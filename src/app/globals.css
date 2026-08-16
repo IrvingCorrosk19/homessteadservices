@@ -128,14 +128,61 @@ a {
   }
 }
 
+.logo-link {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.5rem;
+}
+
+.logo-img {
+  display: block;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.logo-header .logo-img {
+  max-width: min(10rem, 42vw);
+  max-height: 2.75rem;
+}
+
+@media (min-width: 768px) {
+  .logo-header .logo-img {
+    max-width: 11rem;
+    max-height: 3.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .logo-header .logo-img {
+    max-width: 11.5rem;
+    max-height: 3.75rem;
+  }
+}
+
+.logo-footer .logo-img {
+  max-width: min(14rem, 72vw);
+  max-height: 8.25rem;
+}
+
+@media (min-width: 768px) {
+  .logo-footer .logo-img {
+    max-width: 17.5rem;
+    max-height: 10.5rem;
+  }
+}
+
 .header-solid {
-  background: rgba(246, 243, 238, 0.92);
+  background: rgba(246, 243, 238, 0.94);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
 }
 
 .header-clear {
-  background: transparent;
+  background: rgba(246, 243, 238, 0.88);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid transparent;
 }
 

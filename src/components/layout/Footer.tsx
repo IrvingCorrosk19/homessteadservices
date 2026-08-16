@@ -14,12 +14,9 @@ export function Footer() {
     <footer className="border-t border-line bg-cream-deep">
       <div className="container-home grid gap-10 py-14 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
-          <Logo href="/" />
-          <p className="mt-4 max-w-sm text-sm leading-6 text-navy-soft">
+          <Logo href="/" variant="footer" />
+          <p className="mt-5 max-w-sm text-sm leading-6 text-navy-soft">
             {dictionary.footer.note}
-          </p>
-          <p className="mt-3 text-[0.7rem] tracking-[0.16em] uppercase text-mist">
-            {site.descriptor}
           </p>
         </div>
 

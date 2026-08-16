@@ -8,6 +8,12 @@ import type { ServiceSlug } from "@/lib/site";
  * Licencias: Unsplash License y Pexels License (uso comercial permitido).
  * Ver public/images/CREDITS.txt
  */
+export const brandLogo = {
+  src: "/images/homesteadservices.png",
+  width: 882,
+  height: 645,
+} as const;
+
 export const images = {
   hero: "/images/hero.webp",
   cta: "/images/cta.webp",

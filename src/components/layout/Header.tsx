@@ -14,8 +14,6 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
-  const homeHero = pathname === "/";
-  const inverted = !scrolled && homeHero;
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -44,8 +42,8 @@ export function Header() {
         scrolled || open ? "header-solid" : "header-clear"
       }`}
     >
-      <div className="container-home flex h-[72px] items-center justify-between gap-4 md:h-[76px]">
-        <Logo href="/" inverted={inverted && !open} />
+      <div className="container-home flex h-[72px] items-center justify-between gap-3 md:h-[80px] md:gap-4">
+        <Logo href="/" variant="header" />
 
         <nav className="hidden items-center gap-8 lg:flex" aria-label="Principal">
           {navItems.map((item) => {
@@ -59,13 +57,7 @@ export function Header() {
                 key={item.key}
                 href={to}
                 className={`text-[0.92rem] transition-colors ${
-                  inverted
-                    ? current
-                      ? "text-cream"
-                      : "text-cream/75 hover:text-cream"
-                    : current
-                      ? "text-navy"
-                      : "text-navy-soft hover:text-navy"
+                  current ? "text-navy" : "text-navy-soft hover:text-navy"
                 }`}
               >
                 {dictionary.nav[item.key]}
@@ -80,16 +72,14 @@ export function Header() {
               href={whatsapp}
               target="_blank"
               rel="noopener noreferrer"
-              className={`text-[0.92rem] transition-colors ${
-                inverted ? "text-cream/80 hover:text-cream" : "text-navy-soft hover:text-navy"
-              }`}
+              className="text-[0.92rem] text-navy-soft transition-colors hover:text-navy"
             >
               {dictionary.whatsapp.label}
             </a>
           )}
           <ButtonLink
             href="/contact"
-            variant={inverted ? "light" : "primary"}
+            variant="primary"
             className="min-h-11 px-5 text-[0.72rem]"
           >
             {dictionary.common.request}
@@ -99,16 +89,14 @@ export function Header() {
         <div className="flex items-center gap-2 lg:hidden">
           <ButtonLink
             href="/contact"
-            variant={inverted && !open ? "light" : "primary"}
+            variant="primary"
             className="min-h-10 px-4 text-[0.68rem]"
           >
             {dictionary.common.request}
           </ButtonLink>
           <button
             type="button"
-            className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-              inverted && !open ? "text-cream" : "text-navy"
-            }`}
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-navy"
             aria-expanded={open}
             aria-label={open ? "Cerrar menú" : "Abrir menú"}
             onClick={() => setOpen((value) => !value)}
