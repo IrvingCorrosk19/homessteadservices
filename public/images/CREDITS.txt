@@ -1,0 +1,45 @@
+Imágenes representativas del servicio. No son trabajos de HOMESTEAD SERVICES.
+Licencias: Unsplash License y Pexels License (uso comercial permitido).
+Reemplazar estos archivos por fotografías reales manteniendo el mismo nombre.
+
+hero.webp
+  Unsplash — interior residencial (Spacejoy)
+  https://unsplash.com/photos/brown-wooden-table-and-chairs-near-white-sofa-1600210492486
+  Licencia: Unsplash License
+
+cta.webp / contact.webp
+  Unsplash — interior de apartamento
+  Licencia: Unsplash License
+
+features/ac-maintenance.webp
+services/ac.webp
+  Pexels — recámara con aire acondicionado tipo split
+  https://www.pexels.com/photo/6585756/
+  Licencia: Pexels License
+
+services/plumbing.webp
+  Unsplash — baño residencial con grifería
+  https://unsplash.com/photos/white-bathtub-near-white-sink-1584622650111
+  Licencia: Unsplash License
+
+services/painting.webp
+  Unsplash — pintura interior con rodillo
+  https://unsplash.com/photos/rMVjOX8nm2U
+  Licencia: Unsplash License
+
+services/electrical.webp
+  Unsplash — técnico junto a instalación eléctrica residencial
+  Licencia: Unsplash License
+
+services/locksmith.webp
+  Unsplash — cerradura moderna
+  Licencia: Unsplash License
+
+services/repairs.webp
+  Pexels — herramientas organizadas
+  https://www.pexels.com/photo/162553/
+  Licencia: Pexels License
+
+services/remodeling.webp
+  Unsplash — cocina residencial
+  Licencia: Unsplash License

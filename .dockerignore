@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.cursor
+*.md
+scripts
+terminals
+agent-transcripts
+public/images/raw
