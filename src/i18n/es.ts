@@ -114,7 +114,12 @@ export type Dictionary = {
   whatsapp: {
     label: string;
     defaultMessage: string;
+    headerMessage: string;
     serviceMessage: string;
+  };
+  social: {
+    follow: string;
+    soon: string;
   };
   footer: {
     rights: string;
@@ -359,7 +364,12 @@ export const es: Dictionary = {
   whatsapp: {
     label: "WhatsApp",
     defaultMessage: "Hola Homestead Services. Necesito ayuda.",
+    headerMessage: "Hola Homestead Services, necesito ayuda con un servicio.",
     serviceMessage: "Hola Homestead Services. Necesito ayuda con {service}.",
+  },
+  social: {
+    follow: "Síguenos",
+    soon: "Próximamente",
   },
   footer: {
     rights: "Todos los derechos reservados.",

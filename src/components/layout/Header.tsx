@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/brand/Logo";
+import { SocialIcons } from "@/components/brand/SocialIcons";
+import { WhatsAppHeaderButton } from "@/components/brand/WhatsAppHeaderButton";
 import { ButtonLink } from "@/components/ui/Button";
-import { navItems, whatsappHref } from "@/lib/site";
+import { navItems } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 export function Header() {
@@ -13,7 +15,6 @@ export function Header() {
   const dictionary = getDictionary();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -66,37 +67,18 @@ export function Header() {
           })}
         </nav>
 
-        <div className="hidden items-center gap-4 lg:flex">
-          {whatsapp && (
-            <a
-              href={whatsapp}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[0.92rem] text-navy-soft transition-colors hover:text-navy"
-            >
-              {dictionary.whatsapp.label}
-            </a>
-          )}
+        <div className="flex items-center gap-3">
           <ButtonLink
             href="/contact"
             variant="primary"
-            className="min-h-11 px-5 text-[0.72rem]"
+            className="hidden min-h-12 px-5 text-[0.72rem] md:inline-flex"
           >
             {dictionary.common.request}
           </ButtonLink>
-        </div>
-
-        <div className="flex items-center gap-2 lg:hidden">
-          <ButtonLink
-            href="/contact"
-            variant="primary"
-            className="min-h-10 px-4 text-[0.68rem]"
-          >
-            {dictionary.common.request}
-          </ButtonLink>
+          <WhatsAppHeaderButton />
           <button
             type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-navy"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-navy lg:hidden"
             aria-expanded={open}
             aria-label={open ? "Cerrar menú" : "Abrir menú"}
             onClick={() => setOpen((value) => !value)}
@@ -126,17 +108,17 @@ export function Header() {
                 {dictionary.nav[item.key]}
               </Link>
             ))}
-            {whatsapp && (
-              <a
-                href={whatsapp}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-lg text-navy"
-              >
-                {dictionary.whatsapp.label}
-              </a>
-            )}
+            <ButtonLink
+              href="/contact"
+              variant="primary"
+              className="mt-1 min-h-12 px-5 text-[0.72rem] md:hidden"
+            >
+              {dictionary.common.request}
+            </ButtonLink>
           </nav>
+          <div className="mt-6 border-t border-line pt-5">
+            <SocialIcons variant="menu" />
+          </div>
         </div>
       )}
     </header>

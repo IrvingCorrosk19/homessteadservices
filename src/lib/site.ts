@@ -7,7 +7,7 @@ export const site = {
   shortName: "HOMESTEAD",
   descriptor: "Repairs • Maintenance • Improvements",
   tagline: "Tu espacio en buenas manos.",
-  url: process.env.NEXT_PUBLIC_SITE_URL || "https://homesteadservices.com",
+  url: process.env.NEXT_PUBLIC_SITE_URL || "https://homestead.lat",
   region: "Panamá",
 };
 
@@ -28,6 +28,7 @@ export const contact = {
   hours: envOrEmpty(process.env.NEXT_PUBLIC_HOURS),
   serviceArea: envOrEmpty(process.env.NEXT_PUBLIC_SERVICE_AREA),
   instagram: envOrEmpty(process.env.NEXT_PUBLIC_INSTAGRAM),
+  facebook: envOrEmpty(process.env.NEXT_PUBLIC_FACEBOOK),
 };
 
 export function phoneHref() {
@@ -58,6 +59,29 @@ export function instagramHref() {
   const handle = contact.instagram.value.replace(/^@/, "");
   if (handle.startsWith("http")) return handle;
   return `https://instagram.com/${handle}`;
+}
+
+export function facebookHref() {
+  if (!contact.facebook.isConfigured) return null;
+  const handle = contact.facebook.value.replace(/^@/, "");
+  if (handle.startsWith("http")) return handle;
+  return `https://facebook.com/${handle}`;
+}
+
+export type SocialId = "instagram" | "facebook" | "whatsapp";
+
+export type SocialPlatform = {
+  id: SocialId;
+  label: string;
+  href: string | null;
+};
+
+export function getSocialPlatforms(): SocialPlatform[] {
+  return [
+    { id: "instagram", label: "Instagram", href: instagramHref() },
+    { id: "facebook", label: "Facebook", href: facebookHref() },
+    { id: "whatsapp", label: "WhatsApp", href: whatsappHref() },
+  ];
 }
 
 export const serviceSlugs = [

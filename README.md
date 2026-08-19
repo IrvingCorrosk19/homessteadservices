@@ -11,10 +11,10 @@ npm run dev
 
 Abre [http://localhost:3000](http://localhost:3000).
 
-## Vista previa en el VPS
+## Producción
 
-- http://164.68.99.83:8094/
-- http://homestead.164.68.99.83.nip.io/
+- https://homestead.lat/
+- Vista previa: http://164.68.99.83:8094/
 
 ## Configuración de contacto
 

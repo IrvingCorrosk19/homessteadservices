@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/Logo";
+import { SocialIcons } from "@/components/brand/SocialIcons";
 import { contact, emailHref, phoneHref, site, whatsappHref } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
@@ -18,6 +19,9 @@ export function Footer() {
           <p className="mt-5 max-w-sm text-sm leading-6 text-navy-soft">
             {dictionary.footer.note}
           </p>
+          <div className="mt-8">
+            <SocialIcons variant="footer" />
+          </div>
         </div>
 
         <div>

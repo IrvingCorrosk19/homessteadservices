@@ -1,7 +1,10 @@
-import { contact, site } from "@/lib/site";
+import { contact, getSocialPlatforms, site } from "@/lib/site";
 import { images } from "@/data/images";
 
 export function JsonLd() {
+  const sameAs = getSocialPlatforms()
+    .map((platform) => platform.href)
+    .filter((href): href is string => Boolean(href));
   const data = {
     "@context": "https://schema.org",
     "@type": ["LocalBusiness", "HomeAndConstructionBusiness"],
@@ -21,6 +24,7 @@ export function JsonLd() {
       addressCountry: "PA",
     },
     knowsLanguage: ["es"],
+    ...(sameAs.length > 0 ? { sameAs } : {}),
     ...(contact.phone.isConfigured ? { telephone: contact.phone.value } : {}),
     ...(contact.email.isConfigured ? { email: contact.email.value } : {}),
   };
