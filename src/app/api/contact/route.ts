@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { formServices, propertyTypes } from "@/lib/site";
 import { isMailConfigured, sendContactEmail } from "@/lib/mail";
+import { logError, logInfo } from "@/lib/log";
+import { notifyN8n } from "@/lib/n8n";
+import {
+  isAllowedDeclaredType,
+  MAX_PHOTO_BYTES,
+  MAX_PHOTOS,
+  sniffImage,
+} from "@/lib/photos";
+import { saveServiceRequest } from "@/lib/service-requests";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const allowedServices = new Set<string>(formServices);
@@ -33,41 +42,81 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false }, { status: 400 });
     }
 
-    if (photos.length > 6) {
+    if (photos.length > MAX_PHOTOS) {
       return NextResponse.json({ ok: false }, { status: 400 });
     }
 
+    const bufferedPhotos = [];
     for (const file of photos) {
-      if (file.size > 5 * 1024 * 1024 || !file.type.startsWith("image/")) {
+      if (file.size <= 0 || file.size > MAX_PHOTO_BYTES) {
         return NextResponse.json({ ok: false }, { status: 400 });
       }
-    }
-
-    if (!isMailConfigured()) {
-      console.error("[homestead-contact] SMTP is not configured; request logged only");
-      console.info("[homestead-contact]", {
-        name,
-        phone,
-        email,
-        property,
-        service,
-        message,
-        photos: photos.map((file) => ({ name: file.name, size: file.size })),
+      if (file.type && !isAllowedDeclaredType(file.type)) {
+        return NextResponse.json({ ok: false }, { status: 400 });
+      }
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const sniffed = sniffImage(bytes);
+      if (!sniffed) {
+        return NextResponse.json({ ok: false }, { status: 400 });
+      }
+      bufferedPhotos.push({
+        name: file.name || sniffed.ext,
+        size: file.size,
+        type: sniffed.mime,
+        bytes,
+        sniffed,
       });
-      return NextResponse.json({ ok: true });
     }
 
-    await sendContactEmail({
+    const saved = saveServiceRequest({
       name,
       phone,
       email,
       property,
       service,
       message,
-      photos,
+      photos: bufferedPhotos,
     });
 
-    return NextResponse.json({ ok: true });
+    logInfo("ServiceRequestCreated", {
+      requestId: saved.publicId,
+      service: saved.service,
+      photoCount: saved.photos.length,
+    });
+
+    void notifyN8n(saved);
+
+    if (isMailConfigured()) {
+      try {
+        const photoFiles = bufferedPhotos.map(
+          (photo) =>
+            new File([new Uint8Array(photo.bytes)], photo.name, { type: photo.type }),
+        );
+        await sendContactEmail({
+          requestId: saved.publicId,
+          name,
+          phone,
+          email,
+          property,
+          service,
+          message,
+          photos: photoFiles,
+        });
+        logInfo("EmailNotificationSucceeded", { requestId: saved.publicId });
+      } catch (error) {
+        logError("EmailNotificationFailed", {
+          requestId: saved.publicId,
+          cause: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    } else {
+      logError("EmailNotificationFailed", {
+        requestId: saved.publicId,
+        cause: "smtp_not_configured",
+      });
+    }
+
+    return NextResponse.json({ ok: true, requestId: saved.publicId });
   } catch (error) {
     console.error("[homestead-contact]", error);
     return NextResponse.json({ ok: false }, { status: 500 });

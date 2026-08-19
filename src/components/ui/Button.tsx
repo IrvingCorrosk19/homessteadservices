@@ -59,15 +59,18 @@ export function Button({
   type = "button",
   disabled,
   loading,
+  onClick,
 }: Common & {
   type?: "button" | "submit";
   disabled?: boolean;
   loading?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button
       type={type}
       disabled={disabled || loading}
+      onClick={onClick}
       className={`${base} ${variants[variant]} ${className} disabled:cursor-not-allowed disabled:opacity-60`}
     >
       {children}

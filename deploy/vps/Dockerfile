@@ -1,5 +1,6 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -28,7 +29,10 @@ RUN addgroup -g 1001 -S homestead && adduser -S homestead -u 1001
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-RUN mkdir -p /app/.next/cache && chown -R homestead:homestead /app
+COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=deps /app/node_modules/bindings ./node_modules/bindings
+COPY --from=deps /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+RUN mkdir -p /app/data/photos /app/.next/cache && chown -R homestead:homestead /app
 USER homestead
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -3,6 +3,7 @@ import { join } from "path";
 import { site } from "@/lib/site";
 
 export type ContactPayload = {
+  requestId?: string;
   name: string;
   phone: string;
   email: string;
@@ -133,7 +134,9 @@ export async function buildContactEmail(payload: ContactPayload & {
 
   const replyHref = `mailto:${payload.email}?subject=${encodeURIComponent(`Re: ${payload.serviceLabel} — ${payload.name}`)}`;
   const phoneHref = `tel:${payload.phone.replace(/[^\d+]/g, "")}`;
-  const preheader = `${payload.serviceLabel} · ${payload.name} · ${payload.propertyLabel}`;
+  const preheader = payload.requestId
+    ? `${payload.requestId} · ${payload.serviceLabel} · ${payload.name}`
+    : `${payload.serviceLabel} · ${payload.name} · ${payload.propertyLabel}`;
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -175,7 +178,7 @@ export async function buildContactEmail(payload: ContactPayload & {
           <tr>
             <td style="padding:36px 40px 8px;background:${NAVY};">
               <p style="margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:${ACCENT};">
-                Nueva solicitud
+                Nueva solicitud${payload.requestId ? ` · ${escapeHtml(payload.requestId)}` : ""}
               </p>
               <h1 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;font-weight:normal;color:${WHITE};">
                 ${escapeHtml(payload.serviceLabel)}
@@ -195,6 +198,7 @@ export async function buildContactEmail(payload: ContactPayload & {
           <tr>
             <td style="padding:36px 40px 12px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                ${payload.requestId ? labelRow("Folio", escapeHtml(payload.requestId)) : ""}
                 ${labelRow("Cliente", escapeHtml(payload.name))}
                 ${labelRow(
                   "Teléfono",
@@ -263,6 +267,7 @@ export async function buildContactEmail(payload: ContactPayload & {
     site.tagline,
     "",
     "NUEVA SOLICITUD DE SERVICIO",
+    payload.requestId ? `Folio: ${payload.requestId}` : "",
     `Recibida el ${receivedAt}`,
     "",
     `Servicio: ${payload.serviceLabel}`,

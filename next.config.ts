@@ -2,7 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["nodemailer"],
+  serverExternalPackages: ["nodemailer", "better-sqlite3"],
+  outputFileTracingIncludes: {
+    "/api/contact": ["./node_modules/better-sqlite3/**/*"],
+    "/api/admin/**": ["./node_modules/better-sqlite3/**/*"],
+    "/api/media/**": ["./node_modules/better-sqlite3/**/*"],
+    "/admin/**": ["./node_modules/better-sqlite3/**/*"],
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],

@@ -84,7 +84,11 @@ export function RequestForm({
     if (next.message.trim().length < 8) result.message = dictionary.form.errors.message;
     if (
       nextFiles.length > maxFiles ||
-      nextFiles.some((file) => file.size > maxBytes || !file.type.startsWith("image/"))
+      nextFiles.some(
+        (file) =>
+          file.size > maxBytes ||
+          !["image/jpeg", "image/png", "image/webp"].includes(file.type),
+      )
     ) {
       result.files = dictionary.form.errors.files;
     }
@@ -103,7 +107,7 @@ export function RequestForm({
 
   function onFiles(list: FileList | null) {
     const incoming = Array.from(list ?? []).filter((file) =>
-      file.type.startsWith("image/"),
+      ["image/jpeg", "image/png", "image/webp"].includes(file.type),
     );
     const next = [...files, ...incoming].slice(0, maxFiles);
     previews.forEach((url) => URL.revokeObjectURL(url));
@@ -280,7 +284,7 @@ export function RequestForm({
           id="photos"
           name="photos"
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp"
           multiple
           onChange={(event) => onFiles(event.target.files)}
           className="mt-2 block w-full text-sm file:mr-4 file:rounded-lg file:border file:border-navy/15 file:bg-cream file:px-4 file:py-2 file:text-[0.72rem] file:tracking-[0.12em] file:uppercase file:text-navy"

@@ -34,6 +34,10 @@ NEXT_PUBLIC_SERVICE_AREA=Todo Panamá
 
 Mientras esos valores estén vacíos, la página no muestra datos inventados y los botones de llamada/WhatsApp redirigen al formulario.
 
+Las notificaciones internas de n8n/Telegram se documentan en [docs/HOMESTEAD-N8N-TELEGRAM.md](docs/HOMESTEAD-N8N-TELEGRAM.md).
+
+El panel privado de solicitudes está en `/admin/solicitudes`. No es público: exige clave de administrador en el servidor (`ADMIN_PASSWORD` / `ADMIN_SESSION_SECRET`).
+
 ## Imágenes
 
 Las fotografías actuales son **representativas del servicio**, no trabajos de HOMESTEAD.

@@ -1,0 +1,256 @@
+{
+  "name": "HOMESTEAD — Nueva solicitud → Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "homestead-service-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hs-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 360],
+      "webhookId": "homestead-service-request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-homestead-webhook-secret'] }}",
+              "operation": "equal",
+              "value2": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}"
+            },
+            {
+              "value1": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "hs-if-auth",
+      "name": "¿Webhook autorizado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [420, 360]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": false, \"error\": \"unauthorized\" }",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "hs-respond-401",
+      "name": "Responder 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "function escapeHtml(value) {\n  return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\nconst item = $input.first().json;\nconst headers = item.headers || {};\nconst source = item.body && typeof item.body === 'object' && item.body.event ? item.body : item;\nconst payload = {\n  event: source.event,\n  requestId: source.requestId,\n  createdAt: source.createdAt,\n  customer: source.customer,\n  service: source.service,\n  photos: source.photos,\n  actions: source.actions\n};\nconst timestamp = String(headers['x-homestead-timestamp'] || '');\nconst now = Math.floor(Date.now() / 1000);\nconst ts = Number(timestamp);\nconst timestampValid = Boolean(timestamp) && Number.isFinite(ts) && Math.abs(now - ts) <= 300;\nif (!timestampValid) {\n  return [{ json: { httpStatus: 401, sendTelegram: false, photoMode: 'none', photoUrls: [], response: { ok: false, error: 'unauthorized' } } }];\n}\nconst requestId = String(payload.requestId || '');\nconst eventName = String(payload.event || '');\nif (eventName !== 'service_request.created' || !/^HS-\\d{4}-\\d{6}$/.test(requestId) || !payload.customer || !payload.service) {\n  return [{ json: { httpStatus: 400, sendTelegram: false, photoMode: 'none', photoUrls: [], response: { ok: false, error: 'invalid_payload' } } }];\n}\nconst staticData = $getWorkflowStaticData('global');\nstaticData.seen = staticData.seen || {};\nconst seenKey = eventName + ':' + requestId;\nconst cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;\nfor (const key of Object.keys(staticData.seen)) {\n  if (staticData.seen[key] < cutoff) delete staticData.seen[key];\n}\nif (staticData.seen[seenKey]) {\n  return [{ json: { duplicate: true, httpStatus: 200, sendTelegram: false, photoMode: 'none', photoUrls: [], requestId, response: { ok: true, duplicate: true, requestId } } }];\n}\nstaticData.seen[seenKey] = Date.now();\nconst customer = payload.customer || {};\nconst service = payload.service || {};\nconst photos = payload.photos || {};\nconst actions = payload.actions || {};\nconst created = payload.createdAt ? new Date(payload.createdAt) : new Date();\nconst when = new Intl.DateTimeFormat('es-PA', { timeZone: 'America/Panama', day: '2-digit', month: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(created);\nconst items = Array.isArray(photos.items) ? photos.items : [];\nconst photoUrls = [];\nfor (const entry of items) {\n  const photoUrl = String(entry && entry.url || '');\n  if (photoUrl.indexOf('https://') === 0) photoUrls.push(photoUrl);\n}\nif (photoUrls.length > 6) photoUrls.length = 6;\nconst photoMode = photoUrls.length === 0 ? 'none' : photoUrls.length === 1 ? 'single' : 'group';\nconst lines = ['🏠 <b>HOMESTEAD SERVICES</b>', '', '🔔 NUEVA SOLICITUD', '', '🆔 ' + escapeHtml(requestId)];\nif (customer.name) lines.push('', '👤 ' + escapeHtml(customer.name));\nif (service.type) lines.push('🛠 ' + escapeHtml(service.type));\nif (service.property) lines.push('📍 ' + escapeHtml(service.property));\nif (customer.phone) lines.push('', '📞 ' + escapeHtml(customer.phone));\nif (customer.email) lines.push('✉️ ' + escapeHtml(customer.email));\nif (service.description) lines.push('', '💬', escapeHtml(service.description));\nif (photoUrls.length === 1) lines.push('', '📸 1 fotografía adjunta');\nif (photoUrls.length > 1) lines.push('', '📸 ' + photoUrls.length + ' fotografías adjuntas');\nlines.push('', '🕐 ' + escapeHtml(when));\nconst keyboard = { inline_keyboard: [] };\nif (actions.replyUrl && String(actions.replyUrl).indexOf('https://') === 0) keyboard.inline_keyboard.push([{ text: '📧 RESPONDER', url: String(actions.replyUrl) }]);\nif (actions.contactWhatsApp) keyboard.inline_keyboard.push([{ text: '💬 WHATSAPP', url: String(actions.contactWhatsApp) }]);\nreturn [{ json: { duplicate: false, httpStatus: 200, sendTelegram: true, photoMode, photoUrls, requestId, createdAt: payload.createdAt || null, validatedAt: new Date().toISOString(), text: lines.join('\\n'), replyMarkup: keyboard.inline_keyboard.length ? keyboard : null, response: { ok: true, duplicate: false, requestId, photoCount: photoUrls.length } } }];"
+      },
+      "id": "hs-validate",
+      "name": "Validar e idempotencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.sendTelegram }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "hs-if-ready",
+      "name": "¿Payload listo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [920, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $vars.TELEGRAM_BOT_TOKEN }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "hs-if-telegram",
+      "name": "¿Enviar Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1140, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $vars.HOMESTEAD_TELEGRAM_CHAT_ID, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: $json.replyMarkup || undefined }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "hs-telegram",
+      "name": "Telegram Bot API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1360, 80],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Validar e idempotencia').first().json.photoMode }}",
+              "operation": "notEqual",
+              "value2": "none"
+            }
+          ]
+        }
+      },
+      "id": "hs-if-photos",
+      "name": "¿Hay fotos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1580, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Validar e idempotencia').first().json.photoMode }}",
+              "operation": "equal",
+              "value2": "single"
+            }
+          ]
+        }
+      },
+      "id": "hs-if-one-photo",
+      "name": "¿Una fotografía?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1800, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendPhoto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $vars.HOMESTEAD_TELEGRAM_CHAT_ID, photo: $('Validar e idempotencia').first().json.photoUrls[0] }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "hs-telegram-photo",
+      "name": "Telegram sendPhoto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2020, -80],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMediaGroup",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $vars.HOMESTEAD_TELEGRAM_CHAT_ID, media: ($('Validar e idempotencia').first().json.photoUrls || []).map(url => ({ type: 'photo', media: url })) }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "hs-telegram-album",
+      "name": "Telegram sendMediaGroup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2020, 80],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Validar e idempotencia').first().json.response) }}",
+        "options": {
+          "responseCode": "={{ $('Validar e idempotencia').first().json.httpStatus || 200 }}"
+        }
+      },
+      "id": "hs-respond",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2240, 240]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "¿Webhook autorizado?", "type": "main", "index": 0 }]]
+    },
+    "¿Webhook autorizado?": {
+      "main": [
+        [{ "node": "Validar e idempotencia", "type": "main", "index": 0 }],
+        [{ "node": "Responder 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validar e idempotencia": {
+      "main": [[{ "node": "¿Payload listo?", "type": "main", "index": 0 }]]
+    },
+    "¿Payload listo?": {
+      "main": [
+        [{ "node": "¿Enviar Telegram?", "type": "main", "index": 0 }],
+        [{ "node": "Responder", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Enviar Telegram?": {
+      "main": [
+        [{ "node": "Telegram Bot API", "type": "main", "index": 0 }],
+        [{ "node": "Responder", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Bot API": {
+      "main": [[{ "node": "¿Hay fotos?", "type": "main", "index": 0 }]]
+    },
+    "¿Hay fotos?": {
+      "main": [
+        [{ "node": "¿Una fotografía?", "type": "main", "index": 0 }],
+        [{ "node": "Responder", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Una fotografía?": {
+      "main": [
+        [{ "node": "Telegram sendPhoto", "type": "main", "index": 0 }],
+        [{ "node": "Telegram sendMediaGroup", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram sendPhoto": {
+      "main": [[{ "node": "Responder", "type": "main", "index": 0 }]]
+    },
+    "Telegram sendMediaGroup": {
+      "main": [[{ "node": "Responder", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "active": false
+}

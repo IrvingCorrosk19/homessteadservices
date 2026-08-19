@@ -32,6 +32,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# local request database
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
 # source photos (converted copies live in public/images)
 /public/images/raw/
 

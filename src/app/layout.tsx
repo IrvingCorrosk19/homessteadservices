@@ -1,10 +1,6 @@
 import { Newsreader, Outfit } from "next/font/google";
 import type { Metadata, Viewport } from "next";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
-import { MobileBar } from "@/components/layout/MobileBar";
 import { ToastProvider } from "@/components/ui/Toast";
-import { JsonLd } from "@/components/seo/JsonLd";
 import { site } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 import "./globals.css";
@@ -67,14 +63,8 @@ export default function RootLayout({
       lang="es"
       className={`${outfit.variable} ${newsreader.variable} h-full antialiased`}
     >
-      <body className="mobile-bar-space min-h-full bg-cream font-sans text-charcoal">
-        <ToastProvider>
-          <JsonLd />
-          <Header />
-          <main>{children}</main>
-          <Footer />
-          <MobileBar />
-        </ToastProvider>
+      <body className="min-h-full bg-cream font-sans text-charcoal">
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

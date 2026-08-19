@@ -1,0 +1,16 @@
+import { Header } from "@/components/layout/Header";
+import { Footer } from "@/components/layout/Footer";
+import { MobileBar } from "@/components/layout/MobileBar";
+import { JsonLd } from "@/components/seo/JsonLd";
+
+export default function PublicLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mobile-bar-space">
+      <JsonLd />
+      <Header />
+      <main>{children}</main>
+      <Footer />
+      <MobileBar />
+    </div>
+  );
+}
