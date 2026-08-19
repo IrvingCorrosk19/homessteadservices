@@ -6,6 +6,8 @@ services:
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homestead.lat}
         NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
+        NEXT_PUBLIC_HOURS: "${NEXT_PUBLIC_HOURS:-8:00 a.m. a 10:00 p.m.}"
+        NEXT_PUBLIC_SERVICE_AREA: "${NEXT_PUBLIC_SERVICE_AREA:-Todo Panamá}"
     container_name: homestead_web
     restart: unless-stopped
     ports:
@@ -16,6 +18,8 @@ services:
       HOSTNAME: 0.0.0.0
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homestead.lat}
       NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
+      NEXT_PUBLIC_HOURS: "${NEXT_PUBLIC_HOURS:-8:00 a.m. a 10:00 p.m.}"
+      NEXT_PUBLIC_SERVICE_AREA: "${NEXT_PUBLIC_SERVICE_AREA:-Todo Panamá}"
       CONTACT_INBOX: ${CONTACT_INBOX:-servicios@homestead.lat}
       SMTP_HOST: ${SMTP_HOST:-mail.privateemail.com}
       SMTP_PORT: ${SMTP_PORT:-465}

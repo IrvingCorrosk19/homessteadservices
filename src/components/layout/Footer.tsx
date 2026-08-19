@@ -66,6 +66,12 @@ export function Footer() {
                 <a href={email}>{contact.email.value}</a>
               </li>
             )}
+            {contact.hours.isConfigured && (
+              <li>{contact.hours.value}</li>
+            )}
+            {contact.serviceArea.isConfigured && (
+              <li>{contact.serviceArea.value}</li>
+            )}
             {!whatsapp && !phone && !email && (
               <li className="text-mist">{dictionary.contact.pending}</li>
             )}

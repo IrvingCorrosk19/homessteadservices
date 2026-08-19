@@ -18,16 +18,16 @@ Abre [http://localhost:3000](http://localhost:3000).
 
 ## Configuración de contacto
 
-Completa `.env.local` a partir de `.env.example`. No inventes teléfono, WhatsApp, horario ni zona de atención.
+Completa `.env.local` a partir de `.env.example`. No inventes teléfono ni WhatsApp.
 
 El correo de solicitudes es `servicios@homestead.lat`. Las peticiones del formulario se envían a esa cuenta.
 
 ```
 NEXT_PUBLIC_PHONE=
-NEXT_PUBLIC_EMAIL=
+NEXT_PUBLIC_EMAIL=servicios@homestead.lat
 NEXT_PUBLIC_WHATSAPP=
-NEXT_PUBLIC_HOURS=
-NEXT_PUBLIC_SERVICE_AREA=
+NEXT_PUBLIC_HOURS=8:00 a.m. a 10:00 p.m.
+NEXT_PUBLIC_SERVICE_AREA=Todo Panamá
 ```
 
 `NEXT_PUBLIC_WHATSAPP` debe ir en formato internacional, solo dígitos. Ejemplo: `50760000000`.

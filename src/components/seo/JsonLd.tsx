@@ -27,6 +27,15 @@ export function JsonLd() {
     ...(sameAs.length > 0 ? { sameAs } : {}),
     ...(contact.phone.isConfigured ? { telephone: contact.phone.value } : {}),
     ...(contact.email.isConfigured ? { email: contact.email.value } : {}),
+    ...(contact.hours.isConfigured
+      ? {
+          openingHoursSpecification: {
+            "@type": "OpeningHoursSpecification",
+            opens: "08:00",
+            closes: "22:00",
+          },
+        }
+      : {}),
   };
 
   return (
