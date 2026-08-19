@@ -5,6 +5,7 @@ services:
       dockerfile: deploy/vps/Dockerfile
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homestead.lat}
+        NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
     container_name: homestead_web
     restart: unless-stopped
     ports:
@@ -14,3 +15,9 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homestead.lat}
+      NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
+      CONTACT_INBOX: ${CONTACT_INBOX:-servicios@homestead.lat}
+      SMTP_HOST: ${SMTP_HOST:-mail.privateemail.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-servicios@homestead.lat}
+      SMTP_PASS: ${SMTP_PASS:-}

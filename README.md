@@ -18,7 +18,9 @@ Abre [http://localhost:3000](http://localhost:3000).
 
 ## Configuración de contacto
 
-Completa `.env.local` a partir de `.env.example`. No inventes teléfono, WhatsApp, email, horario ni zona de atención.
+Completa `.env.local` a partir de `.env.example`. No inventes teléfono, WhatsApp, horario ni zona de atención.
+
+El correo de solicitudes es `servicios@homestead.lat`. Las peticiones del formulario se envían a esa cuenta.
 
 ```
 NEXT_PUBLIC_PHONE=

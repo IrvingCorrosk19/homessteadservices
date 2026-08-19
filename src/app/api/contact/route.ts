@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { formServices, propertyTypes } from "@/lib/site";
+import { isMailConfigured, sendContactEmail } from "@/lib/mail";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const allowedServices = new Set<string>(formServices);
@@ -42,18 +43,33 @@ export async function POST(request: Request) {
       }
     }
 
-    console.info("[homestead-contact]", {
+    if (!isMailConfigured()) {
+      console.error("[homestead-contact] SMTP is not configured; request logged only");
+      console.info("[homestead-contact]", {
+        name,
+        phone,
+        email,
+        property,
+        service,
+        message,
+        photos: photos.map((file) => ({ name: file.name, size: file.size })),
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    await sendContactEmail({
       name,
       phone,
       email,
       property,
       service,
       message,
-      photos: photos.map((file) => ({ name: file.name, size: file.size })),
+      photos,
     });
 
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("[homestead-contact]", error);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
