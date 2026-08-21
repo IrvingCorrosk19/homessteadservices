@@ -1,0 +1,26 @@
+{
+  "photos_dir": "/opt/apps/homestead/data/photos",
+  "photos_files": 20,
+  "photos_bytes": 12142737,
+  "content_dir": "/opt/apps/homestead/data/content",
+  "content_files": 35,
+  "content_bytes": 28423596,
+  "content_jobs": [
+    {
+      "public_id": "HC-2026-000001",
+      "status": "REJECTED"
+    },
+    {
+      "public_id": "HC-2026-000002",
+      "status": "APPROVED"
+    },
+    {
+      "public_id": "HC-2026-000003",
+      "status": "REJECTED"
+    },
+    {
+      "public_id": "HC-2026-000004",
+      "status": "APPROVED"
+    }
+  ]
+}

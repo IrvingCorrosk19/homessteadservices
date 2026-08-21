@@ -172,6 +172,65 @@ function migrateContentStudio(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_content_assets_job
       ON content_assets (public_id, version, asset_type);
   `);
+  const jobCols = columnNames(database, "content_jobs");
+  const addJobCol = (name: string, ddl: string) => {
+    if (!jobCols.includes(name)) database.exec(`ALTER TABLE content_jobs ADD COLUMN ${ddl}`);
+  };
+  addJobCol("pending_input", "pending_input TEXT");
+  addJobCol("recommended_publish_at", "recommended_publish_at TEXT");
+  addJobCol("recommendation_reason", "recommendation_reason TEXT");
+  addJobCol("captions_json", "captions_json TEXT NOT NULL DEFAULT ''");
+  addJobCol("selected_caption", "selected_caption TEXT NOT NULL DEFAULT ''");
+  addJobCol("publish_lock_until", "publish_lock_until TEXT");
+  addJobCol("media_group_id", "media_group_id TEXT");
+  addJobCol("mix_type", "mix_type TEXT NOT NULL DEFAULT 'trabajo'");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS content_publications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      dry_run INTEGER NOT NULL DEFAULT 1,
+      external_post_id TEXT NOT NULL DEFAULT '',
+      caption TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      attempt INTEGER NOT NULL DEFAULT 1,
+      published_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      timezone TEXT NOT NULL,
+      days_enabled TEXT NOT NULL,
+      windows_json TEXT NOT NULL,
+      max_posts_per_day INTEGER NOT NULL,
+      min_hours_between_posts INTEGER NOT NULL,
+      platforms TEXT NOT NULL,
+      approval_required INTEGER NOT NULL,
+      mode TEXT NOT NULL,
+      dry_run INTEGER NOT NULL,
+      paused INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  const settings = database.prepare("SELECT id FROM content_settings WHERE id = 1").get();
+  if (!settings) {
+    database
+      .prepare(
+        `INSERT INTO content_settings
+          (id, timezone, days_enabled, windows_json, max_posts_per_day, min_hours_between_posts, platforms, approval_required, mode, dry_run, paused, updated_at)
+         VALUES (1, 'America/Panama', '1,2,3,4,5,6', ?, 1, 36, 'instagram,facebook', 1, 'ASSISTED', 1, 0, ?)`,
+      )
+      .run(JSON.stringify([{ start: "18:00", end: "20:00" }]), new Date().toISOString());
+  }
 }
 
 export function getHomesteadDb() {

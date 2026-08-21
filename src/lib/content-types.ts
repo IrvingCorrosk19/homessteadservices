@@ -3,10 +3,15 @@ export const CONTENT_STATUSES = [
   "RECEIVING",
   "PROCESSING",
   "READY_FOR_REVIEW",
+  "AWAITING_APPROVAL",
+  "SCHEDULED",
   "APPROVED",
+  "PUBLISHING",
+  "PUBLISHED",
   "REJECTED",
   "FAILED",
-  "PUBLISHED",
+  "NEEDS_REVIEW",
+  "CANCELLED",
 ] as const;
 
 export type ContentStatus = (typeof CONTENT_STATUSES)[number];
@@ -15,7 +20,6 @@ export const ACTIVE_CONTENT_STATUSES: ContentStatus[] = [
   "DRAFT",
   "RECEIVING",
   "PROCESSING",
-  "READY_FOR_REVIEW",
   "FAILED",
 ];
 
@@ -48,6 +52,12 @@ export type ContentJob = {
   approvedAt: string | null;
   rejectedAt: string | null;
   lastError: string | null;
+  pendingInput: string | null;
+  recommendedPublishAt: string | null;
+  recommendationReason: string | null;
+  captionsJson: string;
+  selectedCaption: string;
+  mixType: string;
 };
 
 export type ContentAsset = {

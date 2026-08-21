@@ -1,0 +1,52 @@
+{
+  "name": "HOMESTEAD — Content Scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 10 }]
+        }
+      },
+      "id": "hs-cs-sched-trigger",
+      "name": "Cada 10 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://homestead.lat/api/internal/content/scheduler-tick",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Homestead-Webhook-Secret", "value": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}" },
+            { "name": "X-Homestead-Timestamp", "value": "={{ $now.toUnixInteger() }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event: 'content.scheduler.tick' }) }}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "hs-cs-sched-http",
+      "name": "Homestead scheduler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Cada 10 minutos": {
+      "main": [[{ "node": "Homestead scheduler", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "active": false
+}

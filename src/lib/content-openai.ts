@@ -34,6 +34,9 @@ export type VisualAnalysis = {
     full: string;
     cta: string;
     hashtags: string[];
+    commercial?: string;
+    warm?: string;
+    educational?: string;
   };
 };
 
@@ -61,9 +64,9 @@ export async function analyzeAndWriteCopy(input: {
 Nota del técnico (puede estar vacía): ${input.description || "(sin nota)"}
 Analiza las fotografías de un trabajo REAL. Clasifica cada imagen en orden (1..n) como PRIMARY, SECONDARY, LOW_QUALITY o DUPLICATE.
 Marca privacy.people/plates/documents si hay personas identificables, placas o documentos.
-Escribe copy comercial Homestead con gancho, problema (solo si se ve o se indicó), solución, resultado observable y CTA.
+Escribe 3 captions cortos (comercial, cercano, educativo). No inventes datos. Hashtags 3–6 con #HomesteadServices y #Panama.
 JSON:
-{"serviceGuess":"","ratings":[{"index":1,"label":"PRIMARY","notes":""}],"privacy":{"people":false,"plates":false,"documents":false,"warning":""},"copy":{"full":"","cta":"","hashtags":[]}}`;
+{"serviceGuess":"","ratings":[{"index":1,"label":"PRIMARY","notes":""}],"privacy":{"people":false,"plates":false,"documents":false,"warning":""},"copy":{"full":"","commercial":"","warm":"","educational":"","cta":"","hashtags":[]}}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60_000);
@@ -102,7 +105,10 @@ JSON:
       ratings: Array.isArray(parsed.ratings) ? parsed.ratings : [],
       privacy: parsed.privacy || { people: false, plates: false, documents: false, warning: "" },
       copy: {
-        full: parsed.copy?.full || "",
+        full: parsed.copy?.full || parsed.copy?.commercial || "",
+        commercial: parsed.copy?.commercial || parsed.copy?.full || "",
+        warm: parsed.copy?.warm || parsed.copy?.full || "",
+        educational: parsed.copy?.educational || parsed.copy?.full || "",
         cta: parsed.copy?.cta || "Agenda tu servicio",
         hashtags: Array.isArray(parsed.copy?.hashtags) ? parsed.copy.hashtags : [],
       },
@@ -116,6 +122,7 @@ export async function rewriteCopyOnly(input: {
   publicId: string;
   description: string;
   previousCopy: string;
+  instruction?: string;
 }): Promise<{ full: string; cta: string; hashtags: string[] }> {
   if (!apiKey()) throw new Error("openai_unconfigured");
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -134,6 +141,7 @@ export async function rewriteCopyOnly(input: {
           role: "user",
           content: `Reescribe el copy. No contradigas la nota ni inventes datos.
 Nota: ${input.description || "(sin nota)"}
+Instrucción extra: ${input.instruction || "otra versión, mismo hecho"}
 Copy anterior:\n${input.previousCopy}
 JSON: {"full":"","cta":"","hashtags":[]}`,
         },

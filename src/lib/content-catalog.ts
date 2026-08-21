@@ -28,6 +28,12 @@ type JobRow = {
   approved_at: string | null;
   rejected_at: string | null;
   last_error: string | null;
+  pending_input: string | null;
+  recommended_publish_at: string | null;
+  recommendation_reason: string | null;
+  captions_json: string | null;
+  selected_caption: string | null;
+  mix_type: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -45,6 +51,12 @@ function mapJob(row: JobRow): ContentJob {
     approvedAt: row.approved_at,
     rejectedAt: row.rejected_at,
     lastError: row.last_error,
+    pendingInput: row.pending_input ?? null,
+    recommendedPublishAt: row.recommended_publish_at ?? null,
+    recommendationReason: row.recommendation_reason ?? null,
+    captionsJson: row.captions_json || "",
+    selectedCaption: row.selected_caption || "",
+    mixType: row.mix_type || "trabajo",
   };
 }
 
@@ -153,6 +165,12 @@ export function updateJob(
     lastError: string | null;
     approvedAt: string | null;
     rejectedAt: string | null;
+    pendingInput: string | null;
+    recommendedPublishAt: string | null;
+    recommendationReason: string | null;
+    captionsJson: string;
+    selectedCaption: string;
+    mixType: string;
   }>,
 ) {
   const current = getJobByPublicId(publicId);
@@ -168,6 +186,12 @@ export function updateJob(
         last_error = ?,
         approved_at = ?,
         rejected_at = ?,
+        pending_input = ?,
+        recommended_publish_at = ?,
+        recommendation_reason = ?,
+        captions_json = ?,
+        selected_caption = ?,
+        mix_type = ?,
         updated_at = ?
        WHERE public_id = ?`,
     )
@@ -181,6 +205,16 @@ export function updateJob(
       patch.lastError === undefined ? current.lastError : patch.lastError,
       patch.approvedAt === undefined ? current.approvedAt : patch.approvedAt,
       patch.rejectedAt === undefined ? current.rejectedAt : patch.rejectedAt,
+      patch.pendingInput === undefined ? current.pendingInput : patch.pendingInput,
+      patch.recommendedPublishAt === undefined
+        ? current.recommendedPublishAt
+        : patch.recommendedPublishAt,
+      patch.recommendationReason === undefined
+        ? current.recommendationReason
+        : patch.recommendationReason,
+      patch.captionsJson ?? current.captionsJson,
+      patch.selectedCaption ?? current.selectedCaption,
+      patch.mixType ?? current.mixType,
       updatedAt,
       publicId,
     );
@@ -488,4 +522,168 @@ export function usageCount(publicId: string) {
     .prepare("SELECT COUNT(*) as total FROM content_usage WHERE public_id = ?")
     .get(publicId) as { total: number };
   return row.total;
+}
+
+export function recordContentEvent(publicId: string, event: string, detail = "") {
+  getHomesteadDb()
+    .prepare(
+      "INSERT INTO content_events (public_id, event, detail, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(publicId, event, detail.slice(0, 500), new Date().toISOString());
+}
+
+export function listJobsByStatus(statuses: ContentStatus[]) {
+  const placeholders = statuses.map(() => "?").join(",");
+  const rows = getHomesteadDb()
+    .prepare(
+      `SELECT * FROM content_jobs WHERE status IN (${placeholders}) ORDER BY recommended_publish_at ASC, updated_at DESC`,
+    )
+    .all(...statuses) as JobRow[];
+  return rows.map(mapJob);
+}
+
+export function jobAwaitingInput(chatId: string) {
+  const row = getHomesteadDb()
+    .prepare(
+      `SELECT * FROM content_jobs
+       WHERE telegram_chat_id = ? AND pending_input IS NOT NULL AND pending_input != ''
+       ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .get(chatId) as JobRow | undefined;
+  return row ? mapJob(row) : null;
+}
+
+export type ContentSettings = {
+  timezone: string;
+  daysEnabled: number[];
+  windows: Array<{ start: string; end: string }>;
+  maxPostsPerDay: number;
+  minHoursBetweenPosts: number;
+  platforms: string[];
+  approvalRequired: boolean;
+  mode: string;
+  dryRun: boolean;
+  paused: boolean;
+};
+
+export function getContentSettings(): ContentSettings {
+  const envDry = process.env.CONTENT_DRY_RUN;
+  const envMode = process.env.CONTENT_MODE?.trim();
+  const row = getHomesteadDb()
+    .prepare("SELECT * FROM content_settings WHERE id = 1")
+    .get() as
+    | {
+        timezone: string;
+        days_enabled: string;
+        windows_json: string;
+        max_posts_per_day: number;
+        min_hours_between_posts: number;
+        platforms: string;
+        approval_required: number;
+        mode: string;
+        dry_run: number;
+        paused: number;
+      }
+    | undefined;
+  const fallback: ContentSettings = {
+    timezone: "America/Panama",
+    daysEnabled: [1, 2, 3, 4, 5, 6],
+    windows: [{ start: "18:00", end: "20:00" }],
+    maxPostsPerDay: 1,
+    minHoursBetweenPosts: 36,
+    platforms: ["instagram", "facebook"],
+    approvalRequired: true,
+    mode: envMode || "ASSISTED",
+    dryRun: envDry === undefined ? true : envDry !== "false",
+    paused: false,
+  };
+  if (!row) return fallback;
+  return {
+    timezone: row.timezone || fallback.timezone,
+    daysEnabled: row.days_enabled.split(",").map((item) => Number(item.trim())).filter(Boolean),
+    windows: JSON.parse(row.windows_json || "[]"),
+    maxPostsPerDay: row.max_posts_per_day,
+    minHoursBetweenPosts: row.min_hours_between_posts,
+    platforms: row.platforms.split(",").map((item) => item.trim()).filter(Boolean),
+    approvalRequired: Boolean(row.approval_required),
+    mode: envMode || row.mode,
+    dryRun: envDry === undefined ? Boolean(row.dry_run) : envDry !== "false",
+    paused: Boolean(row.paused),
+  };
+}
+
+export function setContentPaused(paused: boolean) {
+  getHomesteadDb()
+    .prepare("UPDATE content_settings SET paused = ?, updated_at = ? WHERE id = 1")
+    .run(paused ? 1 : 0, new Date().toISOString());
+}
+
+export function beginPublishLock(publicId: string, ms = 120_000) {
+  const database = getHomesteadDb();
+  const now = Date.now();
+  const row = database
+    .prepare("SELECT publish_lock_until FROM content_jobs WHERE public_id = ?")
+    .get(publicId) as { publish_lock_until: string | null } | undefined;
+  if (!row) return false;
+  if (row.publish_lock_until && Date.parse(row.publish_lock_until) > now) return false;
+  const until = new Date(now + ms).toISOString();
+  const result = database
+    .prepare(
+      `UPDATE content_jobs SET publish_lock_until = ?, updated_at = ?
+       WHERE public_id = ? AND (publish_lock_until IS NULL OR publish_lock_until <= ?)`,
+    )
+    .run(until, new Date(now).toISOString(), publicId, new Date(now).toISOString());
+  return result.changes === 1;
+}
+
+export function clearPublishLock(publicId: string) {
+  getHomesteadDb()
+    .prepare("UPDATE content_jobs SET publish_lock_until = NULL WHERE public_id = ?")
+    .run(publicId);
+}
+
+export function findPublication(publicId: string, platform: string, dryRun: boolean) {
+  return getHomesteadDb()
+    .prepare(
+      "SELECT * FROM content_publications WHERE idempotency_key = ?",
+    )
+    .get(`${publicId}:${platform}:${dryRun ? "dry" : "live"}`) as
+    | { status: string; external_post_id: string }
+    | undefined;
+}
+
+export function recordPublication(input: {
+  publicId: string;
+  platform: string;
+  dryRun: boolean;
+  status: string;
+  caption: string;
+  externalPostId?: string;
+  error?: string;
+}) {
+  const key = `${input.publicId}:${input.platform}:${input.dryRun ? "dry" : "live"}`;
+  const now = new Date().toISOString();
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO content_publications
+        (public_id, platform, idempotency_key, status, dry_run, external_post_id, caption, error, attempt, published_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT(idempotency_key) DO UPDATE SET
+         status = excluded.status,
+         error = excluded.error,
+         attempt = attempt + 1,
+         published_at = excluded.published_at`,
+    )
+    .run(
+      input.publicId,
+      input.platform,
+      key,
+      input.status,
+      input.dryRun ? 1 : 0,
+      input.externalPostId || "",
+      input.caption,
+      input.error || "",
+      input.status === "PUBLISHED" ? now : null,
+      now,
+    );
 }

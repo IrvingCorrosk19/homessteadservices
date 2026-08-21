@@ -6,11 +6,13 @@ import {
   nextVersionNumber,
   originalCount,
   readAssetBytes,
+  recordContentEvent,
   recordUsage,
   saveVersion,
   sha256Of,
   storeDerivedAsset,
   updateJob,
+  getContentSettings,
 } from "@/lib/content-catalog";
 import {
   brandedSocialSet,
@@ -24,21 +26,23 @@ import {
   rewriteCopyOnly,
 } from "@/lib/content-openai";
 import { sendTelegramMessage, sendTelegramPhotos } from "@/lib/content-telegram";
+import { enqueueForApproval, formatPanama } from "@/lib/content-queue";
 import { logError, logInfo } from "@/lib/log";
 import type { ContentAssetRole } from "@/lib/content-types";
 import type { ContentJob } from "@/lib/content-types";
 
 function reviewKeyboard(publicId: string) {
   return [
+    [{ text: "PUBLICAR AHORA", callback_data: `cs:${publicId}:now` }],
+    [{ text: "APROBAR HORARIO", callback_data: `cs:${publicId}:slot` }],
     [
-      { text: "✅ APROBAR", callback_data: `cs:${publicId}:approve` },
-      { text: "🔄 REGENERAR", callback_data: `cs:${publicId}:regen` },
+      { text: "CAMBIAR FECHA", callback_data: `cs:${publicId}:date` },
+      { text: "CAMBIAR TEXTO", callback_data: `cs:${publicId}:edit` },
     ],
     [
-      { text: "✏️ NUEVO COPY", callback_data: `cs:${publicId}:copy` },
-      { text: "🖼️ REPROCESAR IMAGEN", callback_data: `cs:${publicId}:reimage` },
+      { text: "OTRA VERSIÓN", callback_data: `cs:${publicId}:alt` },
+      { text: "DESCARTAR", callback_data: `cs:${publicId}:drop` },
     ],
-    [{ text: "❌ RECHAZAR", callback_data: `cs:${publicId}:reject` }],
   ];
 }
 
@@ -71,26 +75,30 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
   if (photos.length) {
     await sendTelegramPhotos({ chatId: job.telegramChatId, photos: photos.slice(0, 8) });
   }
+  const fresh = getJobByPublicId(job.publicId) || job;
+  const settings = getContentSettings();
+  const when = fresh.recommendedPublishAt
+    ? formatPanama(fresh.recommendedPublishAt, settings)
+    : "por definir";
   const text = [
-    "🏠 HOMESTEAD CONTENT STUDIO",
+    "HOMESTEAD CONTENT",
     "",
-    job.publicId,
+    fresh.publicId,
     "",
-    "✨ PROPUESTA LISTA",
-    `📸 ${photos.length} fotografías procesadas`,
-    "",
-    "COPY",
+    `Trabajo: ${fresh.serviceType || fresh.mixType || "mantenimiento"}`,
+    "Destino: Instagram + Facebook",
+    `Recomendado: ${when}`,
     "",
     copy,
     "",
-    "HASHTAGS",
-    "",
     hashtags,
     "",
-    `Versión ${version}`,
-    "Estado: LISTA PARA REVISIÓN",
-    ...extra.map((line) => `\n${line}`),
-  ].join("\n");
+    `Estado: LISTO PARA PUBLICAR`,
+    settings.dryRun ? "Modo: DRY RUN (no publica en redes hasta que lo actives)" : "",
+    ...extra,
+  ]
+    .filter(Boolean)
+    .join("\n");
   await sendTelegramMessage({
     chatId: job.telegramChatId,
     text,
@@ -230,6 +238,17 @@ async function renderVersion(
   });
   recordUsage(job.publicId, "homestead", kind === "full" ? "process" : "reimage");
   logInfo("CopyGenerated", { contentJobId: job.publicId, stage: `v${version}` });
+  const captions = {
+    commercial: analysis.copy.commercial || copy,
+    warm: analysis.copy.warm || copy,
+    educational: analysis.copy.educational || copy,
+  };
+  updateJob(job.publicId, {
+    serviceType: analysis.serviceGuess || job.serviceType,
+    captionsJson: JSON.stringify(captions),
+    selectedCaption: copy,
+  });
+  recordContentEvent(job.publicId, "CONTENT_PROCESSED", `v${version}`);
   return { version, copy, cta, hashtags, extra: privacyLines(analysis), immutable };
 }
 
@@ -255,9 +274,11 @@ export async function processContentJob(publicId: string, kind: "full" | "image"
       text: `🏠 HOMESTEAD CONTENT STUDIO\n\n${publicId}\n\nProcesando fotografías y copy. Esto puede tomar un minuto.`,
     });
     const result = await renderVersion(job, kind);
-    updateJob(publicId, { status: "READY_FOR_REVIEW" });
+    const queued = getJobByPublicId(publicId) || job;
+    enqueueForApproval(queued);
+    recordContentEvent(publicId, "CONTENT_READY", `v${result.version}`);
     logInfo("PreviewSent", { contentJobId: publicId, stage: `v${result.version}` });
-    await sendPreview(job, result.version, result.copy, result.hashtags, result.extra);
+    await sendPreview(queued, result.version, result.copy, result.hashtags, result.extra);
   } catch (error) {
     const cause = error instanceof Error ? error.message : "unknown";
     logError("ContentProcessingFailed", { contentJobId: publicId, cause: cause.slice(0, 180) });
@@ -272,7 +293,7 @@ export async function processContentJob(publicId: string, kind: "full" | "image"
   }
 }
 
-export async function regenerateCopy(publicId: string) {
+export async function regenerateCopy(publicId: string, instruction?: string) {
   const job = getJobByPublicId(publicId);
   const previous = latestVersion(publicId);
   if (!job || !previous) return;
@@ -281,6 +302,7 @@ export async function regenerateCopy(publicId: string) {
     publicId,
     description: job.description,
     previousCopy: previous.copy,
+    instruction,
   });
   saveVersion({
     job,
@@ -311,5 +333,6 @@ export async function regenerateCopy(publicId: string) {
     });
   }
   logInfo("ContentRegenerated", { contentJobId: publicId, stage: `copy-v${next}` });
+  updateJob(publicId, { selectedCaption: rewritten.full, pendingInput: null });
   await sendPreview(job, next, rewritten.full, rewritten.hashtags.join(" "), []);
 }

@@ -3,13 +3,20 @@ import {
   beginProcessLock,
   clearProcessLock,
   createContentJob,
+  getContentSettings,
   getJobByPublicId,
+  jobAwaitingInput,
+  listJobsByStatus,
   originalCount,
+  recordContentEvent,
   seenTelegramUpdate,
+  setContentPaused,
   storeOriginal,
   updateJob,
 } from "@/lib/content-catalog";
 import { processContentJob, regenerateCopy } from "@/lib/content-process";
+import { formatPanama, parsePanamaDateTime } from "@/lib/content-queue";
+import { publishJob } from "@/lib/content-publish";
 import { metadataOf } from "@/lib/content-images";
 import { sniffImage } from "@/lib/photos";
 import {
@@ -119,8 +126,68 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       void processContentJob(job.publicId, "full");
       return { ok: true };
     }
+    if (parsed.action === "now") {
+      void publishJob(job.publicId, "now");
+      return { ok: true };
+    }
+    if (parsed.action === "slot") {
+      updateJob(job.publicId, {
+        status: "SCHEDULED",
+        approvedAt: new Date().toISOString(),
+        pendingInput: null,
+      });
+      recordContentEvent(job.publicId, "CONTENT_APPROVED", "schedule");
+      const settings = getContentSettings();
+      await sendTelegramMessage({
+        chatId,
+        text: [
+          "Horario aprobado.",
+          "",
+          job.publicId,
+          job.recommendedPublishAt
+            ? formatPanama(job.recommendedPublishAt, settings)
+            : "sin hora",
+          "",
+          getContentSettings().dryRun
+            ? "Al llegar la hora haré DRY RUN (no publica en redes todavía)."
+            : "El scheduler lo publicará a esa hora.",
+        ].join("\n"),
+      });
+      return { ok: true };
+    }
+    if (parsed.action === "date") {
+      updateJob(job.publicId, { pendingInput: "date" });
+      await sendTelegramMessage({
+        chatId,
+        text: "Escribe la nueva fecha y hora en hora de Panamá. Ejemplo:\n20/08 7:00 p.m.",
+      });
+      return { ok: true };
+    }
+    if (parsed.action === "edit") {
+      updateJob(job.publicId, { pendingInput: "copy" });
+      await sendTelegramMessage({
+        chatId,
+        text: "Dime cómo quieres el texto. Ejemplo: más corto, más profesional, menos emojis.",
+      });
+      return { ok: true };
+    }
+    if (parsed.action === "alt") {
+      if (!beginProcessLock(job.publicId, 60_000)) return { ok: true };
+      void regenerateCopy(job.publicId, "otra versión, mismo hecho").finally(() =>
+        clearProcessLock(job.publicId),
+      );
+      return { ok: true };
+    }
+    if (parsed.action === "drop") {
+      await sendTelegramMessage({
+        chatId,
+        text: "¿Descartar esta propuesta?",
+        keyboard: rejectKeyboard(job.publicId),
+      });
+      return { ok: true };
+    }
     if (parsed.action === "approve") {
-      if (job.status !== "READY_FOR_REVIEW") {
+      if (job.status !== "READY_FOR_REVIEW" && job.status !== "AWAITING_APPROVAL") {
         await sendTelegramMessage({
           chatId,
           text: "Esta propuesta todavía no está lista para aprobar.",
@@ -196,6 +263,116 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return { ok: true, denied: true };
   }
 
+  if (text === "/pendientes" || text.startsWith("/pendientes@")) {
+    const rows = listJobsByStatus(["AWAITING_APPROVAL", "READY_FOR_REVIEW"]);
+    await sendTelegramMessage({
+      chatId,
+      text: rows.length
+        ? `Pendientes de aprobación:\n\n${rows.map((row) => `${row.publicId} — ${row.serviceType || row.mixType}`).join("\n")}`
+        : "No hay contenidos pendientes de aprobación.",
+    });
+    return { ok: true };
+  }
+  if (text === "/programadas" || text.startsWith("/programadas@")) {
+    const rows = listJobsByStatus(["SCHEDULED"]);
+    const settings = getContentSettings();
+    await sendTelegramMessage({
+      chatId,
+      text: rows.length
+        ? `Programadas:\n\n${rows
+            .map(
+              (row) =>
+                `${row.recommendedPublishAt ? formatPanama(row.recommendedPublishAt, settings) : "sin hora"} — ${row.publicId} ${row.serviceType || ""}`.trim(),
+            )
+            .join("\n")}`
+        : "No hay publicaciones programadas.",
+    });
+    return { ok: true };
+  }
+  if (text === "/publicadas" || text.startsWith("/publicadas@")) {
+    const rows = listJobsByStatus(["PUBLISHED"]);
+    await sendTelegramMessage({
+      chatId,
+      text: rows.length
+        ? `Publicadas:\n\n${rows.map((row) => `${row.publicId} — ${row.serviceType || row.mixType}`).join("\n")}`
+        : "Aún no hay publicaciones registradas.",
+    });
+    return { ok: true };
+  }
+  if (text === "/proxima" || text.startsWith("/proxima@")) {
+    const next = listJobsByStatus(["SCHEDULED"])[0];
+    const settings = getContentSettings();
+    await sendTelegramMessage({
+      chatId,
+      text: next
+        ? `Próxima:\n\n${next.publicId}\n${next.recommendedPublishAt ? formatPanama(next.recommendedPublishAt, settings) : "sin hora"}`
+        : "No hay una próxima publicación programada.",
+    });
+    return { ok: true };
+  }
+  if (text === "/estado" || text.startsWith("/estado@")) {
+    const settings = getContentSettings();
+    await sendTelegramMessage({
+      chatId,
+      text: [
+        "HOMESTEAD CONTENT",
+        `Modo: ${settings.mode}`,
+        `DRY RUN: ${settings.dryRun ? "sí" : "no"}`,
+        `Pausa: ${settings.paused ? "sí" : "no"}`,
+        `Zona: ${settings.timezone}`,
+        `Pendientes: ${listJobsByStatus(["AWAITING_APPROVAL"]).length}`,
+        `Programadas: ${listJobsByStatus(["SCHEDULED"]).length}`,
+      ].join("\n"),
+    });
+    return { ok: true };
+  }
+  if (text === "/pausa" || text.startsWith("/pausa@")) {
+    setContentPaused(true);
+    await sendTelegramMessage({ chatId, text: "Autopublicación en pausa. El scheduler no publicará." });
+    return { ok: true };
+  }
+  if (text === "/reanudar" || text.startsWith("/reanudar@")) {
+    setContentPaused(false);
+    await sendTelegramMessage({ chatId, text: "Scheduler reanudado." });
+    return { ok: true };
+  }
+
+  const waiting = jobAwaitingInput(chatId);
+  if (waiting && text && !text.startsWith("/") && !message.photo && !message.document) {
+    if (waiting.pendingInput === "date") {
+      const iso = parsePanamaDateTime(text);
+      if (!iso) {
+        await sendTelegramMessage({
+          chatId,
+          text: "No entendí la fecha. Ejemplo: 21/08 7:00 p.m.",
+        });
+        return { ok: true };
+      }
+      updateJob(waiting.publicId, {
+        recommendedPublishAt: iso,
+        recommendationReason: "Fecha indicada por Telegram",
+        pendingInput: null,
+        status: "AWAITING_APPROVAL",
+      });
+      recordContentEvent(waiting.publicId, "CONTENT_RESCHEDULED", iso);
+      await sendTelegramMessage({
+        chatId,
+        text: `Nueva hora:\n${formatPanama(iso, getContentSettings())}\n\nToca APROBAR HORARIO cuando quieras dejarla programada.`,
+        keyboard: [
+          [{ text: "APROBAR HORARIO", callback_data: `cs:${waiting.publicId}:slot` }],
+          [{ text: "PUBLICAR AHORA", callback_data: `cs:${waiting.publicId}:now` }],
+        ],
+      });
+      return { ok: true };
+    }
+    if (waiting.pendingInput === "copy") {
+      updateJob(waiting.publicId, { pendingInput: null });
+      if (!beginProcessLock(waiting.publicId, 60_000)) return { ok: true };
+      void regenerateCopy(waiting.publicId, text).finally(() => clearProcessLock(waiting.publicId));
+      return { ok: true };
+    }
+  }
+
   if (text === "/publicar" || text.startsWith("/publicar@")) {
     const existing = activeJobForChat(chatId);
     if (existing) {
@@ -228,7 +405,15 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return { ok: true, publicId: job.publicId };
   }
 
-  const job = activeJobForChat(chatId);
+  let job = activeJobForChat(chatId);
+  const incomingPhoto = Boolean(message.photo?.length || message.document);
+  if (!job && incomingPhoto) {
+    job = createContentJob({ chatId, userId });
+    logInfo("ContentJobCreated", { contentJobId: job.publicId, stage: "album-auto" });
+    recordContentEvent(job.publicId, "CONTENT_RECEIVED", "auto");
+    updateJob(job.publicId, { status: "RECEIVING" });
+    job = getJobByPublicId(job.publicId) || job;
+  }
   if (!job) return { ok: true };
 
   const caption = (message.caption || "").trim();

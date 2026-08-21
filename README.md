@@ -38,7 +38,7 @@ Las notificaciones internas de n8n/Telegram se documentan en [docs/HOMESTEAD-N8N
 
 El panel privado de solicitudes está en `/admin/solicitudes`. No es público: exige clave de administrador en el servidor (`ADMIN_PASSWORD` / `ADMIN_SESSION_SECRET`).
 
-Content Studio (fotos de trabajos → copy, sin publicar en redes) se documenta en [docs/HOMESTEAD-CONTENT-STUDIO.md](docs/HOMESTEAD-CONTENT-STUDIO.md).
+Content Studio y el autopilot asistido (cola, horario, DRY RUN) están en [docs/HOMESTEAD-CONTENT-STUDIO.md](docs/HOMESTEAD-CONTENT-STUDIO.md), [docs/SMART-CONTENT-AUTOPILOT.md](docs/SMART-CONTENT-AUTOPILOT.md) y [docs/SMART-CONTENT-USER-GUIDE.md](docs/SMART-CONTENT-USER-GUIDE.md).
 
 ## Imágenes
 

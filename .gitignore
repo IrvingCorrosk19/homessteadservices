@@ -38,6 +38,10 @@ yarn-error.log*
 *.sqlite-shm
 *.sqlite-wal
 
+# n8n / DB dumps (may contain secrets)
+*.dump
+backups/**/*.dump
+
 # source photos (converted copies live in public/images)
 /public/images/raw/
 
