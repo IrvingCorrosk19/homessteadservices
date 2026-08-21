@@ -48,10 +48,13 @@ export function upsertCustomer(input: {
   isTest?: boolean;
 }) {
   const digits = normalizePhone(input.phone);
+  const national = digits.length === 11 && digits.startsWith("507") ? digits.slice(3) : digits.length === 8 ? digits : "";
   const database = getHomesteadDb();
   const existing = database
-    .prepare("SELECT id FROM revenue_customers WHERE phone = ? ORDER BY id ASC LIMIT 1")
-    .get(digits || input.phone) as { id: number } | undefined;
+    .prepare(
+      "SELECT id FROM revenue_customers WHERE phone = ? OR phone = ? OR phone = ? ORDER BY id ASC LIMIT 1",
+    )
+    .get(digits || input.phone, national, national ? `507${national}` : digits) as { id: number } | undefined;
   if (existing) {
     database
       .prepare(

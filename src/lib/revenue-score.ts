@@ -33,12 +33,12 @@ export type ScoreInput = {
   referral: boolean;
 };
 
-const VISIT = /visita|vengan|cotiz|presupuesto|mañana|hoy mismo|urgente/i;
+const VISIT = /visita|vengan|cotiz|presupuesto|mañana|hoy mismo|urgente|evaluaci[oó]n|reparar y pintar/i;
 const URGENCY = /urgente|hoy|ya no sirve|se inund|chispa|no enfría nada/i;
 const TIMING = /mañana|tarde|después de|fin de semana|esta semana/i;
 const LOC = /betania|san francisco|bella vista|paitilla|vía españa|panamá|tocumen|chorrera|corriente|zona/i;
 
-const SITE_VISIT_SERVICES = new Set(["painting", "repairs", "remodeling", "ac"]);
+const SITE_VISIT_SERVICES = new Set(["painting", "repairs", "remodeling", "ac", "multiple"]);
 
 export function homesteadLeadScore(input: ScoreInput) {
   const w = revenueConfig.scoreWeights;

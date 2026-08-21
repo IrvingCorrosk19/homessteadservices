@@ -36,7 +36,14 @@ export function createLeadFromConcierge(input: {
   if (!shouldCreateCanonicalLead()) return "";
   const phone = classifyPhone(input.state.phone);
   const name = input.state.name.trim() || "Cliente web";
-  const service = input.state.service && input.state.service !== "unknown" ? input.state.service : "other";
+  let service = input.state.service && input.state.service !== "unknown" ? input.state.service : "other";
+  const blob = `${input.state.problem} ${input.summary}`.toLowerCase();
+  if (service === "multiple" || service === "other") {
+    if (/pintur/.test(blob) && /repar/.test(blob)) service = "painting";
+    else if (/pintur/.test(blob)) service = "painting";
+    else if (/plom/.test(blob)) service = "plumbing";
+    else if (/aire|a\/c|\bac\b/.test(blob)) service = "ac";
+  }
   const location = input.state.location ? `Zona: ${input.state.location}. ` : "";
   const when = input.state.preferredTime ? `Preferencia de horario: ${input.state.preferredTime}. ` : "";
   const message = [
