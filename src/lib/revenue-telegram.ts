@@ -361,7 +361,7 @@ export function applyRevenueCallback(data: string, chatId = ""): RevenueCallback
   if (action === "quote") {
     const draft = createQuoteDraft(leadId);
     if (!draft) return { text: "No se pudo crear cotización.", mutated: false };
-    const visit = ["painting", "repairs", "remodeling", "ac"].includes(lead.service);
+    const visit = ["painting", "repairs", "remodeling", "ac", "multiple"].includes(lead.service);
     const siteVisit = visit ? "SITE VISIT REQUIRED. " : "";
     return {
       text: `${siteVisit}Borrador ${draft.quote_number} · ${draft.pricing_status}. La IA no inventa precio. Carga la tarifa a mano después de evaluar.`,
