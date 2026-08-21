@@ -184,6 +184,11 @@ function migrateContentStudio(database: Database.Database) {
   addJobCol("publish_lock_until", "publish_lock_until TEXT");
   addJobCol("media_group_id", "media_group_id TEXT");
   addJobCol("mix_type", "mix_type TEXT NOT NULL DEFAULT 'trabajo'");
+  addJobCol("content_type", "content_type TEXT NOT NULL DEFAULT 'COMPLETED_WORK'");
+  addJobCol("cta_type", "cta_type TEXT NOT NULL DEFAULT 'QUOTE_REQUEST'");
+  addJobCol("format", "format TEXT NOT NULL DEFAULT 'SINGLE_IMAGE'");
+  addJobCol("business_priority", "business_priority INTEGER NOT NULL DEFAULT 0");
+  addJobCol("valid_until", "valid_until TEXT");
   database.exec(`
     CREATE TABLE IF NOT EXISTS content_publications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,6 +236,55 @@ function migrateContentStudio(database: Database.Database) {
       )
       .run(JSON.stringify([{ start: "18:00", end: "20:00" }]), new Date().toISOString());
   }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS marketing_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      horizon TEXT NOT NULL,
+      collected_at TEXT NOT NULL,
+      reach INTEGER,
+      impressions INTEGER,
+      likes INTEGER,
+      comments INTEGER,
+      shares INTEGER,
+      saves INTEGER,
+      profile_visits INTEGER,
+      link_clicks INTEGER,
+      messages INTEGER,
+      whatsapp_clicks INTEGER,
+      leads INTEGER,
+      source TEXT NOT NULL DEFAULT 'api',
+      UNIQUE (public_id, platform, horizon)
+    );
+    CREATE TABLE IF NOT EXISTS marketing_recommendations (
+      recommendation_id TEXT PRIMARY KEY,
+      public_id TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      recommended_at TEXT,
+      platform TEXT NOT NULL,
+      score REAL NOT NULL,
+      confidence TEXT NOT NULL,
+      learning_stage TEXT NOT NULL,
+      reason_codes TEXT NOT NULL,
+      sample_size INTEGER NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      shadow INTEGER NOT NULL DEFAULT 1,
+      decision TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS marketing_leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL DEFAULT '',
+      channel TEXT NOT NULL,
+      outcome TEXT NOT NULL DEFAULT 'UNKNOWN',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_marketing_snaps
+      ON marketing_snapshots (public_id, collected_at);
+    CREATE INDEX IF NOT EXISTS idx_marketing_recs
+      ON marketing_recommendations (generated_at);
+  `);
 }
 
 export function getHomesteadDb() {

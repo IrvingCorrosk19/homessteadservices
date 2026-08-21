@@ -34,6 +34,11 @@ type JobRow = {
   captions_json: string | null;
   selected_caption: string | null;
   mix_type: string | null;
+  content_type: string | null;
+  cta_type: string | null;
+  format: string | null;
+  business_priority: number | null;
+  valid_until: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -57,6 +62,11 @@ function mapJob(row: JobRow): ContentJob {
     captionsJson: row.captions_json || "",
     selectedCaption: row.selected_caption || "",
     mixType: row.mix_type || "trabajo",
+    contentType: row.content_type || "COMPLETED_WORK",
+    ctaType: row.cta_type || "QUOTE_REQUEST",
+    format: row.format || "SINGLE_IMAGE",
+    businessPriority: row.business_priority || 0,
+    validUntil: row.valid_until ?? null,
   };
 }
 
@@ -171,6 +181,11 @@ export function updateJob(
     captionsJson: string;
     selectedCaption: string;
     mixType: string;
+    contentType: string;
+    ctaType: string;
+    format: string;
+    businessPriority: number;
+    validUntil: string | null;
   }>,
 ) {
   const current = getJobByPublicId(publicId);
@@ -192,6 +207,11 @@ export function updateJob(
         captions_json = ?,
         selected_caption = ?,
         mix_type = ?,
+        content_type = ?,
+        cta_type = ?,
+        format = ?,
+        business_priority = ?,
+        valid_until = ?,
         updated_at = ?
        WHERE public_id = ?`,
     )
@@ -215,6 +235,11 @@ export function updateJob(
       patch.captionsJson ?? current.captionsJson,
       patch.selectedCaption ?? current.selectedCaption,
       patch.mixType ?? current.mixType,
+      patch.contentType ?? current.contentType,
+      patch.ctaType ?? current.ctaType,
+      patch.format ?? current.format,
+      patch.businessPriority ?? current.businessPriority,
+      patch.validUntil === undefined ? current.validUntil : patch.validUntil,
       updatedAt,
       publicId,
     );

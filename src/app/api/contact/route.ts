@@ -78,6 +78,12 @@ export async function POST(request: Request) {
       photos: bufferedPhotos,
     });
 
+    const hsRef = String(form.get("hs_ref") ?? form.get("ref") ?? "").trim();
+    if (/^HC-\d{4}-\d{6}$/.test(hsRef)) {
+      const { recordLead } = await import("@/lib/marketing-store");
+      recordLead({ publicId: hsRef, channel: "website", outcome: "CONTACT" });
+    }
+
     logInfo("ServiceRequestCreated", {
       requestId: saved.publicId,
       service: saved.service,

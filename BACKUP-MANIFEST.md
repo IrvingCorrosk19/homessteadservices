@@ -1,4 +1,54 @@
+# BACKUP MANIFEST — pre Marketing Intelligence Engine
+
+DATE: 2026-08-20T21:14 America/Panama
+
+PRE_IMPLEMENTATION_BACKUP = PASS
+
+## Git
+
+- BRANCH: `main`
+- HEAD (freeze): `cb266eade08253ff0e1a2b2dc8cec8b9997bc816`
+- BACKUP BRANCH: `backup/pre-marketing-intelligence-20260820-2114`
+- BACKUP TAG: `pre-marketing-intelligence-20260820-2114`
+- PUSH: PASS (no force)
+
+Untracked junk in repo root was **not** committed.
+
+Restore: `git checkout pre-marketing-intelligence-20260820-2114`
+
+## n8n (VPS, chmod 600, not in Git)
+
+- `/opt/backups/pre-marketing-intelligence-20260820-2114/`
+- Workflows exported: 14
+- Dump `pg_restore -l`: 359 entries
+- Telegram webhook path unchanged: `homestead-content-studio`
+
+Homestead workflows preserved (not replaced):
+
+| Name | Active |
+| --- | --- |
+| HOMESTEAD — Nueva solicitud → Telegram | yes |
+| HOMESTEAD — Content Studio | yes |
+| HOMESTEAD — Content Scheduler | yes (created earlier; not deleted) |
+
+## Homestead SQLite / storage
+
+- SQLite integrity: ok
+- service_requests: 22
+- content_jobs: 5
+- photos files: 20
+- content files: 41
+- Instagram / Facebook tokens: NOT CONFIGURED
+
+## Previous freezes (kept)
+
+- `pre-smart-content-autopilot-20260820-2024` @ `68646eb`
+- `pre-content-studio-v1-20260820-1916` @ `64b6f8c`
+
+---
+
 # BACKUP MANIFEST — pre Smart Content Autopilot
+
 
 DATE: 2026-08-20T20:25:45-05:00 (America/Panama)
 

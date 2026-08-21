@@ -58,6 +58,11 @@ export type ContentJob = {
   captionsJson: string;
   selectedCaption: string;
   mixType: string;
+  contentType: string;
+  ctaType: string;
+  format: string;
+  businessPriority: number;
+  validUntil: string | null;
 };
 
 export type ContentAsset = {

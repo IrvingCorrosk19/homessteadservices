@@ -1,0 +1,41 @@
+{
+  "timezone": "America/Panama",
+  "intentWeights": {
+    "jobWon": 100,
+    "qualifiedLead": 40,
+    "lead": 25,
+    "whatsappClick": 15,
+    "dm": 15,
+    "callClick": 12,
+    "contactClick": 12,
+    "profileVisit": 6,
+    "linkClick": 6,
+    "share": 4,
+    "save": 4,
+    "comment": 3,
+    "follow": 3,
+    "like": 1,
+    "impression": 0.01
+  },
+  "minSamples": { "low": 1, "medium": 5, "high": 12 },
+  "stagePublished": { "exploration": 3, "learning": 12, "optimized": 30 },
+  "timeWindows": [
+    { "id": "morning", "start": "06:00", "end": "09:00" },
+    { "id": "lateMorning", "start": "09:00", "end": "12:00" },
+    { "id": "midday", "start": "12:00", "end": "15:00" },
+    { "id": "afternoon", "start": "15:00", "end": "18:00" },
+    { "id": "evening", "start": "18:00", "end": "21:00" },
+    { "id": "night", "start": "21:00", "end": "23:00" }
+  ],
+  "allowedWindowIds": ["lateMorning", "afternoon", "evening"],
+  "minHoursBetweenPosts": 36,
+  "maxOrganicPostsPerDay": 1,
+  "targetPostsPerWeek": 4,
+  "diversityLookback": 3,
+  "diversityPenalty": 18,
+  "priorityBoost": 25,
+  "freshnessHalfLifeDays": 21,
+  "explorationRate": 0.25,
+  "queueHealthMinReady": 2,
+  "momentumWaitRatio": 1.4
+}

@@ -26,6 +26,14 @@ import {
   sendTelegramMessage,
   type TelegramUpdate,
 } from "@/lib/content-telegram";
+import {
+  formatRecommendationMessage,
+  recommendationKeyboard,
+  runMarketingEngine,
+  marketingBaseline,
+} from "@/lib/marketing-engine";
+import { latestRecommendation, recordLead, hisForPublicId, markRecommendationDecision } from "@/lib/marketing-store";
+import { mapServiceCategory } from "@/lib/marketing-config";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { logError, logInfo } from "@/lib/log";
 
@@ -99,6 +107,22 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true, denied: true };
     }
     await answerCallback(callback.id);
+    if (callback.data.startsWith("mi:")) {
+      const bits = callback.data.split(":");
+      const action = bits[1];
+      const recId = bits[2] || "";
+      markRecommendationDecision(recId, action === "nopost" ? "NO_POST" : action === "approve" ? "APPROVED_SHADOW" : "SKIP");
+      await sendTelegramMessage({
+        chatId,
+        text:
+          action === "nopost"
+            ? "Registrado: no publicar hoy. En SHADOW no se mueve la cola."
+            : action === "approve"
+              ? "Shadow: guardé tu aprobación. No moví la programación. Si quieres programarla de verdad, abre la pieza y toca APROBAR HORARIO."
+              : "Buscaré otro contenido en la próxima /recomendar.",
+      });
+      return { ok: true };
+    }
     const parsed = parseCallback(callback.data);
     if (!parsed) return { ok: true };
     const job = getJobByPublicId(parsed.publicId);
@@ -322,6 +346,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
         `Zona: ${settings.timezone}`,
         `Pendientes: ${listJobsByStatus(["AWAITING_APPROVAL"]).length}`,
         `Programadas: ${listJobsByStatus(["SCHEDULED"]).length}`,
+        `Marketing: SHADOW ${process.env.MARKETING_INTELLIGENCE_SHADOW === "false" ? "no" : "sí"} · /recomendar`,
       ].join("\n"),
     });
     return { ok: true };
@@ -334,6 +359,142 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (text === "/reanudar" || text.startsWith("/reanudar@")) {
     setContentPaused(false);
     await sendTelegramMessage({ chatId, text: "Scheduler reanudado." });
+    return { ok: true };
+  }
+
+  if (text === "/recomendar" || text.startsWith("/recomendar@") || text === "¿Qué publico hoy?" || text === "¿A qué hora publico?") {
+    const decision = runMarketingEngine();
+    await sendTelegramMessage({
+      chatId,
+      text: formatRecommendationMessage(decision),
+      keyboard: recommendationKeyboard(decision),
+    });
+    return { ok: true };
+  }
+  if (text === "/porque" || text.startsWith("/porque@")) {
+    const rec = latestRecommendation();
+    await sendTelegramMessage({
+      chatId,
+      text: rec
+        ? `${rec.reason}\n\nCódigos: ${rec.reasonCodes.join(", ")}\nMuestra: ${rec.sampleSize}\nConfianza: ${rec.confidence}`
+        : "Todavía no hay una recomendación. Usa /recomendar.",
+    });
+    return { ok: true };
+  }
+  if (text === "/aprendizaje" || text.startsWith("/aprendizaje@")) {
+    const base = marketingBaseline();
+    await sendTelegramMessage({
+      chatId,
+      text: [
+        `Modo: ${base.learningStage}${base.shadow ? " · SHADOW" : ""}`,
+        `Listos: ${base.ready}`,
+        `Programados: ${base.scheduled}`,
+        `Publicados: ${base.published}`,
+        `Con analytics: ${base.withAnalytics}`,
+        base.withAnalytics < 1 ? "INSUFFICIENT DATA — no hay horario 'mejor' todavía." : "",
+        base.queueLow ? "Quedan pocas piezas listas. Conviene registrar nuevos trabajos." : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    return { ok: true };
+  }
+  if (text === "/rendimiento" || text.startsWith("/rendimiento@")) {
+    const base = marketingBaseline();
+    const rec = latestRecommendation();
+    await sendTelegramMessage({
+      chatId,
+      text: [
+        "Últimos datos Homestead",
+        `Publicaciones registradas: ${base.published}`,
+        `Con métricas de red: ${base.withAnalytics}`,
+        base.withAnalytics < 1
+          ? "Alcance y likes: NOT AVAILABLE (Instagram/Facebook no configurados)."
+          : "",
+        `Contactos atribuibles: usa /lead para registrarlos.`,
+        rec ? `Siguiente evidencia: ${rec.publicId}` : "Sin recomendación vigente.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    return { ok: true };
+  }
+  if (text === "/horarios" || text.startsWith("/horarios@")) {
+    await sendTelegramMessage({
+      chatId,
+      text: [
+        "Ventanas (estrategia inicial, America/Panama):",
+        "1. 18:00–21:00 — evening (sampleSize 0 → INSUFFICIENT DATA)",
+        "2. 15:00–18:00 — afternoon",
+        "3. 09:00–12:00 — late morning",
+        "",
+        "No hay evidencia propia de 'mejor hora' hasta recolectar analytics reales.",
+      ].join("\n"),
+    });
+    return { ok: true };
+  }
+  if (text === "/servicios" || text.startsWith("/servicios@")) {
+    const published = listJobsByStatus(["PUBLISHED", "AWAITING_APPROVAL", "SCHEDULED"]);
+    const counts = new Map<string, number>();
+    for (const job of published) {
+      const cat = mapServiceCategory(job.serviceType);
+      counts.set(cat, (counts.get(cat) || 0) + 1);
+    }
+    const lines = [...counts.entries()].map(([cat, n]) => `${cat}: ${n} (sin Intent Score de red todavía)`);
+    await sendTelegramMessage({
+      chatId,
+      text: lines.length
+        ? `Inventario por servicio:\n\n${lines.join("\n")}`
+        : "INSUFFICIENT DATA — aún no hay categorías con intención medida.",
+    });
+    return { ok: true };
+  }
+  if (text === "/mejores" || text.startsWith("/mejores@")) {
+    const published = listJobsByStatus(["PUBLISHED"]);
+    const ranked = published
+      .map((job) => ({ job, his: hisForPublicId(job.publicId) }))
+      .filter((row) => row.his.score !== null)
+      .sort((a, b) => (b.his.score || 0) - (a.his.score || 0));
+    await sendTelegramMessage({
+      chatId,
+      text: ranked.length
+        ? ranked
+            .slice(0, 5)
+            .map((row) => `${row.job.publicId} · HIS ${row.his.score}`)
+            .join("\n")
+        : "INSUFFICIENT DATA — no hay Intent Score todavía (sin métricas ni /lead).",
+    });
+    return { ok: true };
+  }
+  if (text.startsWith("/lead")) {
+    const parts = text.split(/\s+/);
+    const folio = parts[1] || "";
+    const outcomeRaw = (parts[2] || "UNKNOWN").toLowerCase();
+    const outcome =
+      outcomeRaw === "si" || outcomeRaw === "sí"
+        ? "QUALIFIED_LEAD"
+        : outcomeRaw === "no"
+          ? "CONTACT"
+          : "UNKNOWN";
+    if (!/^HC-\d{4}-\d{6}$/.test(folio)) {
+      await sendTelegramMessage({
+        chatId,
+        text: "Uso: /lead HC-2026-000005 si\n(si = oportunidad, no = contacto, otro = no sé)",
+      });
+      return { ok: true };
+    }
+    recordLead({ publicId: folio, channel: "telegram", outcome });
+    await sendTelegramMessage({ chatId, text: `Lead registrado para ${folio} (${outcome}). Sin datos personales.` });
+    return { ok: true };
+  }
+  if (text.startsWith("/prioridad")) {
+    const folio = text.split(/\s+/)[1] || "";
+    if (!/^HC-\d{4}-\d{6}$/.test(folio)) {
+      await sendTelegramMessage({ chatId, text: "Uso: /prioridad HC-2026-000005" });
+      return { ok: true };
+    }
+    updateJob(folio, { businessPriority: 1 });
+    await sendTelegramMessage({ chatId, text: `Prioridad alta en ${folio}.` });
     return { ok: true };
   }
 

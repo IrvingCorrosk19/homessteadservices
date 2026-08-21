@@ -1,0 +1,43 @@
+{
+  "name": "HOMESTEAD — Marketing Analytics Collector",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 12 }] } },
+      "id": "hs-mi-collect-trigger",
+      "name": "Cada 12 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://homestead.lat/api/internal/content/analytics-collect",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Homestead-Webhook-Secret", "value": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}" },
+            { "name": "X-Homestead-Timestamp", "value": "={{ $now.toUnixInteger() }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event: 'marketing.analytics.collect' }) }}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "hs-mi-collect-http",
+      "name": "Homestead collect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Cada 12 horas": { "main": [[{ "node": "Homestead collect", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "availableInMCP": false },
+  "pinData": {},
+  "active": false
+}
