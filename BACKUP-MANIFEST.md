@@ -1,4 +1,34 @@
+# BACKUP MANIFEST — pre AI Sales Concierge
+
+DATE: 2026-08-20T21:32 America/Panama
+
+PRE_IMPLEMENTATION_BACKUP = PASS
+
+## Git
+
+- BRANCH: `main`
+- HEAD (freeze): `24c801c16b3e0501f3abce3afa63e407a56d4284`
+- COMMIT: `chore(backup): checkpoint before ai sales concierge`
+- BACKUP BRANCH: `backup/pre-ai-sales-concierge-20260820-2132`
+- BACKUP TAG: `pre-ai-sales-concierge-20260820-2132`
+- PUSH: PASS (no force)
+
+## n8n / SQLite (VPS)
+
+- `/opt/backups/pre-ai-sales-concierge-20260820-2133/`
+- Workflows exported: 16 (none replaced for this feature)
+- SQLite integrity: ok
+- service_requests: 22
+- OpenAI: CONFIGURED
+- WhatsApp público: NOT CONFIGURED (no inventar número)
+- Teléfono público: NOT CONFIGURED
+
+Restore Git: `git checkout pre-ai-sales-concierge-20260820-2132`
+
+---
+
 # BACKUP MANIFEST — pre Marketing Intelligence Engine
+
 
 DATE: 2026-08-20T21:14 America/Panama
 

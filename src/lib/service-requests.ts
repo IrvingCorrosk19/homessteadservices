@@ -285,6 +285,50 @@ function migrateContentStudio(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_marketing_recs
       ON marketing_recommendations (generated_at);
   `);
+  mkdirSync(join(dataDir(), "concierge"), { recursive: true });
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS concierge_conversations (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      state_json TEXT NOT NULL DEFAULT '{}',
+      summary TEXT NOT NULL DEFAULT '',
+      lead_public_id TEXT NOT NULL DEFAULT '',
+      dry_run INTEGER NOT NULL DEFAULT 1,
+      utm_json TEXT NOT NULL DEFAULT '',
+      ip_hash TEXT NOT NULL DEFAULT '',
+      processing INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS concierge_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS concierge_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS concierge_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      stored_as TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS concierge_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_concierge_msgs
+      ON concierge_messages (conversation_id, id);
+  `);
 }
 
 export function getHomesteadDb() {
@@ -299,6 +343,7 @@ function getDb() {
   if (db) return db;
   mkdirSync(join(dataDir(), "photos"), { recursive: true });
   mkdirSync(join(dataDir(), "content"), { recursive: true });
+  mkdirSync(join(dataDir(), "concierge"), { recursive: true });
   const instance = new Database(dbPath());
   instance.pragma("journal_mode = WAL");
   instance.pragma("busy_timeout = 4000");
