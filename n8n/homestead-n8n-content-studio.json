@@ -1,0 +1,124 @@
+{
+  "name": "HOMESTEAD — Content Studio",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "homestead-content-studio",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hs-cs-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "homestead-content-studio"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-telegram-bot-api-secret-token'] }}",
+              "operation": "equal",
+              "value2": "={{ $vars.TELEGRAM_WEBHOOK_SECRET }}"
+            },
+            {
+              "value1": "={{ $vars.TELEGRAM_WEBHOOK_SECRET }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "hs-cs-auth",
+      "name": "¿Update autorizado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": false, \"error\": \"unauthorized\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "hs-cs-401",
+      "name": "Responder 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 520]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://homestead.lat/api/internal/content/telegram-update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Homestead-Webhook-Secret",
+              "value": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}"
+            },
+            {
+              "name": "X-Homestead-Timestamp",
+              "value": "={{ $now.toUnixInteger() }}"
+            },
+            {
+              "name": "X-Telegram-Bot-Api-Secret-Token",
+              "value": "={{ $json.headers['x-telegram-bot-api-secret-token'] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 25000
+        }
+      },
+      "id": "hs-cs-homestead",
+      "name": "Homestead Content API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 220],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": true }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "hs-cs-200",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 220]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "¿Update autorizado?", "type": "main", "index": 0 }]]
+    },
+    "¿Update autorizado?": {
+      "main": [
+        [{ "node": "Homestead Content API", "type": "main", "index": 0 }],
+        [{ "node": "Responder 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Homestead Content API": {
+      "main": [[{ "node": "Responder", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "active": false
+}

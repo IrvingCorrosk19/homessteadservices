@@ -12,8 +12,11 @@ export type SniffedImage = {
   ext: "jpg" | "png" | "webp";
 };
 
-export function sniffImage(bytes: Buffer): SniffedImage | null {
-  if (bytes.length < 12 || bytes.length > MAX_PHOTO_BYTES) return null;
+export function sniffImage(
+  bytes: Buffer,
+  maxBytes: number = MAX_PHOTO_BYTES,
+): SniffedImage | null {
+  if (bytes.length < 12 || bytes.length > maxBytes) return null;
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return { mime: "image/jpeg", ext: "jpg" };
   }

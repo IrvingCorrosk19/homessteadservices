@@ -100,11 +100,92 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_messages_public_id
       ON service_request_messages (public_id, created_at);
   `);
+  migrateContentStudio(database);
+}
+
+function migrateContentStudio(database: Database.Database) {
+  mkdirSync(join(dataDir(), "content"), { recursive: true });
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS content_counters (
+      year INTEGER PRIMARY KEY,
+      last INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      service_type TEXT NOT NULL DEFAULT '',
+      telegram_chat_id TEXT NOT NULL,
+      telegram_user_id TEXT NOT NULL DEFAULT '',
+      telegram_status_message_id INTEGER,
+      process_lock_until TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      approved_at TEXT,
+      rejected_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS content_assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      public_id TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 0,
+      asset_type TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      stored_filename TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      sha256 TEXT NOT NULL,
+      telegram_file_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      public_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      copy TEXT NOT NULL DEFAULT '',
+      cta TEXT NOT NULL DEFAULT '',
+      hashtags TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      privacy_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_telegram_updates (
+      update_id INTEGER PRIMARY KEY,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS content_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_jobs_chat
+      ON content_jobs (telegram_chat_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_content_assets_job
+      ON content_assets (public_id, version, asset_type);
+  `);
+}
+
+export function getHomesteadDb() {
+  return getDb();
+}
+
+export function homesteadDataDir() {
+  return dataDir();
 }
 
 function getDb() {
   if (db) return db;
   mkdirSync(join(dataDir(), "photos"), { recursive: true });
+  mkdirSync(join(dataDir(), "content"), { recursive: true });
   const instance = new Database(dbPath());
   instance.pragma("journal_mode = WAL");
   instance.pragma("busy_timeout = 4000");

@@ -32,7 +32,9 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=deps /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=deps /app/node_modules/bindings ./node_modules/bindings
 COPY --from=deps /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
-RUN mkdir -p /app/data/photos /app/.next/cache && chown -R homestead:homestead /app
+COPY --from=deps /app/node_modules/sharp ./node_modules/sharp
+COPY --from=deps /app/node_modules/@img ./node_modules/@img
+RUN mkdir -p /app/data/photos /app/data/content /app/.next/cache && chown -R homestead:homestead /app
 USER homestead
 EXPOSE 3000
 CMD ["node", "server.js"]
