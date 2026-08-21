@@ -39,8 +39,8 @@ export async function createLeadFromConcierge(input: {
   let service = input.state.service && input.state.service !== "unknown" ? input.state.service : "other";
   const blob = `${input.state.problem} ${input.summary}`.toLowerCase();
   if (service === "multiple" || service === "other" || service === "ac") {
-    if (/pintur/.test(blob) && /repar/.test(blob)) service = "painting";
-    else if (/pintur/.test(blob)) service = "painting";
+    if (/pintar|pintur/.test(blob) && /repar/.test(blob)) service = "painting";
+    else if (/pintar|pintur/.test(blob)) service = "painting";
     else if (/plom/.test(blob)) service = "plumbing";
     else if (/aire|a\/c|\bac\b/.test(blob)) service = "ac";
   }

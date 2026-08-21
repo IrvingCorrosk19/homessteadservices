@@ -127,7 +127,7 @@ export type RevenueCallbackResult = {
 
 function serviceLabel(service: string, problem = "") {
   const blob = `${service} ${problem}`.toLowerCase();
-  if (/pintur/.test(blob) && /repar/.test(blob)) return "Reparación y pintura de pared";
+  if (/pintar|pintur/.test(blob) && /repar/.test(blob)) return "Reparación y pintura de pared";
   const labels: Record<string, string> = {
     ac: "Aire acondicionado",
     plumbing: "Plomería",
