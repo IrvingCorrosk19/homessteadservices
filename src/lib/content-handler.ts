@@ -123,6 +123,11 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       });
       return { ok: true };
     }
+    if (callback.data.startsWith("rv:")) {
+      const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
+      await sendTelegramMessage({ chatId, text: applyRevenueCallback(callback.data) });
+      return { ok: true };
+    }
     const parsed = parseCallback(callback.data);
     if (!parsed) return { ok: true };
     const job = getJobByPublicId(parsed.publicId);
@@ -359,6 +364,86 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (text === "/reanudar" || text.startsWith("/reanudar@")) {
     setContentPaused(false);
     await sendTelegramMessage({ chatId, text: "Scheduler reanudado." });
+    return { ok: true };
+  }
+
+  const nl = text.toLowerCase();
+  if (
+    text === "/hoy" ||
+    text.startsWith("/hoy@") ||
+    nl.includes("qué tengo pendiente") ||
+    nl.includes("que tengo pendiente") ||
+    nl === "qué hago hoy?" ||
+    nl === "¿qué hago hoy?" ||
+    nl.includes("qué debo hacer ahora")
+  ) {
+    const { formatHoy, formatQueHago } = await import("@/lib/revenue-telegram");
+    const body = nl.includes("debo hacer") || nl.includes("hago hoy") ? formatQueHago() : formatHoy();
+    await sendTelegramMessage({ chatId, text: body });
+    return { ok: true };
+  }
+  if (text === "/leads" || text.startsWith("/leads@")) {
+    const { formatLeads } = await import("@/lib/revenue-telegram");
+    await sendTelegramMessage({ chatId, text: formatLeads("all") });
+    return { ok: true };
+  }
+  if (text === "/calientes" || text.startsWith("/calientes@") || nl.includes("a quién debo llamar") || nl.includes("a quien contacto")) {
+    const { formatLeads, leadKeyboard } = await import("@/lib/revenue-telegram");
+    const { listLeads } = await import("@/lib/revenue-store");
+    await sendTelegramMessage({ chatId, text: formatLeads("hot") });
+    const first = listLeads({ temperature: "HOT", limit: 1 })[0];
+    if (first) {
+      await sendTelegramMessage({
+        chatId,
+        text: `Acciones para ${first.leadId}`,
+        keyboard: leadKeyboard(first.leadId),
+      });
+    }
+    return { ok: true };
+  }
+  if (text === "/seguimientos" || text.startsWith("/seguimientos@")) {
+    const { formatFollowups } = await import("@/lib/revenue-telegram");
+    await sendTelegramMessage({ chatId, text: formatFollowups() });
+    return { ok: true };
+  }
+  if (text === "/cotizaciones" || text.startsWith("/cotizaciones@") || nl.includes("cotizaciones están")) {
+    const { formatQuotes } = await import("@/lib/revenue-telegram");
+    await sendTelegramMessage({ chatId, text: formatQuotes() });
+    return { ok: true };
+  }
+  if (text === "/agenda" || text.startsWith("/agenda@") || text === "/trabajos" || text.startsWith("/trabajos@")) {
+    const { revenueSnapshot } = await import("@/lib/revenue-store");
+    const snap = revenueSnapshot();
+    await sendTelegramMessage({
+      chatId,
+      text: `Citas internas: ${snap.scheduled}\nTrabajos ganados: ${snap.won}\nNo hay Google Calendar conectado.`,
+    });
+    return { ok: true };
+  }
+  if (text === "/clientes" || text.startsWith("/clientes@")) {
+    const { revenueSnapshot } = await import("@/lib/revenue-store");
+    await sendTelegramMessage({ chatId, text: `Leads en motor: ${revenueSnapshot().leads}` });
+    return { ok: true };
+  }
+  if (text === "/reseñas" || text.startsWith("/reseñas@") || text === "/resenas" || text.startsWith("/resenas@")) {
+    const { revenueSnapshot } = await import("@/lib/revenue-store");
+    await sendTelegramMessage({
+      chatId,
+      text: `Reseñas elegibles: ${revenueSnapshot().reviews}\nNo hay URL de Google/Facebook configurada: no se inventa el enlace.`,
+    });
+    return { ok: true };
+  }
+  if (text === "/mantenimientos" || text.startsWith("/mantenimientos@")) {
+    const { revenueSnapshot } = await import("@/lib/revenue-store");
+    await sendTelegramMessage({
+      chatId,
+      text: `Oportunidades de mantenimiento: ${revenueSnapshot().maintenance}\nIntervalo A/C configurado: 90 días (comercial, no se contacta al cliente en AUTO).`,
+    });
+    return { ok: true };
+  }
+  if (text === "/ventas" || text.startsWith("/ventas@") || nl.includes("cuánto hemos vendido") || nl.includes("cuanto hemos vendido") || nl.includes("de dónde vienen")) {
+    const { formatVentas } = await import("@/lib/revenue-telegram");
+    await sendTelegramMessage({ chatId, text: formatVentas() });
     return { ok: true };
   }
 

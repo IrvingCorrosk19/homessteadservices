@@ -1,0 +1,33 @@
+{
+  "followUpMode": "ASSISTED",
+  "autoFollowUp": false,
+  "maxFollowUps": 3,
+  "minimumSpacingHours": 48,
+  "hotScore": 70,
+  "warmScore": 40,
+  "scoreWeights": {
+    "serviceIdentified": 12,
+    "problemSpecific": 10,
+    "requestedVisitOrQuote": 20,
+    "providedPhone": 15,
+    "providedLocation": 10,
+    "providedPhotos": 8,
+    "desiredTiming": 12,
+    "urgency": 15,
+    "returningCustomer": 18,
+    "referral": 12
+  },
+  "businessHours": { "start": "08:00", "end": "22:00", "timezone": "America/Panama" },
+  "maintenanceIntervalsDays": {
+    "ac": 90,
+    "plumbing": 0,
+    "painting": 0,
+    "electrical": 0,
+    "locksmith": 0,
+    "repairs": 0,
+    "remodeling": 0
+  },
+  "reviewDelayHours": 24,
+  "quoteValidityDays": 14,
+  "lostReasons": ["PRICE", "NO_RESPONSE", "TIMING", "COMPETITOR", "OUT_OF_SCOPE", "LOCATION", "CANCELLED", "UNKNOWN"]
+}

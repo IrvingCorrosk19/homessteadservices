@@ -329,6 +329,156 @@ function migrateContentStudio(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_concierge_msgs
       ON concierge_messages (conversation_id, id);
   `);
+  migrateRevenueEngine(database);
+}
+
+function migrateRevenueEngine(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS revenue_customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      email TEXT NOT NULL DEFAULT '',
+      general_location TEXT NOT NULL DEFAULT '',
+      preferred_channel TEXT NOT NULL DEFAULT '',
+      source_first TEXT NOT NULL DEFAULT 'UNKNOWN',
+      source_last TEXT NOT NULL DEFAULT 'UNKNOWN',
+      do_not_contact INTEGER NOT NULL DEFAULT 0,
+      is_test INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_rev_cust_phone ON revenue_customers (phone);
+    CREATE TABLE IF NOT EXISTS revenue_leads (
+      lead_id TEXT PRIMARY KEY,
+      customer_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'WEBSITE_FORM',
+      source_detail TEXT NOT NULL DEFAULT '',
+      utm_json TEXT NOT NULL DEFAULT '',
+      content_id TEXT NOT NULL DEFAULT '',
+      conversation_id TEXT NOT NULL DEFAULT '',
+      service_category TEXT NOT NULL DEFAULT '',
+      problem_summary TEXT NOT NULL DEFAULT '',
+      general_location TEXT NOT NULL DEFAULT '',
+      temperature TEXT NOT NULL DEFAULT 'COLD',
+      lead_score INTEGER NOT NULL DEFAULT 0,
+      pipeline_stage TEXT NOT NULL DEFAULT 'NEW',
+      next_action TEXT NOT NULL DEFAULT 'CONTACT_HOT_LEAD',
+      next_follow_up_at TEXT,
+      lost_reason TEXT NOT NULL DEFAULT '',
+      quote_id TEXT NOT NULL DEFAULT '',
+      job_id TEXT NOT NULL DEFAULT '',
+      is_test INTEGER NOT NULL DEFAULT 0,
+      dry_run INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS revenue_followups (
+      followup_id TEXT PRIMARY KEY,
+      lead_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'TELEGRAM_INTERNAL',
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      attempt INTEGER NOT NULL DEFAULT 1,
+      suggested_message TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS revenue_quotes (
+      quote_id TEXT PRIMARY KEY,
+      quote_number TEXT NOT NULL UNIQUE,
+      lead_id TEXT NOT NULL,
+      customer_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      valid_until TEXT,
+      items_json TEXT NOT NULL DEFAULT '[]',
+      subtotal REAL,
+      tax REAL,
+      discount REAL,
+      total REAL,
+      currency TEXT NOT NULL DEFAULT 'PAB',
+      status TEXT NOT NULL DEFAULT 'DRAFT',
+      pricing_status TEXT NOT NULL DEFAULT 'NEEDS_MANUAL_PRICING',
+      notes TEXT NOT NULL DEFAULT '',
+      terms TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      sent_at TEXT,
+      accepted_at TEXT,
+      rejected_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS revenue_appointments (
+      appointment_id TEXT PRIMARY KEY,
+      lead_id TEXT NOT NULL,
+      job_id TEXT NOT NULL DEFAULT '',
+      customer_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL DEFAULT '',
+      service TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'PROPOSED',
+      assigned_to TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      confirmed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS revenue_jobs (
+      job_id TEXT PRIMARY KEY,
+      job_number TEXT NOT NULL UNIQUE,
+      lead_id TEXT NOT NULL,
+      customer_id INTEGER NOT NULL,
+      quote_id TEXT NOT NULL DEFAULT '',
+      appointment_id TEXT NOT NULL DEFAULT '',
+      service TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'SCHEDULED',
+      quoted_amount REAL,
+      final_amount REAL,
+      payment_status TEXT NOT NULL DEFAULT 'UNPAID',
+      satisfaction TEXT NOT NULL DEFAULT '',
+      photo_permission INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS revenue_reviews (
+      review_id TEXT PRIMARY KEY,
+      customer_id INTEGER NOT NULL,
+      job_id TEXT NOT NULL DEFAULT '',
+      platform TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ELIGIBLE',
+      requested_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS revenue_referrals (
+      referral_id TEXT PRIMARY KEY,
+      referrer_customer_id INTEGER NOT NULL,
+      referred_lead_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ASKED',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS revenue_maintenance (
+      opportunity_id TEXT PRIMARY KEY,
+      customer_id INTEGER NOT NULL,
+      lead_id TEXT NOT NULL DEFAULT '',
+      service TEXT NOT NULL,
+      eligible_at TEXT NOT NULL,
+      recommended_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS revenue_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id TEXT NOT NULL DEFAULT '',
+      event TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS revenue_quote_counters (
+      year INTEGER PRIMARY KEY,
+      last INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS revenue_job_counters (
+      year INTEGER PRIMARY KEY,
+      last INTEGER NOT NULL
+    );
+  `);
 }
 
 export function getHomesteadDb() {
@@ -411,7 +561,7 @@ export function saveServiceRequest(input: {
   );
   const createdAt = created.toISOString();
 
-  return database.transaction(() => {
+  const saved = database.transaction(() => {
     const publicId = nextPublicId(database, year);
     const photoDir = join(dataDir(), "photos", publicId);
     mkdirSync(photoDir, { recursive: true });
@@ -470,6 +620,8 @@ export function saveServiceRequest(input: {
     });
     return saved;
   })();
+  void import("@/lib/revenue-ingest").then((mod) => mod.ingestSavedRequest(saved)).catch(() => undefined);
+  return saved;
 }
 
 export function readStoredPhoto(publicId: string, storedAs: string) {

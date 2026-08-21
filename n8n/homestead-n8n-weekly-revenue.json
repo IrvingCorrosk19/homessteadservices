@@ -1,0 +1,43 @@
+{
+  "name": "HOMESTEAD — Weekly Revenue Report",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "days", "daysInterval": 7 }] } },
+      "id": "hs-rev-week-trigger",
+      "name": "Cada 7 días",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://homestead.lat/api/internal/revenue/weekly-report",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Homestead-Webhook-Secret", "value": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}" },
+            { "name": "X-Homestead-Timestamp", "value": "={{ $now.toUnixInteger() }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event: 'revenue.weekly.report' }) }}",
+        "options": { "timeout": 25000 }
+      },
+      "id": "hs-rev-week-http",
+      "name": "Homestead weekly revenue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Cada 7 días": { "main": [[{ "node": "Homestead weekly revenue", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "availableInMCP": false },
+  "pinData": {},
+  "active": false
+}

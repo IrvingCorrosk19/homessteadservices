@@ -1,4 +1,29 @@
+# BACKUP MANIFEST — pre Revenue Growth Engine
+
+DATE: 2026-08-20T21:47 America/Panama
+
+PRE_CHANGE_BACKUP = PASS
+
+## Git
+
+- HEAD: `7b9a783fe298ccc6d59f751fb523db67b702ea6c`
+- COMMIT: `chore(backup): checkpoint before revenue growth engine`
+- BRANCH: `backup/pre-revenue-engine-20260820-2147`
+- TAG: `pre-revenue-engine-20260820-2147`
+
+Restore: `git checkout pre-revenue-engine-20260820-2147`
+
+## VPS
+
+- `/opt/backups/pre-revenue-engine-20260820-2148/`
+- n8n workflows: 16 (dump chmod 600, not Git)
+- SQLite integrity ok · 22 service_requests · 5 content_jobs
+- Index: `backups/revenue-engine/` on VPS under homestead (names only)
+
+---
+
 # BACKUP MANIFEST — pre AI Sales Concierge
+
 
 DATE: 2026-08-20T21:32 America/Panama
 
