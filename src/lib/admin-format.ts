@@ -1,3 +1,5 @@
+import { businessTimezone } from "@/lib/appointment-time";
+
 export const REQUEST_STATUSES = [
   "NEW",
   "CONTACTED",
@@ -26,7 +28,7 @@ export function formatPanamaDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("es-PA", {
-    timeZone: "America/Panama",
+    timeZone: businessTimezone(),
     day: "numeric",
     month: "short",
     hour: "numeric",
@@ -38,7 +40,7 @@ export function formatPanamaDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("es-PA", {
-    timeZone: "America/Panama",
+    timeZone: businessTimezone(),
     day: "numeric",
     month: "short",
     year: "numeric",

@@ -487,6 +487,28 @@ function migrateRevenueEngine(database: Database.Database) {
     );
   `);
   migrateLeadHandoff(database);
+  migrateAppointmentCalendar(database);
+}
+
+function migrateAppointmentCalendar(database: Database.Database) {
+  const cols = columnNames(database, "revenue_appointments");
+  if (cols.length && !cols.includes("version")) {
+    database.exec(`ALTER TABLE revenue_appointments ADD COLUMN version INTEGER NOT NULL DEFAULT 1`);
+  }
+  if (cols.length && !cols.includes("notes")) {
+    database.exec(`ALTER TABLE revenue_appointments ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
+  }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS revenue_appointment_notices (
+      notice_key TEXT PRIMARY KEY,
+      appointment_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      sent_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rev_appt_date ON revenue_appointments (date, start_time);
+    CREATE INDEX IF NOT EXISTS idx_rev_appt_status ON revenue_appointments (status);
+  `);
 }
 
 function migrateLeadHandoff(database: Database.Database) {

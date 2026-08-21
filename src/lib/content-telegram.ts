@@ -42,10 +42,12 @@ async function telegramCall(method: string, payload: Record<string, unknown>) {
   return json;
 }
 
+export type TelegramButton = { text: string; callback_data?: string; url?: string };
+
 export async function sendTelegramMessage(input: {
   chatId: string;
   text: string;
-  keyboard?: Array<Array<{ text: string; callback_data: string }>>;
+  keyboard?: Array<Array<TelegramButton>>;
   editMessageId?: number | null;
 }) {
   const replyMarkup = input.keyboard

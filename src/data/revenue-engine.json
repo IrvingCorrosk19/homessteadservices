@@ -20,6 +20,7 @@
     "problemSpecificMinChars": 20
   },
   "businessHours": { "start": "08:00", "end": "22:00", "timezone": "America/Panama" },
+  "appointmentReminders": { "enabled": true, "offsets": ["24h", "2h"] },
   "maintenanceIntervalsDays": {
     "ac": 90,
     "plumbing": 0,

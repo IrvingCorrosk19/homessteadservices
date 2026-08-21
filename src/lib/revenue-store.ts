@@ -9,13 +9,20 @@ import {
   revenueConfig,
   type PipelineStage,
 } from "@/lib/revenue-score";
+import {
+  appointmentServiceLabel,
+  businessTimezone,
+  firstName,
+  isAppointmentStatus,
+  reminderEligibleStatus,
+} from "@/lib/appointment-time";
 
 function nowIso() {
   return new Date().toISOString();
 }
 
 function yearPanama() {
-  return Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Panama", year: "numeric" }).format(new Date()));
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: businessTimezone(), year: "numeric" }).format(new Date()));
 }
 
 function nextNumber(table: "revenue_quote_counters" | "revenue_job_counters", prefix: string) {
@@ -491,9 +498,74 @@ export function latestAppointment(leadId: string) {
     .get(leadId) as { appointment_id: string; date: string; start_time: string; status: string } | undefined;
 }
 
+const APPOINTMENT_SELECT = `a.appointment_id, a.lead_id, a.customer_id, a.job_id, a.date, a.start_time, a.end_time,
+  a.service, a.status, a.assigned_to, a.created_at, a.confirmed_at, a.version, a.notes,
+  l.conversation_id, l.quote_id, l.problem_summary, l.general_location as lead_location,
+  l.pipeline_stage, c.name, c.phone, c.email, c.general_location as customer_location`;
+
+export type AppointmentRecord = {
+  appointmentId: string;
+  leadId: string;
+  customerId: number;
+  jobId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  service: string;
+  serviceLabel: string;
+  status: string;
+  assignedTo: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  version: number;
+  notes: string;
+  conversationId: string;
+  quoteId: string;
+  problem: string;
+  zone: string;
+  stage: string;
+  customerName: string;
+  customerFirst: string;
+  phone: string;
+  email: string;
+};
+
+function mapAppointment(row: Record<string, unknown>): AppointmentRecord {
+  const name = String(row.name || "");
+  const service = String(row.service || "");
+  const problem = String(row.problem_summary || "");
+  return {
+    appointmentId: String(row.appointment_id),
+    leadId: String(row.lead_id),
+    customerId: Number(row.customer_id),
+    jobId: String(row.job_id || ""),
+    date: String(row.date),
+    startTime: String(row.start_time),
+    endTime: String(row.end_time || ""),
+    service,
+    serviceLabel: appointmentServiceLabel(service, problem),
+    status: String(row.status),
+    assignedTo: String(row.assigned_to || ""),
+    createdAt: String(row.created_at),
+    confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null,
+    version: Number(row.version || 1),
+    notes: String(row.notes || ""),
+    conversationId: String(row.conversation_id || ""),
+    quoteId: String(row.quote_id || ""),
+    problem,
+    zone: String(row.lead_location || row.customer_location || ""),
+    stage: String(row.pipeline_stage || ""),
+    customerName: name,
+    customerFirst: firstName(name),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+  };
+}
+
 export function createAppointment(leadId: string, date: string, startTime: string, status = "PROPOSED") {
   const lead = getLead(leadId);
   if (!lead) return null;
+  const normalized = isAppointmentStatus(status) ? status : "PROPOSED";
   const open = getHomesteadDb()
     .prepare(
       `SELECT appointment_id FROM revenue_appointments
@@ -508,29 +580,112 @@ export function createAppointment(leadId: string, date: string, startTime: strin
         (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, leadId, lead.customerId, date, startTime, lead.service, status, nowIso());
+    .run(id, leadId, lead.customerId, date, startTime, lead.service, normalized, nowIso());
   getHomesteadDb()
     .prepare("UPDATE revenue_leads SET visit_proposed_at = COALESCE(visit_proposed_at, ?), updated_at = ? WHERE lead_id = ?")
     .run(nowIso(), nowIso(), leadId);
-  addRevenueEvent(leadId, "APPOINTMENT_CREATED");
+  addRevenueEvent(leadId, normalized === "REQUESTED" ? "APPOINTMENT_REQUESTED" : "APPOINTMENT_CREATED");
   return id;
 }
 
-export function setAppointmentStatus(appointmentId: string, status: string) {
+export function getAppointment(appointmentId: string) {
   const row = getHomesteadDb()
-    .prepare("SELECT lead_id FROM revenue_appointments WHERE appointment_id = ?")
-    .get(appointmentId) as { lead_id: string } | undefined;
-  if (!row) return null;
+    .prepare(
+      `SELECT ${APPOINTMENT_SELECT}
+       FROM revenue_appointments a
+       JOIN revenue_leads l ON l.lead_id = a.lead_id
+       JOIN revenue_customers c ON c.id = a.customer_id
+       WHERE a.appointment_id = ?`,
+    )
+    .get(appointmentId) as Record<string, unknown> | undefined;
+  return row ? mapAppointment(row) : null;
+}
+
+export function listAppointments(input: { from?: string; to?: string; status?: string; service?: string; assignedTo?: string } = {}) {
+  const clauses = ["1=1"];
+  const params: Array<string> = [];
+  if (input.from) {
+    clauses.push("a.date >= ?");
+    params.push(input.from);
+  }
+  if (input.to) {
+    clauses.push("a.date <= ?");
+    params.push(input.to);
+  }
+  if (input.status && input.status !== "ALL") {
+    clauses.push("a.status = ?");
+    params.push(input.status);
+  }
+  if (input.service) {
+    clauses.push("a.service = ?");
+    params.push(input.service);
+  }
+  if (input.assignedTo) {
+    clauses.push("a.assigned_to = ?");
+    params.push(input.assignedTo);
+  }
+  const rows = getHomesteadDb()
+    .prepare(
+      `SELECT ${APPOINTMENT_SELECT}
+       FROM revenue_appointments a
+       JOIN revenue_leads l ON l.lead_id = a.lead_id
+       JOIN revenue_customers c ON c.id = a.customer_id
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY a.date ASC, a.start_time ASC`,
+    )
+    .all(...params) as Array<Record<string, unknown>>;
+  return rows.map(mapAppointment);
+}
+
+export function listReminderAppointments() {
+  return listAppointments().filter((item) => reminderEligibleStatus(item.status));
+}
+
+export function setAppointmentStatus(appointmentId: string, status: string) {
+  if (!isAppointmentStatus(status)) return null;
+  const current = getAppointment(appointmentId);
+  if (!current) return null;
   getHomesteadDb()
     .prepare("UPDATE revenue_appointments SET status = ?, confirmed_at = CASE WHEN ? = 'CONFIRMED' THEN ? ELSE confirmed_at END WHERE appointment_id = ?")
     .run(status, status, nowIso(), appointmentId);
   if (status === "CONFIRMED") {
     getHomesteadDb()
       .prepare("UPDATE revenue_leads SET visit_confirmed_at = ?, pipeline_stage = 'SCHEDULED', updated_at = ? WHERE lead_id = ?")
-      .run(nowIso(), nowIso(), row.lead_id);
+      .run(nowIso(), nowIso(), current.leadId);
   }
-  addRevenueEvent(row.lead_id, `APPOINTMENT_${status}`);
-  return row.lead_id;
+  addRevenueEvent(current.leadId, `APPOINTMENT_${status}`);
+  return current.leadId;
+}
+
+export function rescheduleAppointment(appointmentId: string, date: string, startTime: string) {
+  const current = getAppointment(appointmentId);
+  if (!current) return null;
+  if (current.status === "CANCELLED" || current.status === "COMPLETED") return null;
+  const nextStatus = current.status === "CONFIRMED" || current.status === "RESCHEDULED" ? "RESCHEDULED" : current.status;
+  getHomesteadDb()
+    .prepare(
+      `UPDATE revenue_appointments
+       SET date = ?, start_time = ?, status = ?, version = version + 1
+       WHERE appointment_id = ?`,
+    )
+    .run(date, startTime, nextStatus, appointmentId);
+  addRevenueEvent(current.leadId, "APPOINTMENT_RESCHEDULED");
+  return { ...current, date, startTime, status: nextStatus, version: current.version + 1, previousDate: current.date, previousTime: current.startTime };
+}
+
+export function releaseAppointmentNotice(noticeKey: string) {
+  getHomesteadDb().prepare("DELETE FROM revenue_appointment_notices WHERE notice_key = ?").run(noticeKey);
+}
+
+export function claimAppointmentNotice(noticeKey: string, appointmentId: string, eventType: string, version: number) {
+  const result = getHomesteadDb()
+    .prepare(
+      `INSERT OR IGNORE INTO revenue_appointment_notices
+        (notice_key, appointment_id, event_type, version, sent_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(noticeKey, appointmentId, eventType, version, nowIso());
+  return result.changes === 1;
 }
 
 export function createJobFromLead(leadId: string) {
@@ -609,7 +764,7 @@ export function revenueSnapshot() {
     hot: count("SELECT COUNT(*) as n FROM revenue_leads WHERE temperature = 'HOT' AND pipeline_stage NOT IN ('WON','LOST','CANCELLED') AND is_test = 0"),
     followups: count("SELECT COUNT(*) as n FROM revenue_followups WHERE status = 'PENDING'"),
     quotes: count("SELECT COUNT(*) as n FROM revenue_quotes WHERE status IN ('DRAFT','READY_FOR_REVIEW','SENT')"),
-    scheduled: count("SELECT COUNT(*) as n FROM revenue_appointments WHERE status IN ('PROPOSED','CONFIRMED')"),
+    scheduled: count("SELECT COUNT(*) as n FROM revenue_appointments WHERE status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED')"),
     reviews: count("SELECT COUNT(*) as n FROM revenue_reviews WHERE status = 'ELIGIBLE'"),
     maintenance: count("SELECT COUNT(*) as n FROM revenue_maintenance WHERE status = 'OPEN'"),
     leads: count("SELECT COUNT(*) as n FROM revenue_leads WHERE is_test = 0"),

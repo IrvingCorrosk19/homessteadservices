@@ -25,6 +25,9 @@ export function ConciergeWidget() {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingRef = useRef(false);
+  const [sendError, setSendError] = useState(false);
 
   useEffect(() => {
     if (sessionStorage.getItem(GREET_KEY)) return;
@@ -71,10 +74,12 @@ export function ConciergeWidget() {
     };
   }, []);
 
-  const send = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string) => {
     const message = text.trim();
-    if (!message || pending || ended) return;
+    if (!message || pendingRef.current || ended) return;
+    pendingRef.current = true;
     setPending(true);
+    setSendError(false);
     setInput("");
     setWhatsapp(null);
     setMessages((current) => [...current, { role: "user", body: message }]);
@@ -95,6 +100,7 @@ export function ConciergeWidget() {
         }),
       });
       const data = await response.json();
+      if (!response.ok) throw new Error("send_failed");
       const reply = typeof data.reply === "string" ? data.reply : "Cuéntame un poco más del problema para orientarlo.";
       setMessages((current) => [...current, { role: "assistant", body: reply }]);
       setChips(Array.isArray(data.chips) ? data.chips : []);
@@ -102,24 +108,22 @@ export function ConciergeWidget() {
       setLeadId(typeof data.leadId === "string" ? data.leadId : null);
       setEnded(Boolean(data.ended));
     } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          body: "Puedo seguir registrando tu solicitud. Cuéntame brevemente qué servicio necesitas y nuestro equipo podrá darle seguimiento.",
-        },
-      ]);
+      setMessages((current) => current.filter((item, index, list) => !(index === list.length - 1 && item.role === "user" && item.body === message)));
+      setInput(message);
+      setSendError(true);
     } finally {
+      pendingRef.current = false;
       setPending(false);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [ended, pending]);
+  }, [ended]);
 
   async function onPhoto(file: File) {
     const body = new FormData();
     body.append("photo", file);
     await fetch("/api/concierge/photo", { method: "POST", body });
     setMessages((current) => [...current, { role: "user", body: "Envié una foto." }]);
-    await send("Te envié una foto de la zona o el equipo.");
+    await sendMessage("Te envié una foto de la zona o el equipo.");
   }
 
   function openChat() {
@@ -131,6 +135,7 @@ export function ConciergeWidget() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ event: "CHAT_STARTED" }),
     });
+    window.setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   return (
@@ -185,14 +190,23 @@ export function ConciergeWidget() {
                 key={`${item.role}-${index}`}
                 className={
                   item.role === "user"
-                    ? "ml-8 rounded-2xl bg-navy px-4 py-3 text-sm leading-6 text-cream"
-                    : "mr-8 rounded-2xl border border-line bg-white px-4 py-3 text-sm leading-6 text-charcoal"
+                    ? "ml-8 whitespace-pre-wrap rounded-2xl bg-navy px-4 py-3 text-sm leading-6 text-cream"
+                    : "mr-8 whitespace-pre-wrap rounded-2xl border border-line bg-white px-4 py-3 text-sm leading-6 text-charcoal"
                 }
               >
                 {item.body}
               </p>
             ))}
-            {pending && <p className="mr-8 text-sm text-mist">Escribiendo…</p>}
+            {pending && (
+              <p className="mr-8 text-sm text-mist" aria-live="polite">
+                Enviando…
+              </p>
+            )}
+            {sendError && (
+              <p className="text-xs text-accent" role="alert">
+                No se pudo enviar. El texto se conservó; puedes reintentar.
+              </p>
+            )}
             {leadId && (
               <p className="text-xs text-mist">Solicitud {leadId} registrada.</p>
             )}
@@ -204,7 +218,7 @@ export function ConciergeWidget() {
                   key={chip}
                   type="button"
                   className="min-h-11 rounded-full border border-navy/20 px-3 text-xs text-navy"
-                  onClick={() => void send(chip)}
+                  onClick={() => void sendMessage(chip)}
                 >
                   {chip}
                 </button>
@@ -228,7 +242,7 @@ export function ConciergeWidget() {
               className="flex items-end gap-2 border-t border-line bg-white px-3 py-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                void send(input);
+                void sendMessage(input);
               }}
             >
               <button
@@ -255,18 +269,27 @@ export function ConciergeWidget() {
               </label>
               <textarea
                 id="hs-concierge-input"
+                ref={inputRef}
                 rows={1}
                 value={input}
+                disabled={pending}
                 onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                  if (event.key !== "Enter") return;
+                  if (event.shiftKey) return;
+                  event.preventDefault();
+                  void sendMessage(input);
+                }}
                 placeholder="Cuéntame qué necesitas"
-                className="max-h-28 min-h-11 flex-1 resize-none bg-transparent py-2 text-sm outline-none"
+                className="max-h-28 min-h-11 flex-1 resize-none bg-transparent py-2 text-sm outline-none disabled:opacity-60"
               />
               <button
                 type="submit"
-                disabled={pending}
+                disabled={pending || !input.trim()}
                 className="min-h-11 rounded-lg bg-accent px-3 text-xs tracking-[0.12em] uppercase text-white disabled:opacity-50"
               >
-                Enviar
+                {pending ? "Enviando" : "Enviar"}
               </button>
             </form>
           )}

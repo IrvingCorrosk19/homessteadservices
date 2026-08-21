@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyInternalHomesteadRequest } from "@/lib/internal-auth";
 import { runContentScheduler } from "@/lib/content-scheduler";
-import { runHotLeadReminders } from "@/lib/revenue-telegram";
+import { runHotLeadReminders, runAppointmentReminders } from "@/lib/revenue-telegram";
 import { logError } from "@/lib/log";
 
 export const runtime = "nodejs";
@@ -21,7 +21,15 @@ export async function POST(request: Request) {
         cause: error instanceof Error ? error.name : "unknown",
       });
     }
-    return NextResponse.json({ ...result, reminders });
+    let appointments: { sent: number } = { sent: 0 };
+    try {
+      appointments = await runAppointmentReminders();
+    } catch (error) {
+      logError("AppointmentReminderFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+      });
+    }
+    return NextResponse.json({ ...result, reminders, appointments });
   } catch (error) {
     logError("ContentSchedulerFailed", {
       cause: error instanceof Error ? error.name : "unknown",

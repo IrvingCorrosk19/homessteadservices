@@ -1,4 +1,30 @@
+# BACKUP MANIFEST — pre chat Enter, calendar and appointment reminders
+
+DATE: 2026-08-20T23:03 America/Panama
+
+PRE_CHANGE_BACKUP = PASS
+
+## Git
+
+- HEAD (freeze): `afb25bac8d335b458bf37bd04d7578edc9cf1e0c`
+- COMMIT: `chore(backup): checkpoint before chat enter calendar and telegram reminders`
+- BRANCH: `backup/pre-appointments-calendar-20260820-2300`
+- TAG: `pre-appointments-calendar-20260820-2300`
+
+Restore: `git checkout pre-appointments-calendar-20260820-2300`
+
+## VPS
+
+- `/opt/backups/pre-appointments-calendar-20260820-2300/`
+- SQLite integrity: ok
+- service_requests: 23
+- revenue_appointments: 0
+- n8n workflows: not modified (no dump required)
+
+---
+
 # BACKUP MANIFEST — pre Chat → Lead → Telegram handoff
+
 
 DATE: 2026-08-20T22:11 America/Panama
 

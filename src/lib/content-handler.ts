@@ -125,7 +125,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     }
     if (callback.data.startsWith("rv:")) {
       const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
-      const result = applyRevenueCallback(callback.data, chatId);
+      const result = await applyRevenueCallback(callback.data, chatId);
       await sendTelegramMessage({ chatId, text: result.text, keyboard: result.keyboard });
       return { ok: true };
     }
@@ -295,7 +295,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   if (text && !text.startsWith("/")) {
     const { consumeOperatorDate } = await import("@/lib/revenue-telegram");
-    const consumed = consumeOperatorDate(chatId, text);
+    const consumed = await consumeOperatorDate(chatId, text);
     if (consumed) {
       await sendTelegramMessage({ chatId, text: consumed.text, keyboard: consumed.keyboard });
       return { ok: true };

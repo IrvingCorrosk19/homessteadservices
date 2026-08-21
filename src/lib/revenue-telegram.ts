@@ -1,12 +1,26 @@
 import { marketingBaseline } from "@/lib/marketing-engine";
 import { contactRegion, alertPhone } from "@/lib/phone";
 import { isAutoFollowUp, isRevenueDryRun, revenueConfig } from "@/lib/revenue-score";
-import { adminChatIds, sendTelegramMessage } from "@/lib/content-telegram";
+import {
+  APPOINTMENT_STATUS_LABELS,
+  appointmentNoticeKey,
+  appointmentReminderConfig,
+  appointmentServiceLabel,
+  businessYmd,
+  dueReminderOffset,
+  formatAppointmentClock,
+  formatAppointmentDay,
+  formatRemaining,
+  reminderEligibleStatus,
+  zonedLocalToUtcMs,
+} from "@/lib/appointment-time";
+import { adminChatIds, sendTelegramMessage, type TelegramButton } from "@/lib/content-telegram";
 import { customerWhatsAppUrl } from "@/lib/service-requests";
 import { contact, site } from "@/lib/site";
 import { logError, logInfo } from "@/lib/log";
 import {
   acceptQuote,
+  addRevenueEvent,
   backfillFromServiceRequests,
   clearOperatorPending,
   completeJob,
@@ -16,6 +30,11 @@ import {
   getLead,
   getOperatorPending,
   latestAppointment,
+  claimAppointmentNotice,
+  getAppointment,
+  listReminderAppointments,
+  releaseAppointmentNotice,
+  rescheduleAppointment,
   listLeads,
   listUnattendedHotLeads,
   markHotReminded,
@@ -121,38 +140,16 @@ export function formatQueHago() {
 
 export type RevenueCallbackResult = {
   text: string;
-  keyboard?: Array<Array<{ text: string; callback_data: string }>>;
+  keyboard?: Array<Array<TelegramButton>>;
   mutated: boolean;
 };
 
 function serviceLabel(service: string, problem = "") {
-  const blob = `${service} ${problem}`.toLowerCase();
-  if (/pintar|pintur/.test(blob) && /repar/.test(blob)) return "Reparación y pintura de pared";
-  const labels: Record<string, string> = {
-    ac: "Aire acondicionado",
-    plumbing: "Plomería",
-    painting: "Pintura",
-    electrical: "Electricidad",
-    locksmith: "Cerrajería",
-    repairs: "Reparaciones",
-    remodeling: "Remodelación",
-    multiple: "Varios servicios",
-  };
-  return labels[service] || service || "Servicio Homestead";
+  return appointmentServiceLabel(service, problem);
 }
 
 function panamaYmd(addDays = 0) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: revenueConfig.businessHours.timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .format(new Date())
-    .split("-")
-    .map(Number);
-  const utc = Date.UTC(parts[0], parts[1] - 1, parts[2] + addDays);
-  return new Date(utc).toISOString().slice(0, 10);
+  return businessYmd(new Date(), addDays);
 }
 
 function commercialWindow() {
@@ -245,7 +242,8 @@ function visitKeyboard(leadId: string, hasPreference: boolean) {
 
 function confirmKeyboard(leadId: string) {
   return [
-    [{ text: "CONFIRMAR Y PREPARAR MENSAJE", callback_data: `rv:${leadId}:ok` }],
+    [{ text: "CONFIRMAR CITA", callback_data: `rv:${leadId}:cf` }],
+    [{ text: "PREPARAR MENSAJE AL CLIENTE", callback_data: `rv:${leadId}:ok` }],
     [
       { text: "CAMBIAR", callback_data: `rv:${leadId}:visit` },
       { text: "CANCELAR", callback_data: `rv:${leadId}:vx` },
@@ -339,7 +337,7 @@ export async function runHotLeadReminders() {
   return { sent, checked: leads.length, minutes };
 }
 
-export function applyRevenueCallback(data: string, chatId = ""): RevenueCallbackResult {
+export async function applyRevenueCallback(data: string, chatId = ""): Promise<RevenueCallbackResult> {
   const parts = data.split(":");
   if (parts[0] !== "rv" || parts.length < 3) return { text: "Acción no reconocida.", mutated: false };
   const leadId = parts[1];
@@ -461,11 +459,22 @@ export function applyRevenueCallback(data: string, chatId = ""): RevenueCallback
     const days = action === "vt" ? 0 : 1;
     const date = panamaYmd(days);
     const time = action === "vp" && /3|15/.test(lead.preferredTimeWindow || "") ? "15:00" : "16:00";
-    const id = createAppointment(leadId, date, time, "PROPOSED");
+    const proposed = await proposeVisitSlot(leadId, date, time);
     setPipeline(leadId, "SITE_VISIT_NEEDED");
     return {
-      text: `${visitSummary(lead, date, time)}\n\nCita interna: ${id} · PROPOSED`,
+      text: `${visitSummary(lead, date, time)}\n\nCita interna: ${proposed.id} · ${proposed.status}`,
       keyboard: confirmKeyboard(leadId),
+      mutated: true,
+    };
+  }
+  if (action === "cf") {
+    const appt = latestAppointment(leadId);
+    if (!appt) return { text: "No hay propuesta de visita.", mutated: false };
+    setAppointmentStatus(appt.appointment_id, "CONFIRMED");
+    await notifyAppointmentEvent(appt.appointment_id, "CONFIRMED");
+    return {
+      text: `Cita confirmada internamente.\n${appt.appointment_id}\n${appt.date} ${appt.start_time}`,
+      keyboard: appointmentKeyboard(appt.appointment_id, leadId),
       mutated: true,
     };
   }
@@ -488,8 +497,11 @@ export function applyRevenueCallback(data: string, chatId = ""): RevenueCallback
   }
   if (action === "vx") {
     const appt = latestAppointment(leadId);
-    if (appt) setAppointmentStatus(appt.appointment_id, "CANCELLED");
-    return { text: `Propuesta cancelada.\n${leadId}`, keyboard: leadKeyboard(leadId), mutated: true };
+    if (appt) {
+      setAppointmentStatus(appt.appointment_id, "CANCELLED");
+      await notifyAppointmentEvent(appt.appointment_id, "CANCELLED");
+    }
+    return { text: `Cita cancelada.\n${leadId}`, keyboard: leadKeyboard(leadId), mutated: true };
   }
   return { text: "Acción no reconocida.", mutated: false };
 }
@@ -498,7 +510,7 @@ export function bindOperatorChat(chatId: string, leadId: string, expect: string)
   setOperatorPending(chatId, leadId, expect);
 }
 
-export function consumeOperatorDate(chatId: string, text: string): RevenueCallbackResult | null {
+export async function consumeOperatorDate(chatId: string, text: string): Promise<RevenueCallbackResult | null> {
   const pending = getOperatorPending(chatId);
   if (!pending || pending.expect !== "date") return null;
   clearOperatorPending(chatId);
@@ -508,15 +520,214 @@ export function consumeOperatorDate(chatId: string, text: string): RevenueCallba
   if (!match) {
     return { text: "No entendí la fecha. Ejemplo: 25/08 15:30", mutated: false };
   }
-  const year = new Date().getFullYear();
+  const year = Number(new Intl.DateTimeFormat("en-US", { timeZone: revenueConfig.businessHours.timezone, year: "numeric" }).format(new Date()));
   const date = `${year}-${String(match[2]).padStart(2, "0")}-${String(match[1]).padStart(2, "0")}`;
   const time = `${String(match[3]).padStart(2, "0")}:${String(match[4] || "00").padStart(2, "0")}`;
-  const id = createAppointment(lead.leadId, date, time, "PROPOSED");
+  const id = await proposeVisitSlot(lead.leadId, date, time);
   markLeadHumanAction(lead.leadId);
   setPipeline(lead.leadId, "SITE_VISIT_NEEDED");
   return {
-    text: `${visitSummary(lead, date, time)}\n\nCita interna: ${id} · PROPOSED`,
+    text: `${visitSummary(lead, date, time)}\n\nCita interna: ${id.id} · ${id.status}`,
     keyboard: confirmKeyboard(lead.leadId),
     mutated: true,
   };
+}
+
+async function proposeVisitSlot(leadId: string, date: string, time: string) {
+  const latest = latestAppointment(leadId);
+  if (latest && ["REQUESTED", "PROPOSED", "CONFIRMED", "RESCHEDULED"].includes(latest.status)) {
+    const moved = rescheduleAppointment(latest.appointment_id, date, time);
+    if (moved && (latest.status === "CONFIRMED" || latest.status === "RESCHEDULED")) {
+      await notifyAppointmentEvent(latest.appointment_id, "RESCHEDULED", {
+        previousDate: latest.date,
+        previousTime: latest.start_time,
+      });
+    }
+    return { id: latest.appointment_id, status: moved?.status || latest.status };
+  }
+  const created = createAppointment(leadId, date, time, "PROPOSED");
+  return { id: created, status: "PROPOSED" };
+}
+
+function appointmentUrl(appointmentId: string) {
+  return `${site.url.replace(/\/$/, "")}/admin/citas?id=${encodeURIComponent(appointmentId)}`;
+}
+
+export function appointmentKeyboard(appointmentId: string, leadId: string): TelegramButton[][] {
+  return [
+    [{ text: "👁 VER CITA", url: appointmentUrl(appointmentId) }],
+    [
+      { text: "💬 CONTACTAR", callback_data: `rv:${leadId}:contact` },
+      { text: "🔄 REPROGRAMAR", callback_data: `rv:${leadId}:visit` },
+    ],
+  ];
+}
+
+function statusLabel(status: string) {
+  return APPOINTMENT_STATUS_LABELS[status as keyof typeof APPOINTMENT_STATUS_LABELS] || status;
+}
+
+export async function notifyAppointmentEvent(
+  appointmentId: string,
+  eventType: "CONFIRMED" | "RESCHEDULED" | "CANCELLED" | "REMINDER",
+  extra?: { previousDate?: string; previousTime?: string; offsetLabel?: string; remainingMs?: number },
+) {
+  const appointment = getAppointment(appointmentId);
+  if (!appointment) return { sent: 0 };
+  if (eventType === "REMINDER" && !reminderEligibleStatus(appointment.status)) {
+    return { sent: 0, skipped: appointment.status };
+  }
+  if (eventType === "CONFIRMED" && appointment.status !== "CONFIRMED" && appointment.status !== "RESCHEDULED") {
+    return { sent: 0, skipped: appointment.status };
+  }
+  if (eventType === "CANCELLED" && appointment.status !== "CANCELLED") {
+    return { sent: 0, skipped: appointment.status };
+  }
+  const extraKey =
+    eventType === "REMINDER"
+      ? `${extra?.offsetLabel || ""}:${appointment.date}:${appointment.startTime}`
+      : eventType === "RESCHEDULED"
+        ? `${appointment.date}:${appointment.startTime}`
+        : "";
+  const noticeKey = appointmentNoticeKey(appointment.appointmentId, eventType, appointment.version, extraKey);
+  if (!claimAppointmentNotice(noticeKey, appointment.appointmentId, eventType, appointment.version)) {
+    return { sent: 0, duplicate: true as const };
+  }
+  const chats = adminChatIds();
+  if (!chats.length) {
+    releaseAppointmentNotice(noticeKey);
+    return { sent: 0 };
+  }
+  const text = formatAppointmentTelegram(appointment, eventType, extra);
+  const keyboard = appointmentKeyboard(appointment.appointmentId, appointment.leadId);
+  let sent = 0;
+  for (const chatId of chats) {
+    const id = await sendTelegramMessage({ chatId, text, keyboard });
+    if (id) sent += 1;
+  }
+  if (!sent) {
+    releaseAppointmentNotice(noticeKey);
+    logError("AppointmentTelegramFailed", { contentJobId: appointmentId, stage: eventType });
+    return { sent: 0 };
+  }
+  addRevenueEvent(appointment.leadId, eventType === "REMINDER" ? "REMINDER_SENT" : `APPOINTMENT_${eventType}_NOTIFIED`);
+  logInfo("AppointmentTelegramSent", { contentJobId: appointmentId, stage: `${eventType}:${sent}` });
+  return { sent };
+}
+
+function formatAppointmentTelegram(
+  appointment: NonNullable<ReturnType<typeof getAppointment>>,
+  eventType: "CONFIRMED" | "RESCHEDULED" | "CANCELLED" | "REMINDER",
+  extra?: { previousDate?: string; previousTime?: string; offsetLabel?: string; remainingMs?: number },
+) {
+  if (eventType === "RESCHEDULED") {
+    return [
+      "🔄 CITA REPROGRAMADA",
+      "",
+      `Cliente: ${appointment.customerName}`,
+      `Servicio: ${appointment.serviceLabel}`,
+      extra?.previousDate
+        ? `Anterior: ${formatAppointmentDay(extra.previousDate)} ${formatAppointmentClock(extra.previousTime || "")}`
+        : "",
+      `Nueva: ${formatAppointmentDay(appointment.date)} ${formatAppointmentClock(appointment.startTime)}`,
+      `Estado: ${statusLabel(appointment.status).toUpperCase()}`,
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+  }
+  if (eventType === "CANCELLED") {
+    return [
+      "❌ CITA CANCELADA",
+      "",
+      `Cliente: ${appointment.customerName}`,
+      `Servicio: ${appointment.serviceLabel}`,
+      `Fecha: ${formatAppointmentDay(appointment.date)}`,
+      `Hora: ${formatAppointmentClock(appointment.startTime)}`,
+      "No se enviarán recordatorios de esta cita.",
+    ].join("\n");
+  }
+  if (eventType === "REMINDER") {
+    const remaining = extra?.remainingMs ? formatRemaining(extra.remainingMs) : extra?.offsetLabel || "";
+    return [
+      "━━━━━━━━━━━━━━━━━━━━━━",
+      "⏰ HOMESTEAD · CITA PRÓXIMA",
+      "━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      `📅 ${formatAppointmentDay(appointment.date)} · ${formatAppointmentClock(appointment.startTime)}`,
+      "",
+      "👤 Cliente:",
+      appointment.customerName,
+      "",
+      "🛠 Servicio:",
+      appointment.serviceLabel,
+      "",
+      "📍 Zona:",
+      appointment.zone || "Por confirmar",
+      "",
+      "⏳ Faltan:",
+      remaining,
+    ].join("\n");
+  }
+  return [
+    "━━━━━━━━━━━━━━━━━━━━━━",
+    "📅 HOMESTEAD · NUEVA CITA",
+    "━━━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "👤 Cliente:",
+    appointment.customerName,
+    "",
+    "🛠 Servicio:",
+    appointment.serviceLabel,
+    "",
+    "📍 Zona:",
+    appointment.zone || "Por confirmar",
+    "",
+    "📆 Fecha:",
+    formatAppointmentDay(appointment.date),
+    "",
+    "🕐 Hora:",
+    formatAppointmentClock(appointment.startTime),
+    "",
+    "📌 Estado:",
+    statusLabel(appointment.status).toUpperCase(),
+    "",
+    "📞 Contacto:",
+    alertPhone(appointment.phone) || "No registrado",
+    "",
+    "💡 Próxima acción:",
+    "Preparar visita",
+  ].join("\n");
+}
+
+export async function runAppointmentReminders(now = Date.now()) {
+  const config = appointmentReminderConfig();
+  if (!config.enabled) return { sent: 0, skipped: 0, enabled: false };
+  const appointments = listReminderAppointments();
+  let sent = 0;
+  let skipped = 0;
+  for (const item of appointments) {
+    const fresh = getAppointment(item.appointmentId);
+    if (!fresh || !reminderEligibleStatus(fresh.status)) {
+      skipped += 1;
+      continue;
+    }
+    const start = zonedLocalToUtcMs(fresh.date, fresh.startTime, config.timezone);
+    if (!Number.isFinite(start)) {
+      skipped += 1;
+      continue;
+    }
+    const remaining = start - now;
+    const due = dueReminderOffset(remaining, config.offsets);
+    if (!due) {
+      skipped += 1;
+      continue;
+    }
+    const result = await notifyAppointmentEvent(fresh.appointmentId, "REMINDER", {
+      offsetLabel: due.label,
+      remainingMs: remaining,
+    });
+    if (result.sent) sent += result.sent;
+    else skipped += 1;
+  }
+  return { sent, skipped, enabled: true, checked: appointments.length };
 }
