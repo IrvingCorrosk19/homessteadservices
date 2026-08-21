@@ -109,9 +109,9 @@ function mergeState(state: ConversationState, extracted: ConciergeAiOutput["extr
   const classifiedCurrent = classifyPhone(state.phone);
   const phone =
     classifiedIncoming.status === "VALID"
-      ? classifiedIncoming.display
+      ? classifiedIncoming.e164
       : classifiedCurrent.status === "VALID"
-        ? state.phone
+        ? classifiedCurrent.e164 || state.phone
         : "";
   return {
     ...state,
@@ -276,7 +276,7 @@ export async function conciergeTurn(input: {
     const state = mergeState(conversation.state, parsed.extracted, parsed.serviceCategory);
     if (contact.status === "VALID") {
       const classified = classifyPhone(contact.raw);
-      state.phone = classified.display;
+      state.phone = classified.e164 || classified.display;
       state.contactStatus = "VALID";
       addEvent(input.conversationId, "VALID_CONTACT");
     } else if (contact.status === "INCOMPLETE") {
@@ -334,7 +334,7 @@ export async function conciergeTurn(input: {
     let leadId = conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : "";
     const stopped = parsed.nextAction === "CLOSE" && /no te contactaremos/i.test(parsed.reply);
     if (!stopped && canCreateLead(state)) {
-      const created = createLeadFromConcierge({
+      const created = await createLeadFromConcierge({
         conversationId: input.conversationId,
         state,
         summary,

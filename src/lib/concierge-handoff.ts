@@ -1,5 +1,5 @@
 import { classifyPhone, maskPhone } from "@/lib/phone";
-import { logInfo } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 import { notifyN8n } from "@/lib/n8n";
 import { saveServiceRequest } from "@/lib/service-requests";
 import { recordLead } from "@/lib/marketing-store";
@@ -24,7 +24,7 @@ export function shouldCreateCanonicalLead() {
   return process.env.AI_CONCIERGE_CREATE_LEADS !== "false";
 }
 
-export function createLeadFromConcierge(input: {
+export async function createLeadFromConcierge(input: {
   conversationId: string;
   state: ConversationState;
   summary: string;
@@ -38,7 +38,7 @@ export function createLeadFromConcierge(input: {
   const name = input.state.name.trim() || "Cliente web";
   let service = input.state.service && input.state.service !== "unknown" ? input.state.service : "other";
   const blob = `${input.state.problem} ${input.summary}`.toLowerCase();
-  if (service === "multiple" || service === "other") {
+  if (service === "multiple" || service === "other" || service === "ac") {
     if (/pintur/.test(blob) && /repar/.test(blob)) service = "painting";
     else if (/pintur/.test(blob)) service = "painting";
     else if (/plom/.test(blob)) service = "plumbing";
@@ -57,7 +57,7 @@ export function createLeadFromConcierge(input: {
     .join("\n");
   const saved = saveServiceRequest({
     name,
-    phone: phone.display || phone.e164 || input.state.phone.trim(),
+    phone: phone.e164 || input.state.phone.trim(),
     email: input.state.email.trim() || conciergeKnowledge().email || "servicios@homestead.lat",
     property: "other",
     service: service === "unknown" ? "other" : service,
@@ -85,7 +85,12 @@ export function createLeadFromConcierge(input: {
   }
   recordLead({ publicId: saved.publicId, channel: "website_ai_concierge", outcome: "CONTACT" });
   void notifyN8n(saved);
-  void sendNewLeadAlert(saved.publicId);
+  const alert = await sendNewLeadAlert(saved.publicId);
+  if (!alert.sent) {
+    logError("TelegramLeadAlertFailed", { contentJobId: saved.publicId, stage: "send_zero" });
+  } else {
+    logInfo("TelegramLeadAlertSent", { contentJobId: saved.publicId, stage: String(alert.sent) });
+  }
   logInfo("ConciergeLeadCreated", {
     contentJobId: saved.publicId,
     stage: input.conversationId.slice(0, 8),

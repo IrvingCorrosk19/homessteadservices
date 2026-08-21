@@ -34,7 +34,7 @@ function classifyPhone(raw) {
   let national = "";
   if (digits.length === pa.nationalLength) national = digits;
   if (digits.length === pa.e164Length && digits.startsWith(pa.countryCode)) national = digits.slice(pa.countryCode.length);
-  if (national && !ALL_SAME.test(national)) return { status: "VALID", digits: `${pa.countryCode}${national}`, national };
+  if (national && !ALL_SAME.test(national)) return { status: "VALID", digits: `${pa.countryCode}${national}`, national, e164: `+${pa.countryCode}${national}` };
   if (digits.length < pa.nationalLength) return { status: "INCOMPLETE", digits };
   if (region.allowInternational && digits.length >= region.internationalMinDigits && digits.length <= region.internationalMaxDigits && !digits.startsWith(pa.countryCode)) {
     return { status: "VALID", digits };
@@ -45,7 +45,8 @@ function classifyPhone(raw) {
 
 assert("594210 incomplete", classifyPhone("594210").status === "INCOMPLETE");
 assert("678993 incomplete", classifyPhone("678993").status === "INCOMPLETE");
-assert("69594210 valid panama", classifyPhone("69594210").status === "VALID");
+assert("69594219 valid panama", classifyPhone("69594219").status === "VALID");
+assert("69594219 canonical e164", classifyPhone("69594219").e164 === "+50769594219");
 assert("+507 6959-4210 valid", classifyPhone("+507 6959-4210").status === "VALID");
 assert("international kept", classifyPhone("+14155552671").status === "VALID" && classifyPhone("+14155552671").digits.startsWith("1"));
 assert("abcdef invalid", classifyPhone("abcdef").status === "INVALID");
@@ -77,7 +78,10 @@ assert("prompt one question", /UNA pregunta/.test(prompt));
 assert("score uses validator", /classifyPhone\(input\.phone\)/.test(scoreSrc));
 assert("next action program visit", /PROGRAM_SITE_VISIT/.test(scoreSrc));
 assert("alert idempotent", /internal_alert_at IS NULL/.test(store));
-assert("n8n still used", /notifyN8n/.test(handoff));
+assert("telegram awaits send", /await sendNewLeadAlert/.test(handoff));
+assert("telegram not marked before send", /if \(lead\.internalAlertAt\)/.test(tg) && /markLeadAlerted\(leadId\)/.test(tg));
+assert("alert action copy", /Coordinar visita de evaluación/.test(tg));
+assert("alert phone national", /alertPhone/.test(tg));
 assert("country code centralized", region.regions.PA.countryCode === "507");
 
 if (failed) process.exit(1);

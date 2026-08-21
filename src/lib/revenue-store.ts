@@ -52,9 +52,14 @@ export function upsertCustomer(input: {
   const database = getHomesteadDb();
   const existing = database
     .prepare(
-      "SELECT id FROM revenue_customers WHERE phone = ? OR phone = ? OR phone = ? ORDER BY id ASC LIMIT 1",
+      "SELECT id FROM revenue_customers WHERE phone = ? OR phone = ? OR phone = ? OR phone = ? ORDER BY id ASC LIMIT 1",
     )
-    .get(digits || input.phone, national, national ? `507${national}` : digits) as { id: number } | undefined;
+    .get(
+      digits || input.phone,
+      national,
+      national ? `507${national}` : digits,
+      national ? `+507${national}` : digits,
+    ) as { id: number } | undefined;
   if (existing) {
     database
       .prepare(
@@ -72,7 +77,7 @@ export function upsertCustomer(input: {
     .run(
       nowIso(),
       input.name,
-      digits || input.phone,
+      classifyPhone(input.phone).e164 || digits || input.phone,
       input.email,
       input.location || "",
       input.source,

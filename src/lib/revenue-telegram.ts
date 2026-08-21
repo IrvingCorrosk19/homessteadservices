@@ -1,9 +1,10 @@
 import { marketingBaseline } from "@/lib/marketing-engine";
-import { contactRegion } from "@/lib/phone";
+import { contactRegion, alertPhone } from "@/lib/phone";
 import { isAutoFollowUp, isRevenueDryRun, revenueConfig } from "@/lib/revenue-score";
 import { adminChatIds, sendTelegramMessage } from "@/lib/content-telegram";
 import { customerWhatsAppUrl } from "@/lib/service-requests";
 import { contact, site } from "@/lib/site";
+import { logError, logInfo } from "@/lib/log";
 import {
   acceptQuote,
   backfillFromServiceRequests,
@@ -124,7 +125,9 @@ export type RevenueCallbackResult = {
   mutated: boolean;
 };
 
-function serviceLabel(service: string) {
+function serviceLabel(service: string, problem = "") {
+  const blob = `${service} ${problem}`.toLowerCase();
+  if (/pintur/.test(blob) && /repar/.test(blob)) return "Reparación y pintura de pared";
   const labels: Record<string, string> = {
     ac: "Aire acondicionado",
     plumbing: "Plomería",
@@ -175,7 +178,7 @@ export function formatLeadAlert(lead: NonNullable<ReturnType<typeof getLead>>) {
     lead.name || "Cliente web",
     "",
     "🛠 Servicio:",
-    serviceLabel(lead.service),
+    serviceLabel(lead.service, lead.problem),
     "",
     "📝 Necesidad:",
     lead.problem.slice(0, 280) || "Sin detalle",
@@ -184,7 +187,7 @@ export function formatLeadAlert(lead: NonNullable<ReturnType<typeof getLead>>) {
     lead.location || "No indicada",
     "",
     "📞 Contacto:",
-    lead.phone,
+    alertPhone(lead.phone),
     "",
     "🕐 Preferencia:",
     preference,
@@ -198,8 +201,8 @@ export function formatLeadAlert(lead: NonNullable<ReturnType<typeof getLead>>) {
     "📌 Estado:",
     lead.stage === "NEW" ? "Nuevo" : lead.stage,
     "",
-    "💡 Siguiente acción:",
-    lead.nextAction === "PROGRAM_SITE_VISIT" ? "Programar evaluación / contactar" : lead.nextAction,
+    "💡 Acción recomendada:",
+    lead.nextAction === "PROGRAM_SITE_VISIT" ? "Coordinar visita de evaluación" : lead.nextAction,
     "",
     "Lead:",
     lead.leadId,
@@ -264,7 +267,7 @@ function visitSummary(lead: NonNullable<ReturnType<typeof getLead>>, date: strin
     "Propuesta interna (aún no confirmada con el cliente)",
     "",
     `Cliente: ${lead.name}`,
-    `Servicio: ${serviceLabel(lead.service)}`,
+    `Servicio: ${serviceLabel(lead.service, lead.problem)}`,
     `Fecha: ${date}`,
     `Hora: ${time}`,
     `Ubicación: ${lead.location || "por confirmar"}`,
@@ -277,14 +280,31 @@ function visitSummary(lead: NonNullable<ReturnType<typeof getLead>>, date: strin
 export async function sendNewLeadAlert(leadId: string) {
   const lead = getLead(leadId);
   if (!lead) return { sent: 0 };
-  if (!markLeadAlerted(leadId)) return { sent: 0 };
+  if (lead.internalAlertAt) return { sent: 0, duplicate: true as const };
+  const chats = adminChatIds();
+  if (!chats.length) {
+    logError("TelegramLeadAlertFailed", { contentJobId: leadId, stage: "no_admin_chat" });
+    return { sent: 0 };
+  }
   const text = formatLeadAlert(lead);
   const keyboard = leadKeyboard(leadId);
   let sent = 0;
-  for (const chatId of adminChatIds()) {
-    const id = await sendTelegramMessage({ chatId, text, keyboard });
-    if (id) sent += 1;
+  for (const chatId of chats) {
+    let delivered = false;
+    for (let attempt = 0; attempt < 2 && !delivered; attempt += 1) {
+      const id = await sendTelegramMessage({ chatId, text, keyboard });
+      if (id) {
+        sent += 1;
+        delivered = true;
+      }
+    }
   }
+  if (!sent) {
+    logError("TelegramLeadAlertFailed", { contentJobId: leadId, stage: "api_zero" });
+    return { sent: 0 };
+  }
+  markLeadAlerted(leadId);
+  logInfo("TelegramLeadAlertSent", { contentJobId: leadId, stage: String(sent) });
   return { sent };
 }
 

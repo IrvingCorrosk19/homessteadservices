@@ -74,7 +74,7 @@ export function classifyPhone(raw: string): PhoneAssessment {
       digits: `${region.countryCode}${national}`,
       e164,
       national,
-      display: `+${region.countryCode} ${national}`,
+      display: e164,
     };
   }
 
@@ -103,6 +103,17 @@ export function classifyPhone(raw: string): PhoneAssessment {
   }
 
   return { status: "INVALID", digits, e164: "", national: "", display: "" };
+}
+
+export function canonicalPhone(raw: string) {
+  const assessed = classifyPhone(raw);
+  return assessed.status === "VALID" ? assessed.e164 : "";
+}
+
+export function alertPhone(raw: string) {
+  const assessed = classifyPhone(raw);
+  if (assessed.status !== "VALID") return String(raw || "").trim();
+  return assessed.national || assessed.e164;
 }
 
 export function toWhatsAppDigits(raw: string) {
