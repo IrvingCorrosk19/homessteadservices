@@ -16,6 +16,7 @@ import {
   brandedSocialSet,
   enhanceDeterministic,
   metadataOf,
+  toJpeg,
 } from "@/lib/content-images";
 import {
   analyzeAndWriteCopy,
@@ -114,11 +115,37 @@ async function renderVersion(
   }));
 
   logInfo("ImageAnalysisStarted", { contentJobId: job.publicId });
-  const analysis = await analyzeAndWriteCopy({
-    publicId: job.publicId,
-    description: job.description,
-    photos: photos.map((item) => ({ bytes: item.bytes, mime: item.mime })),
-  });
+  let analysis;
+  try {
+    analysis = await analyzeAndWriteCopy({
+      publicId: job.publicId,
+      description: job.description,
+      photos: await Promise.all(
+        photos.map(async (item) => ({ bytes: await toJpeg(item.bytes), mime: "image/jpeg" })),
+      ),
+    });
+  } catch (error) {
+    logError("ImageAnalysisFailed", {
+      contentJobId: job.publicId,
+      cause: error instanceof Error ? error.message.slice(0, 180) : "unknown",
+    });
+    analysis = {
+      serviceGuess: job.serviceType,
+      ratings: photos.map((_, index) => ({
+        index: index + 1,
+        label: (index === 0 ? "PRIMARY" : "SECONDARY") as "PRIMARY" | "SECONDARY",
+        notes: "",
+      })),
+      privacy: { people: false, plates: false, documents: false, warning: "" },
+      copy: {
+        full: job.description
+          ? `Homestead Services en Panamá.\n\n${job.description}\n\nTrabajo real, bien hecho y con seguimiento claro.\n\nAgenda tu servicio.`
+          : "Homestead Services en Panamá.\nTrabajo real de mantenimiento y reparación.\nAgenda tu servicio.",
+        cta: "Agenda tu servicio",
+        hashtags: ["#HomesteadServices", "#Panama", "#Mantenimiento"],
+      },
+    };
+  }
   logInfo("ImageAnalysisCompleted", { contentJobId: job.publicId });
 
   const version = nextVersionNumber(job.publicId);
@@ -131,11 +158,15 @@ async function renderVersion(
     const role = (rating?.label || (index === 0 ? "PRIMARY" : "SECONDARY")) as ContentAssetRole;
     if (role === "LOW_QUALITY" || role === "DUPLICATE") continue;
     logInfo("ImageEnhancementStarted", { contentJobId: job.publicId, stage: item.asset.storedFilename });
-    const ai = kind === "image" || kind === "full" ? await enhanceWithOpenAi({
-      publicId: job.publicId,
-      bytes: item.bytes,
-    }) : null;
-    const enhanced = ai || (await enhanceDeterministic(item.bytes));
+    const jpegInput = await toJpeg(item.bytes);
+    const ai =
+      kind === "image" || kind === "full"
+        ? await enhanceWithOpenAi({
+            publicId: job.publicId,
+            bytes: jpegInput,
+          })
+        : null;
+    const enhanced = ai || (await enhanceDeterministic(jpegInput));
     const meta = await metadataOf(enhanced);
     storeDerivedAsset({
       job,

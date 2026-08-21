@@ -17,6 +17,10 @@ export async function metadataOf(bytes: Buffer) {
   };
 }
 
+export async function toJpeg(bytes: Buffer) {
+  return sharp(bytes).rotate().jpeg({ quality: 92, mozjpeg: true }).toBuffer();
+}
+
 export async function enhanceDeterministic(bytes: Buffer) {
   return sharp(bytes)
     .rotate()
