@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import Database from "better-sqlite3";
 import { storedPhotoName, type SniffedImage } from "@/lib/photos";
+import { toWhatsAppDigits } from "@/lib/phone";
 import {
   isRequestStatus,
   PUBLIC_ID_PATTERN,
@@ -478,7 +479,32 @@ function migrateRevenueEngine(database: Database.Database) {
       year INTEGER PRIMARY KEY,
       last INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS revenue_operator_pending (
+      chat_id TEXT PRIMARY KEY,
+      lead_id TEXT NOT NULL,
+      expect TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
+  migrateLeadHandoff(database);
+}
+
+function migrateLeadHandoff(database: Database.Database) {
+  const leadCols = columnNames(database, "revenue_leads");
+  const addLead = (name: string, ddl: string) => {
+    if (!leadCols.includes(name)) database.exec(`ALTER TABLE revenue_leads ADD COLUMN ${ddl}`);
+  };
+  addLead("phone_normalized", "phone_normalized TEXT NOT NULL DEFAULT ''");
+  addLead("preferred_date", "preferred_date TEXT NOT NULL DEFAULT ''");
+  addLead("preferred_time_window", "preferred_time_window TEXT NOT NULL DEFAULT ''");
+  addLead("contact_captured_at", "contact_captured_at TEXT");
+  addLead("lead_created_at", "lead_created_at TEXT");
+  addLead("internal_alert_at", "internal_alert_at TEXT");
+  addLead("first_human_action_at", "first_human_action_at TEXT");
+  addLead("visit_proposed_at", "visit_proposed_at TEXT");
+  addLead("visit_confirmed_at", "visit_confirmed_at TEXT");
+  addLead("hot_reminded_at", "hot_reminded_at TEXT");
+  addLead("pending_operator", "pending_operator TEXT NOT NULL DEFAULT ''");
 }
 
 export function getHomesteadDb() {
@@ -648,13 +674,8 @@ export function readStoredPhoto(publicId: string, storedAs: string) {
 }
 
 export function customerWhatsAppUrl(phone: string, message?: string) {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length < 7) return null;
-  const intl = digits.startsWith("507")
-    ? digits
-    : digits.length === 8
-      ? `507${digits}`
-      : digits;
+  const intl = toWhatsAppDigits(phone);
+  if (!intl) return null;
   const text = message ? `?text=${encodeURIComponent(message)}` : "";
   return `https://wa.me/${intl}${text}`;
 }

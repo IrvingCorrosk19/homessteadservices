@@ -1,4 +1,5 @@
 import config from "@/data/revenue-engine.json";
+import { classifyPhone } from "@/lib/phone";
 
 export const revenueConfig = config;
 
@@ -37,14 +38,18 @@ const URGENCY = /urgente|hoy|ya no sirve|se inund|chispa|no enfría nada/i;
 const TIMING = /mañana|tarde|después de|fin de semana|esta semana/i;
 const LOC = /betania|san francisco|bella vista|paitilla|vía españa|panamá|tocumen|chorrera|corriente|zona/i;
 
+const SITE_VISIT_SERVICES = new Set(["painting", "repairs", "remodeling", "ac"]);
+
 export function homesteadLeadScore(input: ScoreInput) {
   const w = revenueConfig.scoreWeights;
+  const minChars = w.problemSpecificMinChars ?? 20;
   let score = 0;
   if (input.service && input.service !== "other") score += w.serviceIdentified;
-  if ((input.problem || "").trim().length >= 40) score += w.problemSpecific;
+  if ((input.problem || "").trim().length >= minChars) score += w.problemSpecific;
   if (VISIT.test(input.problem)) score += w.requestedVisitOrQuote;
-  if ((input.phone || "").replace(/\D/g, "").length >= 7) score += w.providedPhone;
+  if (classifyPhone(input.phone).status === "VALID") score += w.providedPhone;
   if (input.location || LOC.test(input.problem)) score += w.providedLocation;
+  if (SITE_VISIT_SERVICES.has(input.service)) score += w.siteVisitCategory ?? 0;
   if (input.photoCount > 0) score += w.providedPhotos;
   if (TIMING.test(input.problem)) score += w.desiredTiming;
   if (URGENCY.test(input.problem)) score += w.urgency;
@@ -68,9 +73,10 @@ export function inboxToPipeline(status: string): PipelineStage {
   return "NEW";
 }
 
-export function nextActionFor(stage: PipelineStage, temperature: string, doNotContact: boolean) {
+export function nextActionFor(stage: PipelineStage, temperature: string, doNotContact: boolean, service = "") {
   if (doNotContact) return "NO_ACTION";
   if (stage === "LOST" || stage === "CANCELLED" || stage === "WON") return "NO_ACTION";
+  if ((stage === "NEW" || stage === "QUALIFIED") && SITE_VISIT_SERVICES.has(service)) return "PROGRAM_SITE_VISIT";
   if (temperature === "HOT" && (stage === "NEW" || stage === "QUALIFIED")) return "CONTACT_HOT_LEAD";
   if (stage === "QUOTE_SENT" || stage === "NEGOTIATION") return "FOLLOW_UP_QUOTE";
   if (stage === "QUOTE_PREPARATION" || stage === "SITE_VISIT_NEEDED") return "PREPARE_QUOTE";

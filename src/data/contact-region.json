@@ -1,0 +1,15 @@
+{
+  "defaultRegion": "PA",
+  "allowInternational": true,
+  "internationalMinDigits": 10,
+  "internationalMaxDigits": 15,
+  "hotLeadAttentionMinutes": 30,
+  "regions": {
+    "PA": {
+      "label": "Panamá",
+      "countryCode": "507",
+      "nationalLength": 8,
+      "e164Length": 11
+    }
+  }
+}

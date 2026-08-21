@@ -15,6 +15,7 @@ export type ConversationState = {
   funnelStage: string;
   leadTemperature: string;
   photoCount: number;
+  contactStatus: "UNKNOWN" | "INCOMPLETE" | "INVALID" | "VALID";
 };
 
 const emptyState = (): ConversationState => ({
@@ -28,6 +29,7 @@ const emptyState = (): ConversationState => ({
   funnelStage: "DISCOVERY",
   leadTemperature: "COLD",
   photoCount: 0,
+  contactStatus: "UNKNOWN",
 });
 
 export function hashIp(ip: string) {

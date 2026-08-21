@@ -20,7 +20,9 @@ function assert(name, ok) {
 assert("no openai in widget", !/api\.openai\.com|OPENAI_API_KEY/.test(widget));
 assert("openai only server", /api\.openai\.com/.test(engine));
 assert("kill switch", /AI_CONCIERGE_ENABLED/.test(engine));
-assert("dry run", /AI_CONCIERGE_DRY_RUN/.test(engine));
+assert("dry run flag kept", /AI_CONCIERGE_DRY_RUN/.test(engine));
+assert("valid contact gate", /canHandoffLead|canCreateLead/.test(engine));
+assert("no 7-digit name gate", !/digits\.length >= 7/.test(engine));
 assert("no chatbot label", !/Chatbot|AI Assistant|GPT-4/.test(widget));
 assert("prompt forbids prices", /NUNCA inventes precios/.test(prompt));
 assert("prompt forbids diagnosis", /capacitor/.test(prompt));

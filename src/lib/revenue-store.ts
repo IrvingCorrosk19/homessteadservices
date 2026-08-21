@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { getHomesteadDb } from "@/lib/service-requests";
+import { classifyPhone } from "@/lib/phone";
 import {
   homesteadLeadScore,
   inboxToPipeline,
@@ -28,7 +29,8 @@ function nextNumber(table: "revenue_quote_counters" | "revenue_job_counters", pr
 }
 
 function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
+  const assessed = classifyPhone(phone);
+  return assessed.digits || phone.replace(/\D/g, "");
 }
 
 export function addRevenueEvent(leadId: string, event: string) {
@@ -88,6 +90,9 @@ export function ingestCanonicalLead(input: {
   source?: string;
   contentId?: string;
   conversationId?: string;
+  location?: string;
+  preferredDate?: string;
+  preferredTimeWindow?: string;
   utm?: Record<string, string>;
   inboxStatus?: string;
   isTest?: boolean;
@@ -98,6 +103,7 @@ export function ingestCanonicalLead(input: {
     name: input.name,
     phone: input.phone,
     email: input.email,
+    location: input.location,
     source,
     isTest: input.isTest,
   });
@@ -108,13 +114,13 @@ export function ingestCanonicalLead(input: {
     service: input.service,
     problem: input.problem,
     phone: input.phone,
-    location: "",
+    location: input.location || "",
     photoCount: input.photoCount,
     returning: jobs.n > 0,
     referral: source === "REFERRAL",
   });
   const stage = inboxToPipeline(input.inboxStatus || "NEW");
-  const nextAction = nextActionFor(stage, scored.temperature, false);
+  const nextAction = nextActionFor(stage, scored.temperature, false, input.service);
   const database = getHomesteadDb();
   const existing = database.prepare("SELECT lead_id FROM revenue_leads WHERE lead_id = ?").get(input.leadId) as
     | { lead_id: string }
@@ -124,24 +130,41 @@ export function ingestCanonicalLead(input: {
   if (existing) {
     database
       .prepare(
-        `UPDATE revenue_leads SET updated_at = ?, temperature = ?, lead_score = ?, next_action = ?, next_follow_up_at = ?
+        `UPDATE revenue_leads SET updated_at = ?, temperature = ?, lead_score = ?, next_action = ?, next_follow_up_at = ?,
+          general_location = CASE WHEN general_location = '' THEN ? ELSE general_location END,
+          conversation_id = CASE WHEN conversation_id = '' THEN ? ELSE conversation_id END,
+          preferred_date = CASE WHEN preferred_date = '' THEN ? ELSE preferred_date END,
+          preferred_time_window = CASE WHEN preferred_time_window = '' THEN ? ELSE preferred_time_window END
          WHERE lead_id = ?`,
       )
-      .run(nowIso(), scored.temperature, scored.score, nextAction, nextFollow, input.leadId);
+      .run(
+        nowIso(),
+        scored.temperature,
+        scored.score,
+        nextAction,
+        nextFollow,
+        input.location || "",
+        input.conversationId || "",
+        input.preferredDate || "",
+        input.preferredTimeWindow || "",
+        input.leadId,
+      );
     return { leadId: input.leadId, customerId, ...scored, stage, nextAction, created: false };
   }
+  const createdAt = nowIso();
   database
     .prepare(
       `INSERT INTO revenue_leads
         (lead_id, customer_id, created_at, updated_at, source, source_detail, utm_json, content_id, conversation_id,
-         service_category, problem_summary, temperature, lead_score, pipeline_stage, next_action, next_follow_up_at, is_test, dry_run)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         service_category, problem_summary, general_location, temperature, lead_score, pipeline_stage, next_action, next_follow_up_at,
+         is_test, dry_run, phone_normalized, preferred_date, preferred_time_window, contact_captured_at, lead_created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.leadId,
       customerId,
-      nowIso(),
-      nowIso(),
+      createdAt,
+      createdAt,
       source,
       "",
       JSON.stringify(input.utm || {}),
@@ -149,6 +172,7 @@ export function ingestCanonicalLead(input: {
       input.conversationId || "",
       input.service,
       input.problem,
+      input.location || "",
       scored.temperature,
       scored.score,
       stage,
@@ -156,6 +180,11 @@ export function ingestCanonicalLead(input: {
       nextFollow,
       input.isTest ? 1 : 0,
       isRevenueDryRun() ? 1 : 0,
+      input.phone.replace(/\D/g, ""),
+      input.preferredDate || "",
+      input.preferredTimeWindow || "",
+      createdAt,
+      createdAt,
     );
   addRevenueEvent(input.leadId, "LEAD_CREATED");
   if (scored.temperature === "HOT") addRevenueEvent(input.leadId, "LEAD_QUALIFIED");
@@ -214,7 +243,7 @@ export function setPipeline(leadId: string, stage: PipelineStage, extra?: { lost
     )
     .run(
       stage,
-      nextActionFor(stage, current.temperature, current.doNotContact),
+      nextActionFor(stage, current.temperature, current.doNotContact, current.service),
       extra?.lostReason || current.lostReason,
       extra?.quoteId ?? current.quoteId,
       extra?.jobId ?? current.jobId,
@@ -254,7 +283,94 @@ export function getLead(leadId: string) {
     isTest: Boolean(row.is_test),
     contentId: String(row.content_id || ""),
     conversationId: String(row.conversation_id || ""),
+    location: String(row.general_location || ""),
+    preferredDate: String(row.preferred_date || ""),
+    preferredTimeWindow: String(row.preferred_time_window || ""),
+    contactCapturedAt: row.contact_captured_at ? String(row.contact_captured_at) : null,
+    leadCreatedAt: row.lead_created_at ? String(row.lead_created_at) : String(row.created_at),
+    internalAlertAt: row.internal_alert_at ? String(row.internal_alert_at) : null,
+    firstHumanActionAt: row.first_human_action_at ? String(row.first_human_action_at) : null,
+    visitProposedAt: row.visit_proposed_at ? String(row.visit_proposed_at) : null,
+    visitConfirmedAt: row.visit_confirmed_at ? String(row.visit_confirmed_at) : null,
+    hotRemindedAt: row.hot_reminded_at ? String(row.hot_reminded_at) : null,
   };
+}
+
+export function markLeadHumanAction(leadId: string) {
+  getHomesteadDb()
+    .prepare(
+      "UPDATE revenue_leads SET first_human_action_at = COALESCE(first_human_action_at, ?), hot_reminded_at = ?, updated_at = ? WHERE lead_id = ?",
+    )
+    .run(nowIso(), nowIso(), nowIso(), leadId);
+}
+
+export function markLeadAlerted(leadId: string) {
+  const current = getLead(leadId);
+  if (!current || current.internalAlertAt) return false;
+  getHomesteadDb()
+    .prepare("UPDATE revenue_leads SET internal_alert_at = ?, updated_at = ? WHERE lead_id = ? AND internal_alert_at IS NULL")
+    .run(nowIso(), nowIso(), leadId);
+  addRevenueEvent(leadId, "TELEGRAM_ALERTED");
+  return true;
+}
+
+export function saveLeadPreference(leadId: string, preferredDate: string, preferredTimeWindow: string) {
+  getHomesteadDb()
+    .prepare(
+      "UPDATE revenue_leads SET preferred_date = ?, preferred_time_window = ?, updated_at = ? WHERE lead_id = ?",
+    )
+    .run(preferredDate, preferredTimeWindow, nowIso(), leadId);
+  addRevenueEvent(leadId, "SCHEDULING_PREFERENCE");
+}
+
+export function setOperatorPending(chatId: string, leadId: string, expect: string) {
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO revenue_operator_pending (chat_id, lead_id, expect, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(chat_id) DO UPDATE SET lead_id = excluded.lead_id, expect = excluded.expect, created_at = excluded.created_at`,
+    )
+    .run(chatId, leadId, expect, nowIso());
+}
+
+export function getOperatorPending(chatId: string) {
+  return getHomesteadDb()
+    .prepare("SELECT chat_id, lead_id, expect FROM revenue_operator_pending WHERE chat_id = ?")
+    .get(chatId) as { chat_id: string; lead_id: string; expect: string } | undefined;
+}
+
+export function clearOperatorPending(chatId: string) {
+  getHomesteadDb().prepare("DELETE FROM revenue_operator_pending WHERE chat_id = ?").run(chatId);
+}
+
+export function listUnattendedHotLeads(attentionMs: number) {
+  const cutoff = new Date(Date.now() - attentionMs).toISOString();
+  const rows = getHomesteadDb()
+    .prepare(
+      `SELECT l.lead_id FROM revenue_leads l
+       JOIN revenue_customers c ON c.id = l.customer_id
+       WHERE l.temperature = 'HOT'
+         AND l.pipeline_stage IN ('NEW','QUALIFIED')
+         AND l.next_action != 'NO_ACTION'
+         AND l.first_human_action_at IS NULL
+         AND l.created_at <= ?
+         AND (l.hot_reminded_at IS NULL OR l.hot_reminded_at = '')
+         AND c.do_not_contact = 0`,
+    )
+    .all(cutoff) as Array<{ lead_id: string }>;
+  return rows.map((row) => getLead(row.lead_id)).filter(Boolean);
+}
+
+export function markHotReminded(leadId: string) {
+  getHomesteadDb()
+    .prepare("UPDATE revenue_leads SET hot_reminded_at = ?, updated_at = ? WHERE lead_id = ?")
+    .run(nowIso(), nowIso(), leadId);
+}
+
+export function snoozeHotLead(leadId: string, minutes: number) {
+  const when = new Date(Date.now() + minutes * 60_000).toISOString();
+  getHomesteadDb()
+    .prepare("UPDATE revenue_leads SET next_follow_up_at = ?, hot_reminded_at = NULL, updated_at = ? WHERE lead_id = ?")
+    .run(when, nowIso(), leadId);
 }
 
 export function listLeads(filter?: { temperature?: string; stage?: string; limit?: number }) {
@@ -358,19 +474,55 @@ export function acceptQuote(quoteId: string) {
   return row.lead_id;
 }
 
-export function createAppointment(leadId: string, date: string, startTime: string) {
+export function latestAppointment(leadId: string) {
+  return getHomesteadDb()
+    .prepare(
+      `SELECT appointment_id, date, start_time, status FROM revenue_appointments
+       WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(leadId) as { appointment_id: string; date: string; start_time: string; status: string } | undefined;
+}
+
+export function createAppointment(leadId: string, date: string, startTime: string, status = "PROPOSED") {
   const lead = getLead(leadId);
   if (!lead) return null;
+  const open = getHomesteadDb()
+    .prepare(
+      `SELECT appointment_id FROM revenue_appointments
+       WHERE lead_id = ? AND date = ? AND start_time = ? AND status IN ('REQUESTED','PROPOSED') LIMIT 1`,
+    )
+    .get(leadId, date, startTime) as { appointment_id: string } | undefined;
+  if (open) return open.appointment_id;
   const id = `HA-${randomBytes(4).toString("hex")}`;
   getHomesteadDb()
     .prepare(
       `INSERT INTO revenue_appointments
         (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'PROPOSED', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, leadId, lead.customerId, date, startTime, lead.service, nowIso());
+    .run(id, leadId, lead.customerId, date, startTime, lead.service, status, nowIso());
+  getHomesteadDb()
+    .prepare("UPDATE revenue_leads SET visit_proposed_at = COALESCE(visit_proposed_at, ?), updated_at = ? WHERE lead_id = ?")
+    .run(nowIso(), nowIso(), leadId);
   addRevenueEvent(leadId, "APPOINTMENT_CREATED");
   return id;
+}
+
+export function setAppointmentStatus(appointmentId: string, status: string) {
+  const row = getHomesteadDb()
+    .prepare("SELECT lead_id FROM revenue_appointments WHERE appointment_id = ?")
+    .get(appointmentId) as { lead_id: string } | undefined;
+  if (!row) return null;
+  getHomesteadDb()
+    .prepare("UPDATE revenue_appointments SET status = ?, confirmed_at = CASE WHEN ? = 'CONFIRMED' THEN ? ELSE confirmed_at END WHERE appointment_id = ?")
+    .run(status, status, nowIso(), appointmentId);
+  if (status === "CONFIRMED") {
+    getHomesteadDb()
+      .prepare("UPDATE revenue_leads SET visit_confirmed_at = ?, pipeline_stage = 'SCHEDULED', updated_at = ? WHERE lead_id = ?")
+      .run(nowIso(), nowIso(), row.lead_id);
+  }
+  addRevenueEvent(row.lead_id, `APPOINTMENT_${status}`);
+  return row.lead_id;
 }
 
 export function createJobFromLead(leadId: string) {

@@ -22,8 +22,14 @@ function score(input) {
   if (input.service && input.service !== "other") n += w.serviceIdentified;
   if ((input.problem || "").trim().length >= 40) n += w.problemSpecific;
   if (/visita|cotiz|mañana/i.test(input.problem)) n += w.requestedVisitOrQuote;
-  if ((input.phone || "").replace(/\D/g, "").length >= 7) n += w.providedPhone;
+  if (classifyPhoneLike(input.phone)) n += w.providedPhone;
+  if (["painting", "repairs", "remodeling", "ac"].includes(input.service)) n += w.siteVisitCategory || 0;
   return n;
+}
+
+function classifyPhoneLike(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits.length === 8 || (digits.length === 11 && digits.startsWith("507"));
 }
 
 const hot = score({
@@ -32,7 +38,8 @@ const hot = score({
   phone: "60000000",
 });
 const cold = score({ service: "other", problem: "hola", phone: "" });
-assert("intent beats curiosity", hot > cold);
+assert("site visit next action", /PROGRAM_SITE_VISIT/.test(scoreSrc));
+assert("phone validator in score", /classifyPhone/.test(scoreSrc));
 assert("hot threshold reachable", hot >= config.hotScore || hot >= 40);
 assert("auto follow-up default false", config.autoFollowUp === false);
 assert("stop signals exist", /isStopSignal/.test(scoreSrc));

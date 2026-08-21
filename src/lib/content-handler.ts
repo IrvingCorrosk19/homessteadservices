@@ -125,7 +125,8 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     }
     if (callback.data.startsWith("rv:")) {
       const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
-      await sendTelegramMessage({ chatId, text: applyRevenueCallback(callback.data) });
+      const result = applyRevenueCallback(callback.data, chatId);
+      await sendTelegramMessage({ chatId, text: result.text, keyboard: result.keyboard });
       return { ok: true };
     }
     const parsed = parseCallback(callback.data);
@@ -290,6 +291,15 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       await sendTelegramMessage({ chatId, text: "No autorizado." });
     }
     return { ok: true, denied: true };
+  }
+
+  if (text && !text.startsWith("/")) {
+    const { consumeOperatorDate } = await import("@/lib/revenue-telegram");
+    const consumed = consumeOperatorDate(chatId, text);
+    if (consumed) {
+      await sendTelegramMessage({ chatId, text: consumed.text, keyboard: consumed.keyboard });
+      return { ok: true };
+    }
   }
 
   if (text === "/pendientes" || text.startsWith("/pendientes@")) {

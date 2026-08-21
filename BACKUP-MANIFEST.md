@@ -1,3 +1,26 @@
+# BACKUP MANIFEST — pre Chat → Lead → Telegram handoff
+
+DATE: 2026-08-20T22:11 America/Panama
+
+PRE_CHANGE_BACKUP = PASS
+
+## Git
+
+- HEAD (freeze): `e1e9367c77956cbecd92412875c8696f74513b9a`
+- COMMIT: `chore(backup): checkpoint before chat-lead-telegram handoff`
+- BRANCH: `backup/pre-chat-lead-handoff-20260820-2211`
+- TAG: `pre-chat-lead-handoff-20260820-2211`
+
+Restore: `git checkout pre-chat-lead-handoff-20260820-2211`
+
+## VPS
+
+- `/opt/backups/pre-chat-lead-handoff-20260820-2214/`
+- SQLite integrity: ok
+- n8n workflows: not modified (no dump required)
+
+---
+
 # BACKUP MANIFEST — pre Revenue Growth Engine
 
 DATE: 2026-08-20T21:47 America/Panama

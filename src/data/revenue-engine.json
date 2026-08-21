@@ -15,7 +15,9 @@
     "desiredTiming": 12,
     "urgency": 15,
     "returningCustomer": 18,
-    "referral": 12
+    "referral": 12,
+    "siteVisitCategory": 15,
+    "problemSpecificMinChars": 20
   },
   "businessHours": { "start": "08:00", "end": "22:00", "timezone": "America/Panama" },
   "maintenanceIntervalsDays": {

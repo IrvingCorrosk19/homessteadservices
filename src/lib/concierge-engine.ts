@@ -14,11 +14,22 @@ import {
   tryBeginTurn,
   type ConversationState,
 } from "@/lib/concierge-store";
-import { notifyN8n } from "@/lib/n8n";
-import { saveServiceRequest } from "@/lib/service-requests";
-import { recordLead } from "@/lib/marketing-store";
+import {
+  assessUserContact,
+  incompleteContactReply,
+  invalidContactReply,
+  isPassiveClose,
+  looksLikeSchedulingPreference,
+  parseVisitPreference,
+  preferenceAckReply,
+  shouldStopCommercial,
+  visitPreferenceReply,
+} from "@/lib/concierge-contact";
+import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
+import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
+import { saveLeadPreference } from "@/lib/revenue-store";
 import { whatsappHref } from "@/lib/site";
-import { logError, logInfo } from "@/lib/log";
+import { logError } from "@/lib/log";
 import type { SniffedImage } from "@/lib/photos";
 
 const SAFETY_RE = /chispa|humo|olor a quemado|electroc|incendio|gas(olina)?\s*(fug|olor)/i;
@@ -91,59 +102,37 @@ async function completeJson(messages: Array<{ role: string; content: unknown }>)
 }
 
 function mergeState(state: ConversationState, extracted: ConciergeAiOutput["extracted"], service: string) {
+  const nextService = service && service !== "unknown" ? service : state.service;
+  let name = extracted.name || state.name;
+  if (looksLikePhoneAttempt(name)) name = state.name;
+  const classifiedIncoming = classifyPhone(extracted.phone || "");
+  const classifiedCurrent = classifyPhone(state.phone);
+  const phone =
+    classifiedIncoming.status === "VALID"
+      ? classifiedIncoming.display
+      : classifiedCurrent.status === "VALID"
+        ? state.phone
+        : "";
   return {
     ...state,
-    service: state.service || (service === "unknown" ? "" : service),
+    service: nextService,
     problem: extracted.problemSummary || state.problem,
     location: extracted.location || state.location,
-    name: extracted.name || state.name,
-    phone: extracted.phone || state.phone,
+    name,
+    phone,
     email: extracted.email || state.email,
     preferredTime: extracted.preferredTime || state.preferredTime,
+    contactStatus:
+      classifiedIncoming.status === "VALID" || classifiedCurrent.status === "VALID"
+        ? ("VALID" as const)
+        : classifiedIncoming.status !== "UNKNOWN"
+          ? classifiedIncoming.status
+          : state.contactStatus || "UNKNOWN",
   };
 }
 
-function canCreateLead(state: ConversationState) {
-  const digits = state.phone.replace(/\D/g, "");
-  return Boolean(state.name.trim() && digits.length >= 7 && (state.problem || state.service));
-}
-
-function createLeadIfNeeded(conversationId: string, dryRun: boolean, state: ConversationState, summary: string) {
-  const current = getConversation(conversationId);
-  if (!current || current.leadPublicId) return current?.leadPublicId || "";
-  if (!canCreateLead(state)) return "";
-  if (dryRun) {
-    const fake = `DRY-${conversationId.slice(0, 8)}`;
-    touchConversation(conversationId, { leadPublicId: fake, state });
-    addEvent(conversationId, "LEAD_CREATED");
-    return fake;
-  }
-  const service = state.service && state.service !== "unknown" ? state.service : "other";
-  const location = state.location ? `Zona: ${state.location}. ` : "";
-  const when = state.preferredTime ? `Preferencia de horario: ${state.preferredTime}. ` : "";
-  const message = [
-    "[Asistente web Homestead]",
-    summary || state.problem,
-    location + when,
-    `Servicio: ${service}.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const saved = saveServiceRequest({
-    name: state.name.trim(),
-    phone: state.phone.trim(),
-    email: state.email.trim() || conciergeKnowledge().email || "servicios@homestead.lat",
-    property: "other",
-    service: service === "unknown" ? "other" : service,
-    message,
-    photos: [],
-  });
-  touchConversation(conversationId, { leadPublicId: saved.publicId, state });
-  addEvent(conversationId, "LEAD_CREATED");
-  recordLead({ publicId: saved.publicId, channel: "website_ai_concierge", outcome: "CONTACT" });
-  void notifyN8n(saved);
-  logInfo("ConciergeLeadCreated", { contentJobId: saved.publicId, stage: conversationId.slice(0, 8) });
-  return saved.publicId;
+export function canCreateLead(state: ConversationState) {
+  return canHandoffLead(state);
 }
 
 export async function conciergeTurn(input: {
@@ -277,9 +266,60 @@ export async function conciergeTurn(input: {
 
     const priced = stripHallucinatedPrices(parsed.reply);
     parsed.reply = priced.text;
+    if (looksLikePhoneAttempt(text)) {
+      parsed.extracted.phone = text;
+    }
+    const contact = assessUserContact(text, parsed.extracted.phone);
+    if (looksLikePhoneAttempt(text) || contact.status !== "UNKNOWN") {
+      addEvent(input.conversationId, "CONTACT_VALIDATION_ATTEMPT");
+    }
     const state = mergeState(conversation.state, parsed.extracted, parsed.serviceCategory);
+    if (contact.status === "VALID") {
+      const classified = classifyPhone(contact.raw);
+      state.phone = classified.display;
+      state.contactStatus = "VALID";
+      addEvent(input.conversationId, "VALID_CONTACT");
+    } else if (contact.status === "INCOMPLETE") {
+      state.contactStatus = "INCOMPLETE";
+      addEvent(input.conversationId, "INVALID_CONTACT");
+    } else if (contact.status === "INVALID") {
+      state.contactStatus = "INVALID";
+      addEvent(input.conversationId, "INVALID_CONTACT");
+    }
+    if (!conversation.state.service && state.service && state.service !== "unknown") {
+      addEvent(input.conversationId, "SERVICE_IDENTIFIED");
+    }
+    if (!conversation.state.location && state.location) addEvent(input.conversationId, "LOCATION_CAPTURED");
     state.funnelStage = parsed.funnelStage;
     state.leadTemperature = parsed.leadTemperature;
+
+    if (shouldStopCommercial(text)) {
+      parsed.reply =
+        "Queda anotado: no te contactaremos. Si más adelante quieres retomar un servicio de Homestead, aquí estamos.";
+      parsed.nextAction = "CLOSE";
+      parsed.quickReplies = [];
+      state.funnelStage = "ABANDONED";
+      if (conversation.leadPublicId) stopLeadIfPresent(conversation.leadPublicId);
+      addEvent(input.conversationId, "STOP_SIGNAL");
+    } else if (contact.status === "INCOMPLETE") {
+      parsed.reply = incompleteContactReply();
+      parsed.nextAction = "ASK_COMPLETE_CONTACT";
+      parsed.funnelStage = "CONTACT_PENDING";
+      parsed.quickReplies = [];
+      state.funnelStage = "CONTACT_PENDING";
+    } else if (contact.status === "INVALID") {
+      parsed.reply = invalidContactReply();
+      parsed.nextAction = "ASK_COMPLETE_CONTACT";
+      parsed.quickReplies = [];
+      state.funnelStage = "CONTACT_PENDING";
+    } else if (looksLikeSchedulingPreference(text) && (conversation.leadPublicId || canCreateLead(state))) {
+      const pref = parseVisitPreference(text);
+      state.preferredTime = pref.preferredTimeWindow || text;
+      parsed.reply = preferenceAckReply(state.preferredTime);
+      parsed.nextAction = "ASK_VISIT_PREFERENCE";
+      parsed.quickReplies = [];
+    }
+
     const summary =
       [
         state.problem && `Necesidad: ${state.problem}`,
@@ -291,17 +331,36 @@ export async function conciergeTurn(input: {
         .filter(Boolean)
         .join(". ") || conversation.summary;
 
-    let leadId = conversation.leadPublicId;
-    const wantsLead =
-      parsed.nextAction === "CREATE_LEAD" ||
-      parsed.nextAction === "OFFER_WHATSAPP" ||
-      parsed.nextAction === "ESCALATE_HUMAN" ||
-      parsed.funnelStage === "LEAD_CREATED" ||
-      parsed.funnelStage === "HANDOFF";
-    if (wantsLead || (parsed.shouldAskContact && canCreateLead(state))) {
-      if (canCreateLead(state)) {
-        leadId = createLeadIfNeeded(input.conversationId, isConciergeDryRun(), state, summary);
+    let leadId = conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : "";
+    const stopped = parsed.nextAction === "CLOSE" && /no te contactaremos/i.test(parsed.reply);
+    if (!stopped && canCreateLead(state)) {
+      const created = createLeadFromConcierge({
+        conversationId: input.conversationId,
+        state,
+        summary,
+        existingLeadId: leadId,
+        utm: conversation.utm,
+      });
+      if (created && created !== leadId) {
+        addEvent(input.conversationId, "LEAD_CREATED");
+        state.funnelStage = "LEAD_CREATED";
       }
+      leadId = created || leadId;
+      if (leadId && state.preferredTime) {
+        saveLeadPreference(leadId, parseVisitPreference(state.preferredTime).preferredDate, state.preferredTime);
+      }
+      if (leadId && contact.status === "VALID" && !looksLikeSchedulingPreference(text) && !stopped) {
+        parsed.reply = visitPreferenceReply(state);
+        parsed.nextAction = "ASK_VISIT_PREFERENCE";
+        parsed.quickReplies = [];
+      }
+    }
+
+    if (isPassiveClose(parsed.reply) && canCreateLead(state)) {
+      parsed.reply = visitPreferenceReply(state);
+      parsed.nextAction = "ASK_VISIT_PREFERENCE";
+    } else if (isPassiveClose(parsed.reply) && (contact.status === "INCOMPLETE" || state.contactStatus === "INCOMPLETE")) {
+      parsed.reply = incompleteContactReply();
     }
 
     touchConversation(input.conversationId, { state, summary, leadPublicId: leadId });
@@ -318,7 +377,7 @@ export async function conciergeTurn(input: {
       chips: parsed.quickReplies,
       nextAction: parsed.nextAction,
       leadId: leadId && !leadId.startsWith("DRY-") ? leadId : null,
-      dryLead: Boolean(leadId?.startsWith("DRY-")),
+      dryLead: false,
       whatsappUrl: parsed.shouldOfferWhatsApp || parsed.nextAction === "OFFER_WHATSAPP" ? wa : null,
       contactUrl: "/contact",
       ended: parsed.nextAction === "CLOSE",
