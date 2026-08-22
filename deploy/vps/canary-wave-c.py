@@ -91,6 +91,28 @@ def next_hj(con):
     return f"HJ-{year}-{last:06d}"
 
 
+def unique_slot(con, stamp):
+    day = 1 + (stamp % 27)
+    hour = 8 + (stamp % 10)
+    minute = (stamp % 4) * 15
+    date = f"2026-11-{day:02d}"
+    start = f"{hour:02d}:{minute:02d}"
+    while con.execute(
+        "SELECT 1 FROM revenue_appointments WHERE date=? AND start_time=? AND status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED')",
+        (date, start),
+    ).fetchone():
+        minute += 15
+        if minute >= 60:
+            minute = 0
+            hour += 1
+        if hour >= 20:
+            hour = 8
+            day = 1 if day >= 27 else day + 1
+        date = f"2026-11-{day:02d}"
+        start = f"{hour:02d}:{minute:02d}"
+    return date, start
+
+
 def seed_job(con, suffix, email="canary-wave-c@homestead.lat"):
     now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
     stamp = int(time.time() * 1000) % 100000000
@@ -113,10 +135,11 @@ def seed_job(con, suffix, email="canary-wave-c@homestead.lat"):
         "INSERT INTO revenue_leads (lead_id, customer_id, created_at, updated_at, source, service_category, problem_summary, temperature, lead_score, pipeline_stage, next_action, is_test) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)",
         (lead, cust, now, now, "WAVE-C", "ac", "aire no enfria WAVE-C-TEST", "HOT", 80, "SCHEDULED", "VISIT"),
     )
-    appt = f"HA-{stamp:08x}"[:11]
+    appt = f"HA-c{suffix.lower()}{stamp:08x}"[:16]
+    date, start = unique_slot(con, stamp)
     con.execute(
         "INSERT INTO revenue_appointments (appointment_id, lead_id, job_id, customer_id, date, start_time, service, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-        (appt, lead, "", cust, "2026-12-15", "11:00", "ac", "CONFIRMED", now),
+        (appt, lead, "", cust, date, start, "ac", "CONFIRMED", now),
     )
     job = next_hj(con)
     con.execute(
