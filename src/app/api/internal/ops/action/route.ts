@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const entityId = String(payload.entityId || "");
   if (action === "tick") {
     const ops = runOpsEngine();
-    const drain = await drainAutomationOutbox();
+    const drain = await drainAutomationOutbox(24);
     return NextResponse.json({ ok: true, ops, drain });
   }
   if (action === "brief") {

@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       });
     }
     try {
-      await drainAutomationOutbox();
+      await drainAutomationOutbox(24);
     } catch (error) {
       logError("AutomationDispatchFailed", {
         cause: error instanceof Error ? error.name : "unknown",

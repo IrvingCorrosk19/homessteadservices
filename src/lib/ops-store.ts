@@ -234,7 +234,11 @@ export function isRescueEligible(leadId: string, attentionMs: number) {
     (lead.problem || "").trim().length >= 20;
   if (!hasIntent) return false;
   const activity = lastActivityIso(leadId, row.conversation_id, row.updated_at || row.created_at);
-  return Date.parse(activity) <= Date.now() - attentionMs;
+  const activityMs = Date.parse(activity);
+  if (!Number.isFinite(activityMs)) return false;
+  const lookbackMs = opsConfig().rescueLookbackHours * 3600_000;
+  if (activityMs < Date.now() - lookbackMs) return false;
+  return activityMs <= Date.now() - attentionMs;
 }
 
 export function listRescueDue(attentionMs: number) {
@@ -290,6 +294,7 @@ export function listSlaDue(kind: "first" | "escalation") {
   const cfg = opsConfig();
   const minutes = kind === "first" ? cfg.slaFirstMinutes : cfg.slaEscalationMinutes;
   const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
+  const lookback = new Date(Date.now() - cfg.slaLookbackHours * 3600_000).toISOString();
   const extra =
     kind === "first"
       ? "(r.sla_first_alerted_at IS NULL OR r.sla_first_alerted_at = '')"
@@ -301,11 +306,12 @@ export function listSlaDue(kind: "first" | "escalation") {
        LEFT JOIN revenue_leads l ON l.lead_id = r.public_id
        WHERE r.status = 'NEW'
          AND r.created_at <= ?
+         AND r.created_at >= ?
          AND (r.snoozed_until IS NULL OR r.snoozed_until <= ?)
          AND ${extra}
        LIMIT 20`,
     )
-    .all(cutoff, nowIso()) as Array<{
+    .all(cutoff, lookback, nowIso()) as Array<{
     public_id: string;
     created_at: string;
     name: string;

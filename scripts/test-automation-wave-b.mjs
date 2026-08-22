@@ -40,6 +40,7 @@ check("no second telegram trigger in homestead n8n json", !readFileSync(join(roo
 check("rescue eligibility deterministic", opsStore.includes("function isRescueEligible") && !opsEngine.includes("openai"));
 check("command center no openai", !opsTg.toLowerCase().includes("openai") && !opsCfg.toLowerCase().includes("openai"));
 check("config not hardcoded only", opsCfg.includes("LEAD_RESCUE_AFTER_MINUTES") && opsCfg.includes("SLA_FIRST_RESPONSE_MINUTES") && opsCfg.includes("SLA_ESCALATION_MINUTES") && opsCfg.includes("DAILY_BRIEF_HOUR"));
+check("lookback prevents historic storm", opsCfg.includes("LEAD_RESCUE_LOOKBACK_HOURS") && opsCfg.includes("SLA_LOOKBACK_HOURS"));
 check("compose exposes ops env", compose.includes("LEAD_RESCUE_AFTER_MINUTES") && compose.includes("OPS_QUIET_START_HOUR"));
 check("quiet hours only INFO", opsEngine.includes('priority === "INFO" && isQuietHours()'));
 check("outbox keys", opsEngine.includes("lead.rescue_eligible:") && opsEngine.includes("sla.first:") && opsEngine.includes("sla.escalation:") && opsEngine.includes("daily.brief:"));

@@ -24,7 +24,7 @@ n8n static data is not used for contacted / dismissed / snoozed / booked.
 3. Not booked (no open appointment, stage not SCHEDULED/WON/…)
 4. `first_human_action_at` is null
 5. Not dismissed, not DNC
-6. Last activity (max of lead `updated_at` and last concierge message) older than `LEAD_RESCUE_AFTER_MINUTES` (default 15)
+6. Last activity older than `LEAD_RESCUE_AFTER_MINUTES` (default 15) **and** within `LEAD_RESCUE_LOOKBACK_HOURS` (default 24). Ancient backlog is not blasted in one tick.
 7. Snooze expired
 8. `rescue_alerted_at` empty for this cycle
 

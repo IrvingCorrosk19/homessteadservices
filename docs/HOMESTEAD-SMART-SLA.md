@@ -8,7 +8,7 @@ Commercial first-response SLA for **NEW** service requests. This is not a system
 | --- | --- | --- |
 | `SLA_FIRST_RESPONSE_MINUTES` | 15 | First warning |
 | `SLA_ESCALATION_MINUTES` | 30 | One escalation after first alert |
-| `LEAD_RESCUE_AFTER_MINUTES` | 15 | Rescue inactivity (separate engine) |
+| `SLA_LOOKBACK_HOURS` | 24 | Ignore requests older than this for new SLA alerts |
 | `DAILY_BRIEF_HOUR` | 8 | Daily brief, America/Panama |
 | `OPS_QUIET_START_HOUR` / `OPS_QUIET_END_HOUR` | 22 / 7 | Defers INFO only |
 

@@ -9,8 +9,10 @@ export function opsConfig() {
   return {
     timezone: businessTimezone() || "America/Panama",
     rescueAfterMinutes: positiveInt(process.env.LEAD_RESCUE_AFTER_MINUTES, 15),
+    rescueLookbackHours: positiveInt(process.env.LEAD_RESCUE_LOOKBACK_HOURS, 24),
     slaFirstMinutes: positiveInt(process.env.SLA_FIRST_RESPONSE_MINUTES, 15),
     slaEscalationMinutes: positiveInt(process.env.SLA_ESCALATION_MINUTES, 30),
+    slaLookbackHours: positiveInt(process.env.SLA_LOOKBACK_HOURS, 24),
     dailyBriefHour: positiveInt(process.env.DAILY_BRIEF_HOUR, 8),
     quietStartHour: positiveInt(process.env.OPS_QUIET_START_HOUR, 22),
     quietEndHour: positiveInt(process.env.OPS_QUIET_END_HOUR, 7),
