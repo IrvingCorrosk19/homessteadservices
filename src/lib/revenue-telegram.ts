@@ -545,7 +545,7 @@ async function proposeVisitSlot(leadId: string, date: string, time: string) {
     }
     return { id: latest.appointment_id, status: moved?.status || latest.status };
   }
-  const created = createAppointment(leadId, date, time, "PROPOSED");
+  const created = createAppointment(leadId, date, time, "PROPOSED", { source: "TELEGRAM" });
   return { id: created, status: "PROPOSED" };
 }
 
@@ -670,32 +670,23 @@ function formatAppointmentTelegram(
   }
   return [
     "━━━━━━━━━━━━━━━━━━━━━━",
-    "📅 HOMESTEAD · NUEVA CITA",
+    "📅 NUEVA CITA — HOMESTEAD",
     "━━━━━━━━━━━━━━━━━━━━━━",
     "",
-    "👤 Cliente:",
-    appointment.customerName,
+    appointment.leadId,
     "",
-    "🛠 Servicio:",
-    appointment.serviceLabel,
+    `👤 ${appointment.customerName}`,
+    `🛠 ${appointment.serviceLabel}`,
+    `📍 ${appointment.zone || "Por confirmar"}`,
     "",
-    "📍 Zona:",
-    appointment.zone || "Por confirmar",
+    `📆 ${formatAppointmentDay(appointment.date)}`,
+    `🕒 ${formatAppointmentClock(appointment.startTime)}`,
     "",
-    "📆 Fecha:",
-    formatAppointmentDay(appointment.date),
+    `📞 ${alertPhone(appointment.phone) || "No registrado"}`,
     "",
-    "🕐 Hora:",
-    formatAppointmentClock(appointment.startTime),
+    `Origen: ${appointment.originLabel || "Homestead"}`,
     "",
-    "📌 Estado:",
-    statusLabel(appointment.status).toUpperCase(),
-    "",
-    "📞 Contacto:",
-    alertPhone(appointment.phone) || "No registrado",
-    "",
-    "💡 Próxima acción:",
-    "Preparar visita",
+    `Estado: ${statusLabel(appointment.status).toUpperCase()}`,
   ].join("\n");
 }
 

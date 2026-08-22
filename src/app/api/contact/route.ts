@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import { formServices, propertyTypes } from "@/lib/site";
-import { isMailConfigured, sendContactEmail } from "@/lib/mail";
-import { logError, logInfo } from "@/lib/log";
-import { notifyN8n } from "@/lib/n8n";
+import { logInfo } from "@/lib/log";
 import {
   isAllowedDeclaredType,
   MAX_PHOTO_BYTES,
   MAX_PHOTOS,
   sniffImage,
 } from "@/lib/photos";
-import { saveServiceRequest } from "@/lib/service-requests";
+import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const allowedServices = new Set<string>(formServices);
@@ -68,7 +66,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const saved = saveServiceRequest({
+    const saved = await persistServiceRequest({
       name,
       phone,
       email,
@@ -90,37 +88,10 @@ export async function POST(request: Request) {
       photoCount: saved.photos.length,
     });
 
-    void notifyN8n(saved);
-
-    if (isMailConfigured()) {
-      try {
-        const photoFiles = bufferedPhotos.map(
-          (photo) =>
-            new File([new Uint8Array(photo.bytes)], photo.name, { type: photo.type }),
-        );
-        await sendContactEmail({
-          requestId: saved.publicId,
-          name,
-          phone,
-          email,
-          property,
-          service,
-          message,
-          photos: photoFiles,
-        });
-        logInfo("EmailNotificationSucceeded", { requestId: saved.publicId });
-      } catch (error) {
-        logError("EmailNotificationFailed", {
-          requestId: saved.publicId,
-          cause: error instanceof Error ? error.name : "unknown",
-        });
-      }
-    } else {
-      logError("EmailNotificationFailed", {
-        requestId: saved.publicId,
-        cause: "smtp_not_configured",
-      });
-    }
+    const photoFiles = bufferedPhotos.map(
+      (photo) => new File([new Uint8Array(photo.bytes)], photo.name, { type: photo.type }),
+    );
+    await dispatchServiceRequest(saved, { email: true, n8n: true, photos: photoFiles });
 
     return NextResponse.json({ ok: true, requestId: saved.publicId });
   } catch (error) {

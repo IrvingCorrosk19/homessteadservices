@@ -28,7 +28,9 @@ export type CalendarItem = {
   quoteId: string;
   problem: string;
   phone: string;
+  email: string;
   notes: string;
+  originLabel: string;
 };
 
 type View = "month" | "week" | "day";
@@ -230,7 +232,7 @@ export function AppointmentCalendar({
             <div key={String(label)} className="mt-4">
               <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">{String(label)}</p>
               {(list as CalendarItem[]).length === 0 ? (
-                <p className="mt-2 text-sm text-mist">Sin citas.</p>
+                <p className="mt-2 text-sm text-mist">Aún no hay visitas en este periodo. Las citas confirmadas en el chat o en Telegram aparecen aquí.</p>
               ) : (
                 <ul className="mt-2 space-y-2">
                   {(list as CalendarItem[]).map((item) => (
@@ -253,17 +255,26 @@ export function AppointmentCalendar({
             <h2 className="mt-1 font-display text-3xl text-navy">{open.serviceLabel}</h2>
             <dl className="mt-4 space-y-2 text-sm">
               <div><dt className="text-mist">Cliente</dt><dd>{open.customerName}</dd></div>
+              <div><dt className="text-mist">Folio</dt><dd><Link className="text-accent" href={`/admin/solicitudes/${open.leadId}`}>{open.leadId}</Link></dd></div>
+              <div><dt className="text-mist">Origen</dt><dd>{open.originLabel || "Homestead"}</dd></div>
               <div><dt className="text-mist">Fecha</dt><dd>{formatAppointmentDay(open.date)}</dd></div>
               <div><dt className="text-mist">Hora</dt><dd>{formatAppointmentClock(open.startTime)}</dd></div>
               <div><dt className="text-mist">Zona</dt><dd>{open.zone || "Por confirmar"}</dd></div>
+              {open.phone ? <div><dt className="text-mist">Teléfono</dt><dd>{open.phone}</dd></div> : null}
+              {open.email ? <div><dt className="text-mist">Email</dt><dd>{open.email}</dd></div> : null}
               {open.assignedTo ? <div><dt className="text-mist">Responsable</dt><dd>{open.assignedTo}</dd></div> : null}
-              {open.problem ? <div><dt className="text-mist">Notas</dt><dd className="leading-6">{open.problem.slice(0, 280)}</dd></div> : null}
-              <div><dt className="text-mist">Lead</dt><dd><Link className="text-accent" href={`/admin/solicitudes/${open.leadId}`}>{open.leadId}</Link></dd></div>
+              {open.problem ? <div><dt className="text-mist">Problema</dt><dd className="leading-6">{open.problem.slice(0, 280)}</dd></div> : null}
               {open.quoteId ? <div><dt className="text-mist">Cotización</dt><dd>{open.quoteId}</dd></div> : null}
             </dl>
             <div className="mt-5 grid gap-2">
               {open.phone ? (
-                <a className="min-h-11 rounded-xl border border-navy/15 px-3 py-3 text-center text-xs tracking-[0.12em] uppercase" href={`tel:${open.phone}`}>Contactar</a>
+                <a className="min-h-11 rounded-xl border border-navy/15 px-3 py-3 text-center text-xs tracking-[0.12em] uppercase" href={`tel:${open.phone.replace(/[^\d+]/g, "")}`}>📞 Llamar</a>
+              ) : null}
+              {open.phone ? (
+                <a className="min-h-11 rounded-xl border border-navy/15 px-3 py-3 text-center text-xs tracking-[0.12em] uppercase" href={`https://wa.me/${open.phone.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer">💬 WhatsApp</a>
+              ) : null}
+              {open.email ? (
+                <a className="min-h-11 rounded-xl border border-navy/15 px-3 py-3 text-center text-xs tracking-[0.12em] uppercase" href={`mailto:${open.email}`}>✉️ Email</a>
               ) : null}
               {["REQUESTED", "PROPOSED"].includes(open.status) ? (
                 <button type="button" disabled={Boolean(busy)} className="min-h-11 rounded-xl bg-navy text-xs tracking-[0.12em] uppercase text-cream disabled:opacity-50" onClick={() => void mutate("confirm")}>Confirmar</button>

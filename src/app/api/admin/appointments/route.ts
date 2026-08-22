@@ -21,8 +21,11 @@ export async function GET(request: Request) {
     status: item.status,
     serviceLabel: item.serviceLabel,
     customerFirst: item.customerFirst,
+    customerName: item.customerName,
     zone: item.zone,
     assignedTo: item.assignedTo,
+    originLabel: item.originLabel,
+    phone: item.phone,
   }));
   return NextResponse.json({ ok: true, appointments });
 }

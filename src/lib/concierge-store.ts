@@ -4,6 +4,8 @@ import { join } from "path";
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import type { SniffedImage } from "@/lib/photos";
 
+export type OfferedSlot = { date: string; time: string; label: string };
+
 export type ConversationState = {
   service: string;
   problem: string;
@@ -11,11 +13,19 @@ export type ConversationState = {
   name: string;
   phone: string;
   email: string;
+  propertyType: string;
   preferredTime: string;
+  preferredDate: string;
+  intent: string;
   funnelStage: string;
   leadTemperature: string;
   photoCount: number;
   contactStatus: "UNKNOWN" | "INCOMPLETE" | "INVALID" | "VALID";
+  offeredSlots: OfferedSlot[];
+  pendingSlot: OfferedSlot | null;
+  appointmentId: string;
+  humanRequested: boolean;
+  lastAvailabilityAt: string;
 };
 
 const emptyState = (): ConversationState => ({
@@ -25,11 +35,19 @@ const emptyState = (): ConversationState => ({
   name: "",
   phone: "",
   email: "",
+  propertyType: "",
   preferredTime: "",
+  preferredDate: "",
+  intent: "",
   funnelStage: "DISCOVERY",
   leadTemperature: "COLD",
   photoCount: 0,
   contactStatus: "UNKNOWN",
+  offeredSlots: [],
+  pendingSlot: null,
+  appointmentId: "",
+  humanRequested: false,
+  lastAvailabilityAt: "",
 });
 
 export function hashIp(ip: string) {

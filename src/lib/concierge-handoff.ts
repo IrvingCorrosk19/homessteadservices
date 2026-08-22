@@ -1,12 +1,13 @@
 import { classifyPhone, maskPhone } from "@/lib/phone";
-import { logError, logInfo } from "@/lib/log";
-import { notifyN8n } from "@/lib/n8n";
-import { saveServiceRequest } from "@/lib/service-requests";
+import { logInfo } from "@/lib/log";
 import { recordLead } from "@/lib/marketing-store";
 import { ingestCanonicalLead, saveLeadPreference, stopFollowUps } from "@/lib/revenue-store";
 import { sendNewLeadAlert } from "@/lib/revenue-telegram";
 import { conciergeKnowledge } from "@/lib/concierge-knowledge";
+import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
+import { isConciergeDryRun } from "@/lib/concierge-flags";
 import type { ConversationState } from "@/lib/concierge-store";
+import { recordFunnelEvent } from "@/lib/concierge-intelligence";
 
 export function canHandoffLead(state: ConversationState) {
   const phone = classifyPhone(state.phone);
@@ -16,8 +17,9 @@ export function canHandoffLead(state: ConversationState) {
 
 export function isTestHandoff(state: ConversationState, utm: Record<string, string> = {}) {
   const blob = `${state.name} ${state.problem} ${utm.hs_test || ""}`;
-  if (/TEST-HS-E2E/i.test(blob) || utm.hs_test === "1") return true;
-  return classifyPhone(state.phone).national === "60001111";
+  if (/TEST-HS-E2E|AUDIT-CHATBOT-TEST|V2-TEST/i.test(blob) || utm.hs_test === "1") return true;
+  const national = classifyPhone(state.phone).national;
+  return national === "60001111" || national === "60000000";
 }
 
 export function shouldCreateCanonicalLead() {
@@ -30,6 +32,7 @@ export async function createLeadFromConcierge(input: {
   summary: string;
   existingLeadId: string;
   utm?: Record<string, string>;
+  escalate?: boolean;
 }) {
   if (input.existingLeadId && !input.existingLeadId.startsWith("DRY-")) return input.existingLeadId;
   if (!canHandoffLead(input.state)) return "";
@@ -41,9 +44,15 @@ export async function createLeadFromConcierge(input: {
   if (service === "multiple" || service === "other" || service === "ac") {
     if (/pintar|pintur/.test(blob) && /repar/.test(blob)) service = "painting";
     else if (/pintar|pintur/.test(blob)) service = "painting";
-    else if (/plom/.test(blob)) service = "plumbing";
-    else if (/aire|a\/c|\bac\b/.test(blob)) service = "ac";
+    else if (/plom|fuga|fregador|tuber/.test(blob)) service = "plumbing";
+    else if (/aire|a\/c|\bac\b|enfri/.test(blob)) service = "ac";
+    else if (/cerradur|puerta no cierra|llave/.test(blob)) service = "locksmith";
+    else if (/toma|interruptor|el[eé]ctric/.test(blob)) service = "electrical";
   }
+  const property =
+    input.state.propertyType && ["house", "apartment", "ph", "office", "commerce", "other"].includes(input.state.propertyType)
+      ? input.state.propertyType
+      : "other";
   const location = input.state.location ? `Zona: ${input.state.location}. ` : "";
   const when = input.state.preferredTime ? `Preferencia de horario: ${input.state.preferredTime}. ` : "";
   const message = [
@@ -55,11 +64,11 @@ export async function createLeadFromConcierge(input: {
   ]
     .filter(Boolean)
     .join("\n");
-  const saved = saveServiceRequest({
+  const saved = await persistServiceRequest({
     name,
     phone: phone.e164 || input.state.phone.trim(),
     email: input.state.email.trim() || conciergeKnowledge().email || "servicios@homestead.lat",
-    property: "other",
+    property,
     service: service === "unknown" ? "other" : service,
     message,
     photos: [],
@@ -75,22 +84,21 @@ export async function createLeadFromConcierge(input: {
     source: "WEBSITE_AI_CHAT",
     conversationId: input.conversationId,
     location: input.state.location,
-    preferredDate: "",
+    preferredDate: input.state.preferredDate || "",
     preferredTimeWindow: input.state.preferredTime,
     utm: input.utm,
     isTest: isTestHandoff(input.state, input.utm || {}),
   });
-  if (input.state.preferredTime) {
-    saveLeadPreference(saved.publicId, "", input.state.preferredTime);
+  if (input.state.preferredDate || input.state.preferredTime) {
+    saveLeadPreference(saved.publicId, input.state.preferredDate || "", input.state.preferredTime);
   }
   recordLead({ publicId: saved.publicId, channel: "website_ai_concierge", outcome: "CONTACT" });
-  void notifyN8n(saved);
-  const alert = await sendNewLeadAlert(saved.publicId);
-  if (!alert.sent) {
-    logError("TelegramLeadAlertFailed", { contentJobId: saved.publicId, stage: "send_zero" });
-  } else {
-    logInfo("TelegramLeadAlertSent", { contentJobId: saved.publicId, stage: String(alert.sent) });
+  const notify = !isConciergeDryRun();
+  await dispatchServiceRequest(saved, { email: notify, n8n: notify, photos: [] });
+  if (input.escalate && notify) {
+    await sendNewLeadAlert(saved.publicId);
   }
+  recordFunnelEvent(input.conversationId, "ServiceRequestCreated", { service, lead: saved.publicId });
   logInfo("ConciergeLeadCreated", {
     contentJobId: saved.publicId,
     stage: input.conversationId.slice(0, 8),

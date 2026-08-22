@@ -329,7 +329,20 @@ function migrateContentStudio(database: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_concierge_msgs
       ON concierge_messages (conversation_id, id);
+    CREATE TABLE IF NOT EXISTS concierge_intelligence (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_concierge_intel
+      ON concierge_intelligence (conversation_id, id);
   `);
+  const conciergeCols = columnNames(database, "concierge_conversations");
+  if (conciergeCols.length && !conciergeCols.includes("outcome")) {
+    database.exec(`ALTER TABLE concierge_conversations ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`);
+  }
   migrateRevenueEngine(database);
 }
 
@@ -497,6 +510,9 @@ function migrateAppointmentCalendar(database: Database.Database) {
   }
   if (cols.length && !cols.includes("notes")) {
     database.exec(`ALTER TABLE revenue_appointments ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
+  }
+  if (cols.length && !cols.includes("source")) {
+    database.exec(`ALTER TABLE revenue_appointments ADD COLUMN source TEXT NOT NULL DEFAULT ''`);
   }
   database.exec(`
     CREATE TABLE IF NOT EXISTS revenue_appointment_notices (

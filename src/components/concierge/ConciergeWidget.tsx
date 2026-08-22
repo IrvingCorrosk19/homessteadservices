@@ -12,14 +12,14 @@ export function ConciergeWidget() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [ended, setEnded] = useState(false);
-  const [chips, setChips] = useState<string[]>(["Aire acondicionado", "Plomería", "Electricidad", "Pintura"]);
+  const [chips, setChips] = useState<string[]>(["Necesito un servicio", "Quiero cotizar", "Quiero agendar"]);
   const [whatsapp, setWhatsapp] = useState<string | null>(null);
   const [leadId, setLeadId] = useState<string | null>(null);
   const [keyboardPad, setKeyboardPad] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      body: "Hola. Cuéntame qué necesitas resolver en tu hogar o propiedad: puede ser una reparación, mantenimiento o instalación.",
+      body: "Hola. Cuéntame qué está pasando en tu hogar o propiedad: una reparación, un mantenimiento o algo que quieras instalar.",
     },
   ]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -149,7 +149,7 @@ export function ConciergeWidget() {
           onClick={openChat}
           className="pointer-events-auto max-w-64 rounded-2xl border border-line bg-white px-4 py-3 text-left text-sm leading-6 text-charcoal shadow-[0_18px_40px_rgba(31,51,68,0.16)] md:max-w-72"
         >
-          Hola. Cuéntame qué necesitas reparar, instalar o mantener y te ayudo a orientarlo.
+          Hola. Cuéntame qué está pasando en tu casa o propiedad y te ayudo a orientarlo.
         </button>
       )}
 
@@ -163,9 +163,9 @@ export function ConciergeWidget() {
           <header className="flex items-start justify-between gap-3 bg-navy px-5 py-4 text-cream">
             <div>
               <p className="font-display text-xl">Homestead Services</p>
-              <p className="mt-1 text-xs tracking-[0.12em] uppercase text-cream/70">Asistente de servicios</p>
+              <p className="mt-1 text-xs tracking-[0.12em] uppercase text-cream/70">Asesor de servicios</p>
               <p className="mt-2 max-w-xs text-xs leading-5 text-cream/75">
-                Te ayudamos a orientar tu solicitud y conectarte con nuestro equipo.
+                Conversemos sobre lo que necesitas resolver en tu propiedad.
               </p>
             </div>
             <button
@@ -198,8 +198,10 @@ export function ConciergeWidget() {
               </p>
             ))}
             {pending && (
-              <p className="mr-8 text-sm text-mist" aria-live="polite">
-                Enviando…
+              <p className="mr-8 flex items-center gap-1 rounded-2xl border border-line bg-white px-4 py-3" aria-live="polite" aria-label="Escribiendo">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:120ms]" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:240ms]" />
               </p>
             )}
             {sendError && (

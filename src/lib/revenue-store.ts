@@ -499,9 +499,9 @@ export function latestAppointment(leadId: string) {
 }
 
 const APPOINTMENT_SELECT = `a.appointment_id, a.lead_id, a.customer_id, a.job_id, a.date, a.start_time, a.end_time,
-  a.service, a.status, a.assigned_to, a.created_at, a.confirmed_at, a.version, a.notes,
+  a.service, a.status, a.assigned_to, a.created_at, a.confirmed_at, a.version, a.notes, a.source,
   l.conversation_id, l.quote_id, l.problem_summary, l.general_location as lead_location,
-  l.pipeline_stage, c.name, c.phone, c.email, c.general_location as customer_location`;
+  l.pipeline_stage, l.source as lead_source, c.name, c.phone, c.email, c.general_location as customer_location`;
 
 export type AppointmentRecord = {
   appointmentId: string;
@@ -519,6 +519,8 @@ export type AppointmentRecord = {
   confirmedAt: string | null;
   version: number;
   notes: string;
+  source: string;
+  originLabel: string;
   conversationId: string;
   quoteId: string;
   problem: string;
@@ -530,10 +532,20 @@ export type AppointmentRecord = {
   email: string;
 };
 
+function originLabel(source: string, leadSource: string) {
+  const value = source || leadSource || "";
+  if (value === "CHAT" || value === "WEBSITE_AI_CHAT") return "Chatbot";
+  if (value === "FORM" || value === "WEBSITE_FORM") return "Formulario";
+  if (value === "TELEGRAM") return "Telegram";
+  if (value === "ADMIN") return "Admin";
+  return value || "Homestead";
+}
+
 function mapAppointment(row: Record<string, unknown>): AppointmentRecord {
   const name = String(row.name || "");
   const service = String(row.service || "");
   const problem = String(row.problem_summary || "");
+  const source = String(row.source || "");
   return {
     appointmentId: String(row.appointment_id),
     leadId: String(row.lead_id),
@@ -550,6 +562,8 @@ function mapAppointment(row: Record<string, unknown>): AppointmentRecord {
     confirmedAt: row.confirmed_at ? String(row.confirmed_at) : null,
     version: Number(row.version || 1),
     notes: String(row.notes || ""),
+    source,
+    originLabel: originLabel(source, String(row.lead_source || "")),
     conversationId: String(row.conversation_id || ""),
     quoteId: String(row.quote_id || ""),
     problem,
@@ -562,14 +576,20 @@ function mapAppointment(row: Record<string, unknown>): AppointmentRecord {
   };
 }
 
-export function createAppointment(leadId: string, date: string, startTime: string, status = "PROPOSED") {
+export function createAppointment(
+  leadId: string,
+  date: string,
+  startTime: string,
+  status = "PROPOSED",
+  extra: { notes?: string; source?: string } = {},
+) {
   const lead = getLead(leadId);
   if (!lead) return null;
   const normalized = isAppointmentStatus(status) ? status : "PROPOSED";
   const open = getHomesteadDb()
     .prepare(
       `SELECT appointment_id FROM revenue_appointments
-       WHERE lead_id = ? AND date = ? AND start_time = ? AND status IN ('REQUESTED','PROPOSED') LIMIT 1`,
+       WHERE lead_id = ? AND date = ? AND start_time = ? AND status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED') LIMIT 1`,
     )
     .get(leadId, date, startTime) as { appointment_id: string } | undefined;
   if (open) return open.appointment_id;
@@ -577,10 +597,21 @@ export function createAppointment(leadId: string, date: string, startTime: strin
   getHomesteadDb()
     .prepare(
       `INSERT INTO revenue_appointments
-        (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at, notes, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, leadId, lead.customerId, date, startTime, lead.service, normalized, nowIso());
+    .run(
+      id,
+      leadId,
+      lead.customerId,
+      date,
+      startTime,
+      lead.service,
+      normalized,
+      nowIso(),
+      extra.notes || "",
+      extra.source || "",
+    );
   getHomesteadDb()
     .prepare("UPDATE revenue_leads SET visit_proposed_at = COALESCE(visit_proposed_at, ?), updated_at = ? WHERE lead_id = ?")
     .run(nowIso(), nowIso(), leadId);

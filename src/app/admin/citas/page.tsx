@@ -30,7 +30,9 @@ export default async function CitasPage({
     quoteId: item.quoteId,
     problem: item.problem,
     phone: item.phone,
+    email: item.email,
     notes: item.notes,
+    originLabel: item.originLabel,
   }));
 
   return (

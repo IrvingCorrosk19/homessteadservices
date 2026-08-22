@@ -1,5 +1,5 @@
 import { conciergeKnowledge, conciergeSystemPrompt } from "@/lib/concierge-knowledge";
-import { parseConciergeOutput, stripHallucinatedPrices, type ConciergeAiOutput } from "@/lib/concierge-schema";
+import { stripHallucinatedPrices, enforceAvailabilityIntegrity, enforceBookingIntegrity, injectionDeniedReply } from "@/lib/concierge-integrity";
 import {
   addEvent,
   addMessage,
@@ -14,86 +14,81 @@ import {
   tryBeginTurn,
   type ConversationState,
 } from "@/lib/concierge-store";
-import {
-  assessUserContact,
-  incompleteContactReply,
-  invalidContactReply,
-  isPassiveClose,
-  looksLikeSchedulingPreference,
-  parseVisitPreference,
-  preferenceAckReply,
-  shouldStopCommercial,
-  visitPreferenceReply,
-} from "@/lib/concierge-contact";
+import { assessUserContact, isPassiveClose, shouldStopCommercial } from "@/lib/concierge-contact";
 import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
 import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
-import { saveLeadPreference } from "@/lib/revenue-store";
 import { whatsappHref } from "@/lib/site";
 import { logError } from "@/lib/log";
+import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
+import { CONCIERGE_TOOLS, executeConciergeTool, mergeParsedWhen, type ToolContext } from "@/lib/concierge-tools";
+import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/concierge-intelligence";
+import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SniffedImage } from "@/lib/photos";
 
-const SAFETY_RE = /chispa|humo|olor a quemado|electroc|incendio|gas(olina)?\s*(fug|olor)/i;
-const EXIT_RE = /\bno gracias\b|\bno,? gracias\b|deja as[ií]|no quiero/i;
+export { isConciergeDryRun, isConciergeEnabled };
+
+const SAFETY_RE = /chispa|humo|olor a quemado|electroc|incendio|gas(olina)?\s*(fug|olor)|inundaci[oó]n/i;
+const EXIT_RE = /\bno gracias\b|\bno,? gracias\b|deja as[ií]|no quiero que me contacten/i;
 const HUMAN_RE = /persona|humano|asesor|hablar con alguien|un t[eé]cnico/i;
 const INJECTION_RE = /ignore (all|previous)|olvida( tus)? instrucciones|system prompt|api key|act[úu]a como/i;
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 
-function model() {
-  return process.env.OPENAI_CONCIERGE_MODEL?.trim() || process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-4o";
-}
-
-function apiKey() {
-  return process.env.OPENAI_API_KEY?.trim() || "";
-}
-
-export function isConciergeEnabled() {
-  return process.env.AI_CONCIERGE_ENABLED !== "false";
-}
-
-export function isConciergeDryRun() {
-  const value = process.env.AI_CONCIERGE_DRY_RUN;
-  if (value === undefined) return true;
-  return value !== "false";
-}
+type ChatMessage = { role: string; content: string | unknown; tool_calls?: unknown; tool_call_id?: string; name?: string };
 
 function fallbackReply(message: string) {
   if (SAFETY_RE.test(message)) {
-    return "Si hay chispas, humo o riesgo inmediato, aléjate y usa los servicios de emergencia. Cuando estés en un lugar seguro, dime qué ocurrió y en qué zona estás para dejarlo anotado al equipo.";
+    return "Si hay chispas, humo, olor a gas o riesgo inmediato, aléjate y usa los servicios de emergencia. Cuando estés en un lugar seguro, dime qué ocurrió y en qué zona estás.";
   }
-  if (INJECTION_RE.test(message)) {
-    return "Estoy aquí para ayudarte con los servicios de Homestead Services. Cuéntame qué necesitas resolver en tu propiedad.";
-  }
-  if (EXIT_RE.test(message)) {
-    return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
-  }
-  return "Puedo seguir registrando tu solicitud. Cuéntame brevemente qué servicio necesitas y nuestro equipo podrá darle seguimiento.";
+  if (INJECTION_RE.test(message)) return injectionDeniedReply();
+  if (EXIT_RE.test(message)) return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
+  return "Estoy teniendo un inconveniente para continuar por aquí. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
 }
 
-async function completeJson(messages: Array<{ role: string; content: unknown }>) {
+function extractCasualFacts(state: ConversationState, text: string) {
+  const next = { ...state };
+  const soy = text.match(/\bsoy\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i);
+  if (soy && !looksLikePhoneAttempt(soy[1])) next.name = soy[1].trim().slice(0, 80);
+  const email = text.match(EMAIL_RE);
+  if (email) next.email = email[0];
+  if (/\bapartamento|apto\b/i.test(text)) next.propertyType = "apartment";
+  else if (/\bcasa\b/i.test(text)) next.propertyType = "house";
+  else if (/\boffice|oficina\b/i.test(text)) next.propertyType = "office";
+  const zone = text.match(/\ben\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/);
+  if (zone && !next.location) next.location = zone[1].trim();
+  if (/aire|enfri|bota agua|condens/i.test(text) && !next.service) next.service = "ac";
+  if (/fuga|fregador|plom/i.test(text) && !next.service) next.service = "plumbing";
+  if (/pintar|pintur/i.test(text) && !next.service) next.service = "painting";
+  if (!next.problem && text.trim().length > 12 && !looksLikePhoneAttempt(text)) {
+    next.problem = text.trim().slice(0, 500);
+  }
+  return mergeParsedWhen(next, text);
+}
+
+async function completeTurn(messages: ChatMessage[]) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 28_000);
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey()}`,
+        Authorization: `Bearer ${conciergeApiKey()}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: model(),
-        temperature: 0.4,
-        response_format: { type: "json_object" },
+        model: conciergeModel(),
+        temperature: 0.5,
+        tools: CONCIERGE_TOOLS,
         messages,
       }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`openai_${response.status}`);
     const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ id: string; function?: { name?: string; arguments?: string } }> } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
-    const content = data.choices?.[0]?.message?.content || "";
     return {
-      parsed: parseConciergeOutput(JSON.parse(content)),
+      message: data.choices?.[0]?.message || { content: "" },
       usage: data.usage,
     };
   } finally {
@@ -101,34 +96,13 @@ async function completeJson(messages: Array<{ role: string; content: unknown }>)
   }
 }
 
-function mergeState(state: ConversationState, extracted: ConciergeAiOutput["extracted"], service: string) {
-  const nextService = service && service !== "unknown" ? service : state.service;
-  let name = extracted.name || state.name;
-  if (looksLikePhoneAttempt(name)) name = state.name;
-  const classifiedIncoming = classifyPhone(extracted.phone || "");
-  const classifiedCurrent = classifyPhone(state.phone);
-  const phone =
-    classifiedIncoming.status === "VALID"
-      ? classifiedIncoming.e164
-      : classifiedCurrent.status === "VALID"
-        ? classifiedCurrent.e164 || state.phone
-        : "";
-  return {
-    ...state,
-    service: nextService,
-    problem: extracted.problemSummary || state.problem,
-    location: extracted.location || state.location,
-    name,
-    phone,
-    email: extracted.email || state.email,
-    preferredTime: extracted.preferredTime || state.preferredTime,
-    contactStatus:
-      classifiedIncoming.status === "VALID" || classifiedCurrent.status === "VALID"
-        ? ("VALID" as const)
-        : classifiedIncoming.status !== "UNKNOWN"
-          ? classifiedIncoming.status
-          : state.contactStatus || "UNKNOWN",
-  };
+function chipsFrom(state: ConversationState, booked: boolean, human: boolean) {
+  if (human || booked) return [];
+  if (state.offeredSlots.length) return state.offeredSlots.slice(0, 3).map((item) => item.label);
+  if (!state.service) return ["Necesito un servicio", "Quiero cotizar", "Quiero agendar"];
+  if (!state.location) return ["Estoy en la ciudad", "Estoy en el interior"];
+  if (state.contactStatus !== "VALID") return [];
+  return ["Mañana", "Esta semana", "Prefiero que me llamen"];
 }
 
 export function canCreateLead(state: ConversationState) {
@@ -149,34 +123,132 @@ export async function conciergeTurn(input: {
     const text = input.message.trim().slice(0, 2000);
     addMessage(input.conversationId, "user", text);
     addEvent(input.conversationId, "CHAT_MESSAGE");
+    let state = extractCasualFacts(conversation.state, text);
+    const contact = assessUserContact(text, state.phone);
+    if (looksLikePhoneAttempt(text) || contact.status !== "UNKNOWN") addEvent(input.conversationId, "CONTACT_VALIDATION_ATTEMPT");
+    if (contact.status === "VALID") {
+      const classified = classifyPhone(contact.raw);
+      state.phone = classified.e164 || classified.display;
+      state.contactStatus = "VALID";
+      addEvent(input.conversationId, "VALID_CONTACT");
+    } else if (contact.status === "INCOMPLETE") {
+      state.contactStatus = "INCOMPLETE";
+    } else if (contact.status === "INVALID") {
+      state.contactStatus = "INVALID";
+    }
+
+    if (INJECTION_RE.test(text)) {
+      addMessage(input.conversationId, "assistant", injectionDeniedReply());
+      touchConversation(input.conversationId, { state });
+      return {
+        ok: true as const,
+        reply: injectionDeniedReply(),
+        chips: chipsFrom(state, false, false),
+        nextAction: "ASK_SERVICE_QUESTION",
+        leadId: conversation.leadPublicId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+      };
+    }
+
+    if (shouldStopCommercial(text) || EXIT_RE.test(text)) {
+      const reply = "Queda anotado: no te contactaremos. Si más adelante quieres retomar un servicio de Homestead, aquí estamos.";
+      if (conversation.leadPublicId) stopLeadIfPresent(conversation.leadPublicId);
+      addEvent(input.conversationId, "STOP_SIGNAL");
+      addMessage(input.conversationId, "assistant", reply);
+      setConversationOutcome(input.conversationId, "ABANDONED");
+      touchConversation(input.conversationId, { state: { ...state, funnelStage: "ABANDONED" } });
+      return {
+        ok: true as const,
+        reply,
+        chips: [],
+        nextAction: "CLOSE",
+        leadId: conversation.leadPublicId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: true,
+        requiresHuman: false,
+      };
+    }
+
     const knowledge = conciergeKnowledge();
-    let parsed: ConciergeAiOutput | null = null;
-    if (apiKey()) {
+    let reply = "";
+    const ctx: ToolContext = {
+      conversationId: input.conversationId,
+      state,
+      leadId: conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : "",
+      summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
+      utm: conversation.utm,
+      bookedThisTurn: false,
+      lastSlots: [...(state.offeredSlots || [])] as AvailabilitySlot[],
+    };
+
+    if (conciergeApiKey()) {
       try {
         const history = recentMessages(input.conversationId, 12);
-        const result = await completeJson([
+        const messages: ChatMessage[] = [
           { role: "system", content: conciergeSystemPrompt(knowledge) },
           {
             role: "system",
-            content: `Estado interno (no lo preguntes de nuevo si ya está): ${JSON.stringify({
-              ...conversation.state,
-              summary: conversation.summary,
+            content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
+              name: state.name || null,
+              phone: state.contactStatus === "VALID" ? "valid" : state.contactStatus,
+              email: state.email || null,
+              location: state.location || null,
+              propertyType: state.propertyType || null,
+              service: state.service || null,
+              problem: state.problem || null,
+              preferredDate: state.preferredDate || null,
+              preferredTime: state.preferredTime || null,
+              lead: ctx.leadId || null,
+              appointmentId: state.appointmentId || null,
+              offeredSlots: state.offeredSlots,
               photos: photoCount(input.conversationId),
-              lead: conversation.leadPublicId,
+              safety: SAFETY_RE.test(text),
             })}`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
             content: item.body,
           })),
-        ]);
-        parsed = result.parsed;
-        if (result.usage) {
-          recordUsage(
-            input.conversationId,
-            result.usage.prompt_tokens || 0,
-            result.usage.completion_tokens || 0,
-          );
+        ];
+        for (let round = 0; round < 4; round += 1) {
+          const result = await completeTurn(messages);
+          if (result.usage) {
+            recordUsage(input.conversationId, result.usage.prompt_tokens || 0, result.usage.completion_tokens || 0);
+          }
+          const toolCalls = result.message.tool_calls || [];
+          if (!toolCalls.length) {
+            reply = String(result.message.content || "").trim();
+            break;
+          }
+          messages.push({
+            role: "assistant",
+            content: result.message.content || "",
+            tool_calls: toolCalls,
+          });
+          for (const call of toolCalls) {
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(call.function?.arguments || "{}") as Record<string, unknown>;
+            } catch {
+              args = {};
+            }
+            const executed = await executeConciergeTool(call.function?.name || "", args, ctx);
+            ctx.state = executed.state;
+            ctx.leadId = executed.leadId;
+            state = executed.state;
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: call.function?.name || "",
+              content: JSON.stringify(executed.result),
+            });
+          }
         }
       } catch (error) {
         logError("ConciergeOpenAiFailed", {
@@ -186,202 +258,76 @@ export async function conciergeTurn(input: {
       }
     }
 
-    if (INJECTION_RE.test(text)) {
-      parsed = {
-        ...(parsed || {
-          reply: fallbackReply(text),
-          intent: "OTHER",
-          serviceCategory: "unknown",
-          funnelStage: "DISCOVERY",
-          leadTemperature: "COLD",
-          nextAction: "ASK_SERVICE_QUESTION",
-          shouldAskContact: false,
-          shouldOfferWhatsApp: false,
-          requiresHuman: false,
-          safetyFlag: false,
-          quickReplies: [],
-          extracted: {
-            name: "",
-            phone: "",
-            email: "",
-            location: "",
-            preferredTime: "",
-            problemSummary: "",
-          },
-        }),
-        reply: "Estoy aquí para ayudarte con los servicios de Homestead Services. Cuéntame qué necesitas resolver en tu propiedad.",
-        nextAction: "ASK_SERVICE_QUESTION",
-      };
-    }
-    if (SAFETY_RE.test(text)) {
-      parsed = {
-        ...(parsed as ConciergeAiOutput),
-        reply:
-          parsed?.reply && parsed.safetyFlag
-            ? parsed.reply
-            : fallbackReply(text),
-        safetyFlag: true,
-        leadTemperature: "HOT",
-        funnelStage: "SAFETY",
-        nextAction: "ESCALATE_HUMAN",
-        intent: "EMERGENCY",
-        quickReplies: parsed?.quickReplies?.length ? parsed.quickReplies : ["Ya estoy en un lugar seguro"],
-        extracted: parsed?.extracted || {
-          name: "",
-          phone: "",
-          email: "",
-          location: "",
-          preferredTime: "",
-          problemSummary: "",
-        },
-        shouldAskContact: true,
-        shouldOfferWhatsApp: false,
-        requiresHuman: true,
-        serviceCategory: parsed?.serviceCategory || "electrical",
-      };
-    }
-    if (!parsed) {
-      parsed = {
-        reply: fallbackReply(text),
-        intent: EXIT_RE.test(text) ? "OTHER" : HUMAN_RE.test(text) ? "HUMAN_REQUEST" : "OTHER",
-        serviceCategory: "unknown",
-        funnelStage: EXIT_RE.test(text) ? "ABANDONED" : "DISCOVERY",
-        leadTemperature: "COLD",
-        nextAction: EXIT_RE.test(text) ? "CLOSE" : "ASK_SERVICE_QUESTION",
-        shouldAskContact: false,
-        shouldOfferWhatsApp: false,
-        requiresHuman: HUMAN_RE.test(text),
-        safetyFlag: SAFETY_RE.test(text),
-        quickReplies: EXIT_RE.test(text) ? [] : ["Aire acondicionado", "Plomería", "Electricidad"],
-        extracted: {
-          name: "",
-          phone: "",
-          email: "",
-          location: "",
-          preferredTime: "",
-          problemSummary: "",
-        },
-      };
+    if (state.contactStatus === "INCOMPLETE" && looksLikePhoneAttempt(text)) {
+      reply = "Me faltan algunos dígitos de ese número. ¿Me lo das completo, con el código de área si lo tienes?";
+    } else if (state.contactStatus === "INVALID" && looksLikePhoneAttempt(text)) {
+      reply = "Ese número no me quedó claro. ¿Me lo envías con todos los dígitos?";
     }
 
-    const priced = stripHallucinatedPrices(parsed.reply);
-    parsed.reply = priced.text;
-    if (looksLikePhoneAttempt(text)) {
-      parsed.extracted.phone = text;
-    }
-    const contact = assessUserContact(text, parsed.extracted.phone);
-    if (looksLikePhoneAttempt(text) || contact.status !== "UNKNOWN") {
-      addEvent(input.conversationId, "CONTACT_VALIDATION_ATTEMPT");
-    }
-    const state = mergeState(conversation.state, parsed.extracted, parsed.serviceCategory);
-    if (contact.status === "VALID") {
-      const classified = classifyPhone(contact.raw);
-      state.phone = classified.e164 || classified.display;
-      state.contactStatus = "VALID";
-      addEvent(input.conversationId, "VALID_CONTACT");
-    } else if (contact.status === "INCOMPLETE") {
-      state.contactStatus = "INCOMPLETE";
-      addEvent(input.conversationId, "INVALID_CONTACT");
-    } else if (contact.status === "INVALID") {
-      state.contactStatus = "INVALID";
-      addEvent(input.conversationId, "INVALID_CONTACT");
-    }
-    if (!conversation.state.service && state.service && state.service !== "unknown") {
-      addEvent(input.conversationId, "SERVICE_IDENTIFIED");
-    }
-    if (!conversation.state.location && state.location) addEvent(input.conversationId, "LOCATION_CAPTURED");
-    state.funnelStage = parsed.funnelStage;
-    state.leadTemperature = parsed.leadTemperature;
+    if (!reply) reply = fallbackReply(text);
 
-    if (shouldStopCommercial(text)) {
-      parsed.reply =
-        "Queda anotado: no te contactaremos. Si más adelante quieres retomar un servicio de Homestead, aquí estamos.";
-      parsed.nextAction = "CLOSE";
-      parsed.quickReplies = [];
-      state.funnelStage = "ABANDONED";
-      if (conversation.leadPublicId) stopLeadIfPresent(conversation.leadPublicId);
-      addEvent(input.conversationId, "STOP_SIGNAL");
-    } else if (contact.status === "INCOMPLETE") {
-      parsed.reply = incompleteContactReply();
-      parsed.nextAction = "ASK_COMPLETE_CONTACT";
-      parsed.funnelStage = "CONTACT_PENDING";
-      parsed.quickReplies = [];
-      state.funnelStage = "CONTACT_PENDING";
-    } else if (contact.status === "INVALID") {
-      parsed.reply = invalidContactReply();
-      parsed.nextAction = "ASK_COMPLETE_CONTACT";
-      parsed.quickReplies = [];
-      state.funnelStage = "CONTACT_PENDING";
-    } else if (looksLikeSchedulingPreference(text) && (conversation.leadPublicId || canCreateLead(state))) {
-      const pref = parseVisitPreference(text);
-      state.preferredTime = pref.preferredTimeWindow || text;
-      parsed.reply = preferenceAckReply(state.preferredTime);
-      parsed.nextAction = "ASK_VISIT_PREFERENCE";
-      parsed.quickReplies = [];
+    if (SAFETY_RE.test(text) && !/emergencia|aleja|911|bomberos/.test(reply.toLowerCase())) {
+      reply = fallbackReply(text);
     }
 
-    const summary =
-      [
-        state.problem && `Necesidad: ${state.problem}`,
-        state.service && `Servicio: ${state.service}`,
-        state.location && `Zona: ${state.location}`,
-        state.name && `Nombre: ${state.name}`,
-        state.preferredTime && `Horario: ${state.preferredTime}`,
-      ]
-        .filter(Boolean)
-        .join(". ") || conversation.summary;
-
-    let leadId = conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : "";
-    const stopped = parsed.nextAction === "CLOSE" && /no te contactaremos/i.test(parsed.reply);
-    if (!stopped && canCreateLead(state)) {
+    if (!ctx.leadId && canCreateLead(state)) {
       const created = await createLeadFromConcierge({
         conversationId: input.conversationId,
         state,
-        summary,
-        existingLeadId: leadId,
+        summary: ctx.summary || state.problem,
+        existingLeadId: "",
         utm: conversation.utm,
+        escalate: HUMAN_RE.test(text) || state.humanRequested,
       });
-      if (created && created !== leadId) {
-        addEvent(input.conversationId, "LEAD_CREATED");
-        state.funnelStage = "LEAD_CREATED";
-      }
-      leadId = created || leadId;
-      if (leadId && state.preferredTime) {
-        saveLeadPreference(leadId, parseVisitPreference(state.preferredTime).preferredDate, state.preferredTime);
-      }
-      if (leadId && contact.status === "VALID" && !looksLikeSchedulingPreference(text) && !stopped) {
-        parsed.reply = visitPreferenceReply(state);
-        parsed.nextAction = "ASK_VISIT_PREFERENCE";
-        parsed.quickReplies = [];
-      }
+      ctx.leadId = created || ctx.leadId;
     }
 
-    if (isPassiveClose(parsed.reply) && canCreateLead(state)) {
-      parsed.reply = visitPreferenceReply(state);
-      parsed.nextAction = "ASK_VISIT_PREFERENCE";
-    } else if (isPassiveClose(parsed.reply) && (contact.status === "INCOMPLETE" || state.contactStatus === "INCOMPLETE")) {
-      parsed.reply = incompleteContactReply();
+    const priced = stripHallucinatedPrices(reply);
+    reply = priced.text;
+    if (isPassiveClose(reply) && !ctx.bookedThisTurn) {
+      reply = state.contactStatus === "VALID"
+        ? "Cuando quieras, revisamos un horario real para la visita. ¿Qué día te queda mejor?"
+        : "Cuando quieras te ayudo a dejar los datos para que el equipo te contacte. ¿Me compartes un teléfono?";
     }
+    const availability = enforceAvailabilityIntegrity(reply, ctx.lastSlots);
+    reply = availability.text;
+    const booked = enforceBookingIntegrity(reply, ctx.bookedThisTurn || Boolean(state.appointmentId && /agendad|confirmad/i.test(reply)));
+    reply = booked.text;
 
-    touchConversation(input.conversationId, { state, summary, leadPublicId: leadId });
-    addMessage(input.conversationId, "assistant", parsed.reply);
+    const ended = HUMAN_RE.test(text) && state.humanRequested;
+    if (HUMAN_RE.test(text)) state.humanRequested = true;
+    const outcome = inferOutcome({
+      appointmentId: state.appointmentId,
+      leadId: ctx.leadId,
+      ended: Boolean(ended),
+      unsupported: /fuera de alcance|no ofrecemos/.test(reply.toLowerCase()),
+    });
+    if (ended || state.appointmentId) setConversationOutcome(input.conversationId, outcome);
+
+    touchConversation(input.conversationId, {
+      state,
+      summary: ctx.summary || conversation.summary,
+      leadPublicId: ctx.leadId,
+    });
+    addMessage(input.conversationId, "assistant", reply);
 
     const wa =
-      knowledge.whatsappConfigured && leadId && !leadId.startsWith("DRY-")
-        ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${leadId}.`)
+      knowledge.whatsappConfigured && ctx.leadId
+        ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${ctx.leadId}.`)
         : null;
 
     return {
       ok: true as const,
-      reply: parsed.reply,
-      chips: parsed.quickReplies,
-      nextAction: parsed.nextAction,
-      leadId: leadId && !leadId.startsWith("DRY-") ? leadId : null,
+      reply,
+      chips: chipsFrom(state, ctx.bookedThisTurn, state.humanRequested),
+      nextAction: ctx.bookedThisTurn ? "CLOSE" : state.humanRequested ? "ESCALATE_HUMAN" : "CONTINUE",
+      leadId: ctx.leadId || null,
+      appointmentId: state.appointmentId || null,
       dryLead: false,
-      whatsappUrl: parsed.shouldOfferWhatsApp || parsed.nextAction === "OFFER_WHATSAPP" ? wa : null,
+      whatsappUrl: wa,
       contactUrl: "/contact",
-      ended: parsed.nextAction === "CLOSE",
-      requiresHuman: parsed.requiresHuman,
+      ended: Boolean(ended),
+      requiresHuman: state.humanRequested,
     };
   } finally {
     endTurn(input.conversationId);
@@ -403,5 +349,6 @@ export function attachConciergePhoto(conversationId: string, bytes: Buffer, snif
 export function startConcierge(ip: string, utm: Record<string, string>) {
   const id = createConversation(ip, utm, isConciergeDryRun());
   addEvent(id, "CHAT_OPENED");
+  recordFunnelEvent(id, "ConversationStarted", {});
   return id;
 }

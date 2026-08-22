@@ -6,6 +6,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const prompt = readFileSync(join(root, "src/lib/concierge-knowledge.ts"), "utf8");
 const schema = readFileSync(join(root, "src/lib/concierge-schema.ts"), "utf8");
 const engine = readFileSync(join(root, "src/lib/concierge-engine.ts"), "utf8");
+const flags = readFileSync(join(root, "src/lib/concierge-flags.ts"), "utf8");
+const tools = readFileSync(join(root, "src/lib/concierge-tools.ts"), "utf8");
 const widget = readFileSync(join(root, "src/components/concierge/ConciergeWidget.tsx"), "utf8");
 const chat = readFileSync(join(root, "src/app/api/concierge/chat/route.ts"), "utf8");
 
@@ -19,8 +21,10 @@ function assert(name, ok) {
 
 assert("no openai in widget", !/api\.openai\.com|OPENAI_API_KEY/.test(widget));
 assert("openai only server", /api\.openai\.com/.test(engine));
-assert("kill switch", /AI_CONCIERGE_ENABLED/.test(engine));
-assert("dry run flag kept", /AI_CONCIERGE_DRY_RUN/.test(engine));
+assert("kill switch", /AI_CONCIERGE_ENABLED/.test(engine) || /AI_CONCIERGE_ENABLED/.test(flags));
+assert("dry run flag kept", /AI_CONCIERGE_DRY_RUN/.test(flags));
+assert("tools defined", /check_availability/.test(tools) && /create_appointment/.test(tools));
+assert("booking requires confirmation", /customerConfirmed/.test(tools));
 assert("valid contact gate", /canHandoffLead|canCreateLead/.test(engine));
 assert("no 7-digit name gate", !/digits\.length >= 7/.test(engine));
 assert("no chatbot label", !/Chatbot|AI Assistant|GPT-4/.test(widget));
