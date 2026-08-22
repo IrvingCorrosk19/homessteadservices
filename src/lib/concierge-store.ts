@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import type { SniffedImage } from "@/lib/photos";
+import type { FactConfidence } from "@/lib/concierge/packed-extraction";
 
 export type OfferedSlot = { date: string; time: string; label: string };
 
@@ -36,6 +37,8 @@ export type ConversationState = {
   questionsAsked: number;
   humanHandoffRequested: boolean;
   needsReview: boolean;
+  factConfidence: Record<string, FactConfidence>;
+  corrections: string[];
 };
 
 const emptyState = (): ConversationState => ({
@@ -68,6 +71,8 @@ const emptyState = (): ConversationState => ({
   questionsAsked: 0,
   humanHandoffRequested: false,
   needsReview: false,
+  factConfidence: {},
+  corrections: [],
 });
 
 export function hashIp(ip: string) {

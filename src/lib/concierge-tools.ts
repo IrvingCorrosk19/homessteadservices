@@ -22,6 +22,7 @@ import {
   choosePrimary,
   shouldOfferAvailability,
 } from "@/lib/concierge/playbook-engine";
+import { applyTurnIntelligence, parseTurnIntelligence } from "@/lib/concierge/turn-intelligence";
 
 export const CONCIERGE_TOOLS = [
   {
@@ -35,9 +36,18 @@ export const CONCIERGE_TOOLS = [
           detectedServices: { type: "array", items: { type: "string" } },
           primaryService: { type: "string" },
           facts: { type: "object", additionalProperties: { type: "string" } },
+          factConfidence: {
+            type: "object",
+            additionalProperties: { type: "string", enum: ["EXPLICIT", "HIGH_CONFIDENCE", "UNCERTAIN"] },
+          },
+          corrections: { type: "array", items: { type: "string" } },
           urgency: { type: "string", enum: ["normal", "elevated", "safety"] },
           bookingIntent: { type: "boolean" },
           needsReview: { type: "boolean" },
+          humanHandoffIntent: { type: "boolean" },
+          priceIntent: { type: "boolean" },
+          safetySignals: { type: "boolean" },
+          nextRecommendedAction: { type: "string" },
           nextAction: { type: "string" },
         },
       },
@@ -190,33 +200,48 @@ export async function executeConciergeTool(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<ToolResult> {
-  const state = { ...ctx.state };
+  let state = { ...ctx.state };
   let leadId = ctx.leadId;
 
   if (name === "record_service_intelligence") {
-    const incoming = Array.isArray(args.detectedServices)
-      ? args.detectedServices.map((item) => String(item))
-      : [];
-    const fromText = detectServices([state.problem, asString(args.primaryService), incoming.join(" ")].join(" "));
+    const parsed = parseTurnIntelligence(args);
+    if (!parsed) {
+      return {
+        result: { ok: false, reason: "invalid_structured_output" },
+        state,
+        leadId,
+      };
+    }
+    const incoming = parsed.detectedServices.length
+      ? parsed.detectedServices
+      : Array.isArray(args.detectedServices)
+        ? args.detectedServices.map((item) => String(item))
+        : [];
+    const fromText = detectServices([state.problem, parsed.primaryService, incoming.join(" ")].join(" "));
     state.detectedServices = mergeDetectedServices(state.detectedServices || [], [...incoming, ...fromText]);
-    state.primaryService = choosePrimary(state.detectedServices, asString(args.primaryService) || state.primaryService || state.service);
+    state.primaryService = choosePrimary(
+      state.detectedServices,
+      parsed.primaryService || asString(args.primaryService) || state.primaryService || state.service,
+    );
     if (state.primaryService) state.service = state.primaryService;
     state.secondaryServices = state.detectedServices.filter((id) => id !== state.primaryService);
-    if (args.facts && typeof args.facts === "object") {
+    state = applyTurnIntelligence(state, parsed);
+    if (args.facts && typeof args.facts === "object" && !parsed.extractedFacts) {
       state.facts = applyFactPatch(state.facts || {}, args.facts as Record<string, unknown>);
     }
-    const urgency = asString(args.urgency);
+    const urgency = parsed.urgency || asString(args.urgency);
     if (urgency === "normal" || urgency === "elevated" || urgency === "safety") state.urgency = urgency;
-    state.bookingIntent = Boolean(args.bookingIntent) || state.bookingIntent;
-    state.needsReview = Boolean(args.needsReview) || getPlaybook(state.primaryService).unknownCatalog;
+    state.bookingIntent = parsed.bookingIntent || Boolean(args.bookingIntent) || state.bookingIntent;
+    state.needsReview = parsed.needsReview || Boolean(args.needsReview) || getPlaybook(state.primaryService).unknownCatalog;
     state.bookingStrategy = getPlaybook(state.primaryService || state.service).bookingStrategy;
     if (state.facts.location && !state.location) state.location = state.facts.location;
     if ((state.facts.what || state.facts.symptom || state.facts.need) && !state.problem) {
       state.problem = (state.facts.need || state.facts.symptom || state.facts.what).slice(0, 500);
     }
     recordFunnelEvent(ctx.conversationId, "IntentDetected", {
-      intent: asString(args.nextAction),
+      intent: parsed.nextRecommendedAction || asString(args.nextAction),
       service: state.primaryService || state.service,
+      structured: true,
     });
     return {
       result: {

@@ -16,7 +16,7 @@ import {
 } from "@/lib/concierge-store";
 import { assessUserContact, isPassiveClose, shouldStopCommercial } from "@/lib/concierge-contact";
 import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
-import { classifyPhone, looksLikePhoneAttempt, extractEmbeddedPhone } from "@/lib/phone";
+import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
 import { whatsappHref } from "@/lib/site";
 import { logError } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
@@ -28,17 +28,18 @@ import type { SniffedImage } from "@/lib/photos";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import {
   applyLocationCorrection,
-  choosePrimary,
   countQuestions,
-  detectServices,
-  detectUnknownOpportunity,
-  detectUrgency,
-  mergeDetectedServices,
   missingUsefulFacts,
   playbookPromptBlock,
   redactForModel,
 } from "@/lib/concierge/playbook-engine";
 import { copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
+import { applyPackedExtraction } from "@/lib/concierge/packed-extraction";
+import {
+  detectRepeatedQuestion,
+  questionEconomyBlock,
+  shouldFlagOverquestioning,
+} from "@/lib/concierge/turn-intelligence";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -50,52 +51,34 @@ const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 
 type ChatMessage = { role: string; content: string | unknown; tool_calls?: unknown; tool_call_id?: string; name?: string };
 
-function fallbackReply(message: string) {
+function fallbackReply(message: string, state?: ConversationState) {
   if (SAFETY_RE.test(message)) {
     return "Si hay chispas, humo, olor a gas o riesgo inmediato, aléjate y usa los servicios de emergencia. Cuando estés en un lugar seguro, dime qué ocurrió y en qué zona estás.";
   }
   if (INJECTION_RE.test(message)) return injectionDeniedReply();
   if (EXIT_RE.test(message)) return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
+  const service = state?.primaryService || state?.service;
+  const playbook = service ? getPlaybook(service) : null;
+  if (playbook?.bookingStrategy === "PHOTO_REVIEW_FIRST") {
+    return "Sigo contigo. Si puedes, envíame una foto de la puerta y la cerradura; con eso avanzamos más rápido.";
+  }
+  if (playbook?.serviceId === "ac") {
+    return "Sigo contigo con lo del aire. Cuéntame qué está pasando o, si ya lo mencionaste, dime en qué zona estás para coordinar.";
+  }
+  if (playbook) {
+    return "Sigo contigo. Lo que ya me contaste queda anotado; si me dejas tu teléfono y zona, el equipo puede darle seguimiento.";
+  }
   return "Estoy teniendo un inconveniente para continuar por aquí. Lo que ya me contaste queda anotado. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
 }
 
 function extractCasualFacts(state: ConversationState, text: string) {
-  const next = { ...state, facts: { ...(state.facts || {}) } };
+  let next = applyPackedExtraction(state, text);
   const soy = text.match(/\bsoy\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i);
-  if (soy && !looksLikePhoneAttempt(soy[1])) next.name = soy[1].trim().slice(0, 80);
+  if (soy && !looksLikePhoneAttempt(soy[1]) && !next.name) next.name = soy[1].trim().slice(0, 80);
   const email = text.match(EMAIL_RE);
   if (email) next.email = email[0];
-  if (/\bapartamento|apto\b/i.test(text)) next.propertyType = "apartment";
-  else if (/\bcasa\b/i.test(text)) next.propertyType = "house";
-  else if (/\boffice|oficina\b/i.test(text)) next.propertyType = "office";
-  const zone = text.match(/\ben\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/);
-  if (zone && !looksLikePhoneAttempt(zone[1])) next.location = zone[1].trim();
   next.location = applyLocationCorrection(text, next.location);
-  if (next.location) next.facts.location = next.location;
-  const embeddedPhone = extractEmbeddedPhone(text);
-  if (embeddedPhone) {
-    const phone = classifyPhone(embeddedPhone);
-    if (phone.status === "VALID") {
-      next.phone = phone.e164 || phone.display;
-      next.contactStatus = "VALID";
-    } else if (phone.status === "INCOMPLETE") {
-      next.contactStatus = "INCOMPLETE";
-    }
-  }
-  const detected = detectServices(text);
-  next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
-  next.primaryService = choosePrimary(next.detectedServices, next.primaryService || next.service);
-  if (next.primaryService) next.service = next.primaryService;
-  next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
-  const playbook = getPlaybook(next.primaryService || next.service);
-  next.bookingStrategy = playbook.bookingStrategy;
-  if (detectUnknownOpportunity(text) || next.primaryService === "other") next.needsReview = true;
-  const urgency = detectUrgency(text, playbook);
-  if (urgency !== "normal" || !next.urgency) next.urgency = urgency;
-  if (/agend|cita|visita|disponib/i.test(text)) next.bookingIntent = true;
-  if (!next.problem && text.trim().length > 12 && !looksLikePhoneAttempt(text) && !/^te envié una foto/i.test(text)) {
-    next.problem = text.trim().slice(0, 500);
-  }
+  if (next.location) next.facts = { ...(next.facts || {}), location: next.location };
   return mergeParsedWhen(next, text);
 }
 
@@ -225,7 +208,13 @@ export async function conciergeTurn(input: {
         const missing = missingUsefulFacts(state, playbook);
         const history = recentMessages(input.conversationId, 10);
         const messages: ChatMessage[] = [
-          { role: "system", content: conciergeSystemPrompt(knowledge, playbookPromptBlock(playbook, state, missing)) },
+          {
+            role: "system",
+            content: conciergeSystemPrompt(
+              knowledge,
+              `${playbookPromptBlock(playbook, state, missing)}\n\n${questionEconomyBlock(state, playbook)}`,
+            ),
+          },
           {
             role: "system",
             content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
@@ -302,10 +291,16 @@ export async function conciergeTurn(input: {
       reply = "Ese número no me quedó claro. ¿Me lo envías con todos los dígitos?";
     }
 
-    if (!reply) reply = fallbackReply(text);
+    if (!reply) reply = fallbackReply(text, state);
 
     if (SAFETY_RE.test(text) && !/emergencia|aleja|911|bomberos/.test(reply.toLowerCase())) {
-      reply = fallbackReply(text);
+      reply = fallbackReply(text, state);
+    }
+
+    const repeated = detectRepeatedQuestion(reply, state);
+    if (repeated.length) {
+      addEvent(input.conversationId, "REPEATED_QUESTION");
+      recordFunnelEvent(input.conversationId, "IntentDetected", { intent: "repeated_question", service: repeated.join(",") });
     }
 
     if (!ctx.leadId && canCreateLead(state)) {
@@ -352,7 +347,7 @@ export async function conciergeTurn(input: {
     }
     const ended = Boolean(state.humanHandoffRequested && HUMAN_RE.test(text));
     state.questionsAsked = (state.questionsAsked || 0) + (countQuestions(reply) > 0 ? 1 : 0);
-    if (state.questionsAsked > 5 && !ctx.leadId && !state.appointmentId) {
+    if (shouldFlagOverquestioning(state, state.questionsAsked, ctx.leadId, state.appointmentId)) {
       addEvent(input.conversationId, "OVERQUESTIONING");
     }
     const outcome = inferOutcome({
