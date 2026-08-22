@@ -119,19 +119,17 @@ export function requestDetail(publicId: string) {
   if (!request) return { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   const loc = requestLocation(request.message);
   const wa = customerWhatsAppUrl(request.phone);
-  const tel = request.phone.replace(/[^\d+]/g, "");
   const admin = `${site.url.replace(/\/$/, "")}/admin/solicitudes/${request.publicId}`;
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
-  if (tel) contact.push({ text: "📞 Contactar", url: `tel:${tel}` });
   if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
+  contact.push({ text: "📞 Ficha", url: admin });
   if (contact.length) keyboard.push(contact);
   keyboard.push([{ text: "✅ Marcar atendido", callback_data: `cc:c:${request.publicId}` }]);
   const appt = latestAppointment(request.publicId);
   if (appt?.appointment_id) {
     keyboard.push([{ text: "📅 Ver cita", callback_data: `cc:g:${appt.appointment_id}` }]);
   }
-  keyboard.push([{ text: "🌐 Abrir ficha", url: admin }]);
   keyboard.push([{ text: "⬅ Volver", callback_data: "cc:r:0" }]);
   return {
     text: [
@@ -185,11 +183,15 @@ export function rescueDetail(leadId: string) {
     return { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   }
   const wa = customerWhatsAppUrl(lead.phone);
-  const tel = lead.phone.replace(/[^\d+]/g, "");
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
-  if (tel) contact.push({ text: "📞 Contactar", url: `tel:${tel}` });
   if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
+  if (lead.leadId.startsWith("HS-")) {
+    contact.push({
+      text: "📞 Ficha",
+      url: `${site.url.replace(/\/$/, "")}/admin/solicitudes/${lead.leadId}`,
+    });
+  }
   if (contact.length) keyboard.push(contact);
   keyboard.push([
     { text: "✅ Atendido", callback_data: `cc:c:${lead.leadId}` },
@@ -266,14 +268,12 @@ export function appointmentDetail(appointmentId: string) {
   if (!item) return { text: "Esta cita ya no está disponible.", keyboard: [[{ text: "⬅ Agenda", callback_data: "cc:a:0" }]] };
   const lead = getLead(item.leadId);
   const wa = customerWhatsAppUrl(item.phone);
-  const tel = String(item.phone || "").replace(/[^\d+]/g, "");
   const calendar = `${site.url.replace(/\/$/, "")}/admin/citas`;
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
-  if (tel) contact.push({ text: "📞 Contactar", url: `tel:${tel}` });
   if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
+  contact.push({ text: "🌐 Abrir calendario", url: calendar });
   if (contact.length) keyboard.push(contact);
-  keyboard.push([{ text: "🌐 Abrir calendario", url: calendar }]);
   keyboard.push([{ text: "⬅ Agenda", callback_data: "cc:a:0" }]);
   return {
     text: [

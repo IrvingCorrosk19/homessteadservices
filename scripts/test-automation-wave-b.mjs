@@ -55,7 +55,8 @@ check("user errors are spanish", opsTg.includes("No pudimos actualizarlo en este
 check("internal APIs authenticated", summaryApi.includes("verifyInternalHomesteadRequest") && actionApi.includes("verifyInternalHomesteadRequest"));
 check("health has ops freshness", health.includes("last_ops_engine_at") && health.includes("last_daily_brief_at"));
 check("wave b columns migrated", saveSrc.includes("rescue_alerted_at") && saveSrc.includes("sla_first_alerted_at") && saveSrc.includes("ops_audit"));
-check("contact does not auto-mark", opsTg.includes("url: `tel:") && opsTg.includes("Marcar atendido"));
+check("contact does not auto-mark", opsTg.includes("WhatsApp") && opsTg.includes("Marcar atendido"));
+check("no tel inline urls", !opsTg.includes("tel:") && !opsEngine.includes("tel:"));
 check("edit in place", opsTg.includes("editMessageId"));
 check("no invented revenue", !opsTg.includes("potenciales") && !opsEngine.includes("$1,") && !opsTg.includes("USD"));
 

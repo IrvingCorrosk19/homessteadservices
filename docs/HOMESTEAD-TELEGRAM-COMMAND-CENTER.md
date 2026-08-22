@@ -42,7 +42,7 @@ Compact, no PII in `callback_data` (Telegram 64-byte limit):
 - `cc:a:0` agenda day offset · `cc:n` next 7 days · `cc:g:HA-…` appointment detail
 - `cc:m` marketing pending · `cc:s` today summary
 
-Opening `tel:` or `wa.me` does **not** mark contacted. That requires `✅ Atendido`.
+Telegram inline URL buttons only accept http/https. `tel:` is not supported and caused `telegram_zero` (the whole message failed). Phone stays in the message body. WhatsApp uses `https://wa.me/...`. “Ficha” opens the real admin URL. Opening a URL does not mark contacted.
 
 Admin links use real routes: `/admin/solicitudes/HS-…` and `/admin/citas`. Appointments cannot be cancelled from Telegram in Wave B.
 

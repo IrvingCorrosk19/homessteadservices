@@ -41,13 +41,17 @@ function enqueueOpsAlert(input: {
 }
 
 function contactButtons(id: string, phone: string): TelegramButton[][] {
-  const tel = phone.replace(/[^\d+]/g, "");
   const wa = customerWhatsAppUrl(phone);
   const row: TelegramButton[] = [];
-  if (tel) row.push({ text: "📞 Contactar", url: `tel:${tel}` });
   if (wa) row.push({ text: "💬 WhatsApp", url: wa });
+  if (id.startsWith("HS-")) {
+    row.push({
+      text: "📞 Ficha",
+      url: `${(process.env.NEXT_PUBLIC_SITE_URL || "https://homestead.lat").replace(/\/$/, "")}/admin/solicitudes/${id}`,
+    });
+  }
   return [
-    row.length ? row : [{ text: "📞 Contactar", callback_data: `cc:v:${id}` }],
+    row.length ? row : [{ text: "📞 Ver teléfono arriba", callback_data: `cc:v:${id}` }],
     [
       { text: "✅ Atendido", callback_data: `cc:c:${id}` },
       { text: "🕒 15 min", callback_data: `cc:z:${id}:15` },
