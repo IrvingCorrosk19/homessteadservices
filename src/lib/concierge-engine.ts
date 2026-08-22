@@ -25,6 +25,20 @@ import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/c
 import { formatPanamaSlot } from "@/lib/concierge-datetime";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SniffedImage } from "@/lib/photos";
+import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import {
+  applyLocationCorrection,
+  choosePrimary,
+  countQuestions,
+  detectServices,
+  detectUnknownOpportunity,
+  detectUrgency,
+  mergeDetectedServices,
+  missingUsefulFacts,
+  playbookPromptBlock,
+  redactForModel,
+} from "@/lib/concierge/playbook-engine";
+import { copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -42,11 +56,11 @@ function fallbackReply(message: string) {
   }
   if (INJECTION_RE.test(message)) return injectionDeniedReply();
   if (EXIT_RE.test(message)) return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
-  return "Estoy teniendo un inconveniente para continuar por aquí. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
+  return "Estoy teniendo un inconveniente para continuar por aquí. Lo que ya me contaste queda anotado. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
 }
 
 function extractCasualFacts(state: ConversationState, text: string) {
-  const next = { ...state };
+  const next = { ...state, facts: { ...(state.facts || {}) } };
   const soy = text.match(/\bsoy\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i);
   if (soy && !looksLikePhoneAttempt(soy[1])) next.name = soy[1].trim().slice(0, 80);
   const email = text.match(EMAIL_RE);
@@ -55,11 +69,21 @@ function extractCasualFacts(state: ConversationState, text: string) {
   else if (/\bcasa\b/i.test(text)) next.propertyType = "house";
   else if (/\boffice|oficina\b/i.test(text)) next.propertyType = "office";
   const zone = text.match(/\ben\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/);
-  if (zone && !next.location) next.location = zone[1].trim();
-  if (/aire|enfri|bota agua|condens/i.test(text) && !next.service) next.service = "ac";
-  if (/fuga|fregador|plom/i.test(text) && !next.service) next.service = "plumbing";
-  if (/pintar|pintur/i.test(text) && !next.service) next.service = "painting";
-  if (!next.problem && text.trim().length > 12 && !looksLikePhoneAttempt(text)) {
+  if (zone && !looksLikePhoneAttempt(zone[1])) next.location = zone[1].trim();
+  next.location = applyLocationCorrection(text, next.location);
+  if (next.location) next.facts.location = next.location;
+  const detected = detectServices(text);
+  next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
+  next.primaryService = choosePrimary(next.detectedServices, next.primaryService || next.service);
+  if (next.primaryService) next.service = next.primaryService;
+  next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
+  const playbook = getPlaybook(next.primaryService || next.service);
+  next.bookingStrategy = playbook.bookingStrategy;
+  if (detectUnknownOpportunity(text) || next.primaryService === "other") next.needsReview = true;
+  const urgency = detectUrgency(text, playbook);
+  if (urgency !== "normal" || !next.urgency) next.urgency = urgency;
+  if (/agend|cita|visita|disponib/i.test(text)) next.bookingIntent = true;
+  if (!next.problem && text.trim().length > 12 && !looksLikePhoneAttempt(text) && !/^te envié una foto/i.test(text)) {
     next.problem = text.trim().slice(0, 500);
   }
   return mergeParsedWhen(next, text);
@@ -100,10 +124,7 @@ async function completeTurn(messages: ChatMessage[]) {
 function chipsFrom(state: ConversationState, booked: boolean, human: boolean) {
   if (human || booked) return [];
   if (state.offeredSlots.length) return state.offeredSlots.slice(0, 3).map((item) => item.label);
-  if (!state.service) return ["Necesito un servicio", "Quiero cotizar", "Quiero agendar"];
-  if (!state.location) return ["Estoy en la ciudad", "Estoy en el interior"];
-  if (state.contactStatus !== "VALID") return [];
-  return ["Mañana", "Esta semana", "Prefiero que me llamen"];
+  return [];
 }
 
 export function canCreateLead(state: ConversationState) {
@@ -190,18 +211,22 @@ export async function conciergeTurn(input: {
 
     if (conciergeApiKey()) {
       try {
-        const history = recentMessages(input.conversationId, 12);
+        const playbook = getPlaybook(state.primaryService || state.service);
+        const missing = missingUsefulFacts(state, playbook);
+        const history = recentMessages(input.conversationId, 10);
         const messages: ChatMessage[] = [
-          { role: "system", content: conciergeSystemPrompt(knowledge) },
+          { role: "system", content: conciergeSystemPrompt(knowledge, playbookPromptBlock(playbook, state, missing)) },
           {
             role: "system",
             content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
               name: state.name || null,
               phone: state.contactStatus === "VALID" ? "valid" : state.contactStatus,
-              email: state.email || null,
+              email: state.email ? "present" : null,
               location: state.location || null,
               propertyType: state.propertyType || null,
-              service: state.service || null,
+              service: state.primaryService || state.service || null,
+              detectedServices: state.detectedServices || [],
+              facts: state.facts || {},
               problem: state.problem || null,
               preferredDate: state.preferredDate || null,
               preferredTime: state.preferredTime || null,
@@ -209,15 +234,17 @@ export async function conciergeTurn(input: {
               appointmentId: state.appointmentId || null,
               offeredSlots: state.offeredSlots,
               photos: photoCount(input.conversationId),
+              bookingStrategy: state.bookingStrategy || playbook.bookingStrategy,
+              urgency: state.urgency || "normal",
               safety: SAFETY_RE.test(text),
             })}`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
-            content: item.body,
+            content: redactForModel(item.body),
           })),
         ];
-        for (let round = 0; round < 4; round += 1) {
+        for (let round = 0; round < 3; round += 1) {
           const result = await completeTurn(messages);
           if (result.usage) {
             recordUsage(input.conversationId, result.usage.prompt_tokens || 0, result.usage.completion_tokens || 0);
@@ -303,13 +330,26 @@ export async function conciergeTurn(input: {
       reply = booked.text;
     }
 
-    const ended = HUMAN_RE.test(text) && state.humanRequested;
-    if (HUMAN_RE.test(text)) state.humanRequested = true;
+    if (HUMAN_RE.test(text)) {
+      state.humanRequested = true;
+      state.humanHandoffRequested = true;
+      addEvent(input.conversationId, "HUMAN_HANDOFF_REQUESTED");
+      if (!/ya dejo tu solicitud|nuestro equipo/i.test(reply)) {
+        reply = ctx.leadId
+          ? "Claro. Ya dejo tu solicitud para que podamos continuar contigo. Un miembro del equipo te contacta; no tengo a alguien en línea en este chat."
+          : "Claro. Si me dejas un teléfono, dejo la solicitud para que el equipo te contacte. No tengo a alguien en línea en este chat.";
+      }
+    }
+    const ended = Boolean(state.humanHandoffRequested && HUMAN_RE.test(text));
+    state.questionsAsked = (state.questionsAsked || 0) + (countQuestions(reply) > 0 ? 1 : 0);
+    if (state.questionsAsked > 5 && !ctx.leadId && !state.appointmentId) {
+      addEvent(input.conversationId, "OVERQUESTIONING");
+    }
     const outcome = inferOutcome({
       appointmentId: state.appointmentId,
       leadId: ctx.leadId,
-      ended: Boolean(ended),
-      unsupported: /fuera de alcance|no ofrecemos/.test(reply.toLowerCase()),
+      ended,
+      unsupported: false,
     });
     if (ended || state.appointmentId) setConversationOutcome(input.conversationId, outcome);
 
@@ -335,7 +375,7 @@ export async function conciergeTurn(input: {
       dryLead: false,
       whatsappUrl: wa,
       contactUrl: "/contact",
-      ended: Boolean(ended),
+      ended,
       requiresHuman: state.humanRequested,
     };
   } finally {
@@ -352,6 +392,9 @@ export function attachConciergePhoto(conversationId: string, bytes: Buffer, snif
   touchConversation(conversationId, { state });
   addEvent(conversationId, "PHOTO_ATTACHED");
   addMessage(conversationId, "user", `[Foto adjunta: ${stored}]`);
+  if (conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-")) {
+    copyConciergePhotosToRequest(conversationId, conversation.leadPublicId);
+  }
   return { stored };
 }
 

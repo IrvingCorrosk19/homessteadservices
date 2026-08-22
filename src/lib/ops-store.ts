@@ -217,6 +217,30 @@ export function countRescueLeads(includeTest = false) {
   return row.n;
 }
 
+export function countLeadPhotos(leadId: string, conversationId = "") {
+  let n = 0;
+  try {
+    if (conversationId) {
+      const row = getHomesteadDb()
+        .prepare("SELECT COUNT(*) as n FROM concierge_photos WHERE conversation_id = ?")
+        .get(conversationId) as { n: number } | undefined;
+      n = Math.max(n, Number(row?.n || 0));
+    }
+  } catch {
+    n = n;
+  }
+  try {
+    const req = getHomesteadDb()
+      .prepare("SELECT photos_json FROM service_requests WHERE public_id = ?")
+      .get(leadId) as { photos_json: string } | undefined;
+    const photos = JSON.parse(req?.photos_json || "[]") as unknown;
+    if (Array.isArray(photos)) n = Math.max(n, photos.length);
+  } catch {
+    n = n;
+  }
+  return n;
+}
+
 export function isRescueEligible(leadId: string, attentionMs: number) {
   const lead = getLead(leadId);
   if (!lead) return false;
@@ -237,11 +261,13 @@ export function isRescueEligible(leadId: string, attentionMs: number) {
   if (open) return false;
   const phone = classifyPhone(lead.phone);
   if (phone.status !== "VALID") return false;
+  const photosPresent = countLeadPhotos(leadId, row.conversation_id) > 0;
   const hasIntent =
     lead.temperature === "HOT" ||
     lead.temperature === "WARM" ||
     (lead.service && lead.service !== "unknown" && lead.service !== "other") ||
-    (lead.problem || "").trim().length >= 20;
+    (lead.problem || "").trim().length >= 20 ||
+    photosPresent;
   if (!hasIntent) return false;
   const activity = lastActivityIso(leadId, row.conversation_id, row.updated_at || row.created_at);
   const activityMs = Date.parse(activity);
@@ -311,7 +337,7 @@ export function listSlaDue(kind: "first" | "escalation") {
       : "(r.sla_first_alerted_at IS NOT NULL AND r.sla_first_alerted_at != '' AND (r.sla_escalated_at IS NULL OR r.sla_escalated_at = ''))";
   return getHomesteadDb()
     .prepare(
-      `SELECT r.public_id, r.created_at, r.name, r.service, r.message, r.phone, COALESCE(l.is_test,0) as is_test
+      `SELECT r.public_id, r.created_at, r.name, r.service, r.message, r.phone, r.photos_json, COALESCE(l.is_test,0) as is_test
        FROM service_requests r
        LEFT JOIN revenue_leads l ON l.lead_id = r.public_id
        WHERE r.status = 'NEW'
@@ -328,6 +354,7 @@ export function listSlaDue(kind: "first" | "escalation") {
     service: string;
     message: string;
     phone: string;
+    photos_json: string;
     is_test: number;
   }>;
 }

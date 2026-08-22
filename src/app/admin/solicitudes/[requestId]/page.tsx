@@ -9,6 +9,7 @@ import {
   listRequestMessages,
 } from "@/lib/service-requests";
 import type { FormService } from "@/lib/site";
+import { adminFactRows } from "@/lib/concierge/playbook-engine";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,11 @@ export default async function SolicitudDetailPage({
         messages={messages}
         serviceLabel={serviceLabel}
         whatsappUrl={whatsappUrl}
+        factRows={adminFactRows({
+          service: request.service,
+          photos: request.photos.length,
+          factsJson: request.factsJson,
+        })}
       />
     </>
   );

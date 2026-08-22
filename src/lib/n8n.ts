@@ -9,6 +9,7 @@ import {
 } from "@/lib/service-requests";
 import { site } from "@/lib/site";
 import type { FormService, PropertyType } from "@/lib/site";
+import { telegramServiceLines } from "@/lib/concierge/playbook-engine";
 
 const TIMEOUT_MS = 25000;
 
@@ -38,6 +39,9 @@ export type HomesteadN8nPayload = {
   actions: {
     contactWhatsApp: string | null;
     replyUrl: string;
+  };
+  presentation?: {
+    lines: string[];
   };
 };
 
@@ -93,6 +97,13 @@ export function buildN8nPayload(saved: SavedServiceRequest): HomesteadN8nPayload
         `Hola ${saved.name}, le contactamos de Homestead Services con relación a su solicitud ${saved.publicId}.`,
       ),
       replyUrl: `${siteUrl}/admin/solicitudes/${saved.publicId}`,
+    },
+    presentation: {
+      lines: telegramServiceLines({
+        service: saved.service,
+        message: saved.message,
+        photoCount: items.length,
+      }),
     },
   };
 }

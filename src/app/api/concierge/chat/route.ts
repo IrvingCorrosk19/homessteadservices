@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       reply: "Puedo seguir registrando tu solicitud. Cuéntame brevemente qué servicio necesitas.",
-      chips: ["Aire acondicionado", "Plomería", "Electricidad"],
+      chips: [],
       contactUrl: "/contact",
     });
   }

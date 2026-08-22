@@ -14,8 +14,35 @@ import {
 import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
 import { isConciergeDryRun } from "@/lib/concierge-flags";
 import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
+import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import {
+  applyFactPatch,
+  detectServices,
+  mergeDetectedServices,
+  choosePrimary,
+  shouldOfferAvailability,
+} from "@/lib/concierge/playbook-engine";
 
 export const CONCIERGE_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "record_service_intelligence",
+      description: "Interpreta el turno: oficios, hechos, urgencia, intención de agendar. No se muestra al cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          detectedServices: { type: "array", items: { type: "string" } },
+          primaryService: { type: "string" },
+          facts: { type: "object", additionalProperties: { type: "string" } },
+          urgency: { type: "string", enum: ["normal", "elevated", "safety"] },
+          bookingIntent: { type: "boolean" },
+          needsReview: { type: "boolean" },
+          nextAction: { type: "string" },
+        },
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -145,16 +172,17 @@ function asString(value: unknown) {
 
 function searchCatalog(query: string) {
   const knowledge = conciergeKnowledge();
-  const blob = query.toLowerCase();
-  const match = knowledge.services.find((item) => blob.includes(item.slug) || blob.includes(item.title.toLowerCase()));
-  let slug = match?.slug || "other";
-  if (/aire|a\/c|enfri|condens|filtro/.test(blob)) slug = "ac";
-  else if (/fuga|plom|fregador|tuber|inodoro/.test(blob)) slug = "plumbing";
-  else if (/pintar|pintur|humedad en pared/.test(blob)) slug = "painting";
-  else if (/toma|interruptor|el[eé]ctric|chispa/.test(blob)) slug = "electrical";
-  else if (/cerradur|llave|puerta no cierra/.test(blob)) slug = "locksmith";
+  const detected = detectServices(query);
+  const slug = detected[0] || "other";
   const found = knowledge.services.find((item) => item.slug === slug);
-  return { slug, title: found?.title || slug, inCatalog: Boolean(found) };
+  const playbook = getPlaybook(slug);
+  return {
+    slug,
+    title: found?.title || playbook.label,
+    inCatalog: Boolean(found) && !playbook.unknownCatalog,
+    needsReview: playbook.unknownCatalog || slug === "other",
+    also: detected.slice(1),
+  };
 }
 
 export async function executeConciergeTool(
@@ -164,6 +192,44 @@ export async function executeConciergeTool(
 ): Promise<ToolResult> {
   const state = { ...ctx.state };
   let leadId = ctx.leadId;
+
+  if (name === "record_service_intelligence") {
+    const incoming = Array.isArray(args.detectedServices)
+      ? args.detectedServices.map((item) => String(item))
+      : [];
+    const fromText = detectServices([state.problem, asString(args.primaryService), incoming.join(" ")].join(" "));
+    state.detectedServices = mergeDetectedServices(state.detectedServices || [], [...incoming, ...fromText]);
+    state.primaryService = choosePrimary(state.detectedServices, asString(args.primaryService) || state.primaryService || state.service);
+    if (state.primaryService) state.service = state.primaryService;
+    state.secondaryServices = state.detectedServices.filter((id) => id !== state.primaryService);
+    if (args.facts && typeof args.facts === "object") {
+      state.facts = applyFactPatch(state.facts || {}, args.facts as Record<string, unknown>);
+    }
+    const urgency = asString(args.urgency);
+    if (urgency === "normal" || urgency === "elevated" || urgency === "safety") state.urgency = urgency;
+    state.bookingIntent = Boolean(args.bookingIntent) || state.bookingIntent;
+    state.needsReview = Boolean(args.needsReview) || getPlaybook(state.primaryService).unknownCatalog;
+    state.bookingStrategy = getPlaybook(state.primaryService || state.service).bookingStrategy;
+    if (state.facts.location && !state.location) state.location = state.facts.location;
+    if ((state.facts.what || state.facts.symptom || state.facts.need) && !state.problem) {
+      state.problem = (state.facts.need || state.facts.symptom || state.facts.what).slice(0, 500);
+    }
+    recordFunnelEvent(ctx.conversationId, "IntentDetected", {
+      intent: asString(args.nextAction),
+      service: state.primaryService || state.service,
+    });
+    return {
+      result: {
+        primaryService: state.primaryService || null,
+        detectedServices: state.detectedServices,
+        urgency: state.urgency,
+        bookingStrategy: state.bookingStrategy,
+        facts: state.facts,
+      },
+      state,
+      leadId,
+    };
+  }
 
   if (name === "remember_customer_facts") {
     if (asString(args.name) && !/^\+?\d[\d\s-]{5,}$/.test(asString(args.name))) {
@@ -199,7 +265,13 @@ export async function executeConciergeTool(
 
   if (name === "search_services") {
     const found = searchCatalog(asString(args.query) || state.problem);
-    if (found.inCatalog) state.service = found.slug;
+    if (found.slug) {
+      state.service = found.slug;
+      state.detectedServices = mergeDetectedServices(state.detectedServices || [], [found.slug, ...(found.also || [])]);
+      state.primaryService = choosePrimary(state.detectedServices, found.slug);
+      state.needsReview = Boolean(found.needsReview);
+      state.bookingStrategy = getPlaybook(state.primaryService || found.slug).bookingStrategy;
+    }
     return { result: found, state, leadId };
   }
 
@@ -222,6 +294,18 @@ export async function executeConciergeTool(
   }
 
   if (name === "check_availability") {
+    const playbook = getPlaybook(state.primaryService || state.service);
+    if (!shouldOfferAvailability(playbook, state) && !state.bookingIntent) {
+      return {
+        result: {
+          ok: false,
+          reason: playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" ? "photo_review_first" : "tech_review_first",
+          guidance: playbook.photoGuidance,
+        },
+        state,
+        leadId,
+      };
+    }
     const availability = checkAvailability({
       dateText: asString(args.dateText) || state.preferredDate,
       timeText: asString(args.timeText) || state.preferredTime,
@@ -341,6 +425,7 @@ export async function executeConciergeTool(
 
   if (name === "escalate_human") {
     state.humanRequested = true;
+    state.humanHandoffRequested = true;
     if (!leadId && canHandoffLead(state)) {
       leadId = await createLeadFromConcierge({
         conversationId: ctx.conversationId,

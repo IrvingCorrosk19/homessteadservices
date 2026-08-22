@@ -26,6 +26,16 @@ export type ConversationState = {
   appointmentId: string;
   humanRequested: boolean;
   lastAvailabilityAt: string;
+  detectedServices: string[];
+  primaryService: string;
+  secondaryServices: string[];
+  facts: Record<string, string>;
+  urgency: string;
+  bookingIntent: boolean;
+  bookingStrategy: string;
+  questionsAsked: number;
+  humanHandoffRequested: boolean;
+  needsReview: boolean;
 };
 
 const emptyState = (): ConversationState => ({
@@ -48,6 +58,16 @@ const emptyState = (): ConversationState => ({
   appointmentId: "",
   humanRequested: false,
   lastAvailabilityAt: "",
+  detectedServices: [],
+  primaryService: "",
+  secondaryServices: [],
+  facts: {},
+  urgency: "normal",
+  bookingIntent: false,
+  bookingStrategy: "",
+  questionsAsked: 0,
+  humanHandoffRequested: false,
+  needsReview: false,
 });
 
 export function hashIp(ip: string) {

@@ -9,8 +9,10 @@ import {
   formatAppointmentDay,
 } from "@/lib/appointment-time";
 import { agoLabel, opsConfig } from "@/lib/ops-config";
+import { telegramServiceLines } from "@/lib/concierge/playbook-engine";
 import {
   commandCenterSummary,
+  countLeadPhotos,
   countPendingRequests,
   countRescueLeads,
   dismissLead,
@@ -161,7 +163,11 @@ export function requestDetail(publicId: string) {
       `📥 ${request.publicId}`,
       "",
       `👤 ${request.name}`,
-      `🛠 ${appointmentServiceLabel(request.service, request.message)}`,
+      ...telegramServiceLines({
+        service: request.service,
+        message: request.message,
+        photoCount: request.photos.length,
+      }),
       loc ? `📍 ${loc}` : "",
       `🕐 ${agoLabel(request.createdAt)}`,
       "",
@@ -227,13 +233,18 @@ export function rescueDetail(leadId: string) {
     { text: "❌ Descartar", callback_data: `cc:x:${lead.leadId}` },
   ]);
   keyboard.push([{ text: "⬅ Volver", callback_data: "cc:l:0" }]);
+  const photos = countLeadPhotos(lead.leadId, lead.conversationId);
   return {
     text: [
       "🔥 OPORTUNIDAD SIN CERRAR",
       lead.isTest ? "TEST · no es un cliente real" : "",
       "",
       lead.name && lead.name !== "Cliente web" ? `👤 ${lead.name}` : "",
-      `🛠 ${appointmentServiceLabel(lead.service, lead.problem)}`,
+      ...telegramServiceLines({
+        service: lead.service,
+        message: lead.problem,
+        photoCount: photos,
+      }),
       lead.location ? `📍 ${lead.location}` : "",
       `🕐 ${agoLabel(lead.leadCreatedAt)}`,
       "",

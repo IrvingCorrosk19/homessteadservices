@@ -28,11 +28,13 @@ export function RequestDetailClient({
   messages,
   serviceLabel,
   whatsappUrl,
+  factRows = [],
 }: {
   request: SavedServiceRequest;
   messages: RequestMessage[];
   serviceLabel: string;
   whatsappUrl: string | null;
+  factRows?: Array<{ label: string; value: string }>;
 }) {
   const [status, setStatus] = useState(request.status);
   const [history, setHistory] = useState(messages);
@@ -80,6 +82,20 @@ export function RequestDetailClient({
           </a>
         ) : null}
       </section>
+
+      {factRows.length > 0 ? (
+        <section className="mt-4 rounded-[24px] border border-navy/8 bg-white p-6 md:p-8">
+          <p className="text-[0.72rem] tracking-[0.16em] uppercase text-mist">Hechos del servicio</p>
+          <dl className="mt-4 grid gap-3">
+            {factRows.map((row) => (
+              <div key={row.label}>
+                <dt className="text-[0.72rem] uppercase tracking-[0.12em] text-mist">{row.label}</dt>
+                <dd className="mt-1 text-navy">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
 
       <section className="mt-4 rounded-[24px] border border-navy/8 bg-white p-6 md:p-8">
         <p className="text-[0.72rem] tracking-[0.16em] uppercase text-mist">Mensaje</p>

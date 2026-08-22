@@ -39,6 +39,7 @@ export type SavedServiceRequest = {
   service: string;
   message: string;
   photos: SavedPhoto[];
+  factsJson?: string;
 };
 
 export type RequestMessage = {
@@ -345,6 +346,14 @@ function migrateContentStudio(database: Database.Database) {
   const conciergeCols = columnNames(database, "concierge_conversations");
   if (conciergeCols.length && !conciergeCols.includes("outcome")) {
     database.exec(`ALTER TABLE concierge_conversations ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`);
+  }
+  const photoCols = columnNames(database, "concierge_photos");
+  if (photoCols.length && !photoCols.includes("lead_id")) {
+    database.exec(`ALTER TABLE concierge_photos ADD COLUMN lead_id TEXT NOT NULL DEFAULT ''`);
+  }
+  const requestCols = columnNames(database, "service_requests");
+  if (requestCols.length && !requestCols.includes("facts_json")) {
+    database.exec(`ALTER TABLE service_requests ADD COLUMN facts_json TEXT NOT NULL DEFAULT ''`);
   }
   migrateRevenueEngine(database);
 }
@@ -766,6 +775,7 @@ export function saveServiceRequest(input: {
   service: string;
   message: string;
   photos: BufferedPhoto[];
+  factsJson?: string;
 }): SavedServiceRequest {
   const database = getDb();
   const created = new Date();
@@ -792,11 +802,12 @@ export function saveServiceRequest(input: {
         storedAs,
       });
     }
+    const factsJson = input.factsJson || "";
     const info = database
       .prepare(
         `INSERT INTO service_requests
-          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json)
-         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?)`,
+          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, facts_json)
+         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         publicId,
@@ -809,6 +820,7 @@ export function saveServiceRequest(input: {
         input.service,
         input.message,
         JSON.stringify(photos),
+        factsJson,
       );
     const saved: SavedServiceRequest = {
       id: Number(info.lastInsertRowid),
@@ -823,6 +835,7 @@ export function saveServiceRequest(input: {
       service: input.service,
       message: input.message,
       photos,
+      factsJson,
     };
     insertMessage(database, {
       requestPk: saved.id,
@@ -890,6 +903,7 @@ type DbRequestRow = {
   service: string;
   message: string;
   photos_json: string;
+  facts_json?: string;
 };
 
 function mapRequest(row: DbRequestRow): SavedServiceRequest {
@@ -906,6 +920,7 @@ function mapRequest(row: DbRequestRow): SavedServiceRequest {
     service: row.service,
     message: row.message,
     photos: JSON.parse(row.photos_json) as SavedPhoto[],
+    factsJson: row.facts_json || "",
   };
 }
 
@@ -942,7 +957,7 @@ function insertMessage(
     );
 }
 
-const REQUEST_SELECT = `id, public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json`;
+const REQUEST_SELECT = `id, public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, COALESCE(facts_json,'') as facts_json`;
 
 export function getRequestByPublicId(publicId: string) {
   if (!PUBLIC_ID_PATTERN.test(publicId)) return null;

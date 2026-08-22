@@ -12,7 +12,7 @@ export function ConciergeWidget() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [ended, setEnded] = useState(false);
-  const [chips, setChips] = useState<string[]>(["Necesito un servicio", "Quiero cotizar", "Quiero agendar"]);
+  const [chips, setChips] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState<string | null>(null);
   const [leadId, setLeadId] = useState<string | null>(null);
   const [keyboardPad, setKeyboardPad] = useState(0);

@@ -5,6 +5,7 @@ import { logInfo } from "@/lib/log";
 import { agoLabel, isQuietHours, nextQuietEndIso, opsConfig, panamaParts } from "@/lib/ops-config";
 import {
   commandCenterSummary,
+  countLeadPhotos,
   listRescueDue,
   listSlaDue,
   markRescueAlerted,
@@ -12,7 +13,7 @@ import {
   panamaToday,
   todayMetrics,
 } from "@/lib/ops-store";
-import { appointmentServiceLabel } from "@/lib/appointment-time";
+import { telegramServiceLines, countPhotosJson } from "@/lib/concierge/playbook-engine";
 
 function enqueueOpsAlert(input: {
   eventType: string;
@@ -75,6 +76,7 @@ export function enqueueRescueAlerts() {
     const waited = agoLabel(lead.leadCreatedAt);
     const test = lead.isTest ? "TEST · no es un cliente real\n\n" : "";
     const name = lead.name && lead.name !== "Cliente web" ? `👤 ${lead.name}\n` : "";
+    const photos = countLeadPhotos(lead.leadId, lead.conversationId);
     enqueueOpsAlert({
       eventType: "lead.rescue_eligible",
       correlationId: lead.leadId,
@@ -83,11 +85,18 @@ export function enqueueRescueAlerts() {
       text: [
         "🔥 OPORTUNIDAD SIN CERRAR",
         "",
-        test + name + `🛠 ${appointmentServiceLabel(lead.service, lead.problem)}`,
+        test + name,
+        ...telegramServiceLines({
+          service: lead.service,
+          message: lead.problem,
+          photoCount: photos,
+        }),
         lead.location ? `📍 ${lead.location}` : "",
         `🕐 Sin respuesta ${waited.toLowerCase()}`,
         "",
-        "El cliente dejó un teléfono pero no terminó de agendar.",
+        photos > 0
+          ? "El cliente dejó teléfono y fotos, pero no terminó de agendar."
+          : "El cliente dejó un teléfono pero no terminó de agendar.",
         "",
         lead.leadId,
       ]
@@ -112,6 +121,7 @@ export function enqueueSlaAlerts() {
   let n = 0;
   for (const row of listSlaDue("first")) {
     if (!markSlaAlerted(row.public_id, "first")) continue;
+    const photos = countPhotosJson(row.photos_json);
     enqueueOpsAlert({
       eventType: "sla.first_response",
       correlationId: row.public_id,
@@ -122,7 +132,12 @@ export function enqueueSlaAlerts() {
         "",
         row.is_test ? "TEST · no es un cliente real" : "",
         row.public_id,
-        appointmentServiceLabel(row.service, row.message),
+        ...telegramServiceLines({
+          service: row.service,
+          message: row.message,
+          photoCount: photos,
+        }),
+        photos > 0 ? `${photos} foto${photos === 1 ? "" : "s"} esperando revisión.` : "",
         `${opsConfig().slaFirstMinutes} min sin atención.`,
       ]
         .filter((line) => line !== "")
@@ -133,6 +148,7 @@ export function enqueueSlaAlerts() {
   }
   for (const row of listSlaDue("escalation")) {
     if (!markSlaAlerted(row.public_id, "escalation")) continue;
+    const photos = countPhotosJson(row.photos_json);
     enqueueOpsAlert({
       eventType: "sla.escalation",
       correlationId: row.public_id,
@@ -143,7 +159,11 @@ export function enqueueSlaAlerts() {
         "",
         row.is_test ? "TEST · no es un cliente real" : "",
         row.public_id,
-        appointmentServiceLabel(row.service, row.message),
+        ...telegramServiceLines({
+          service: row.service,
+          message: row.message,
+          photoCount: photos,
+        }),
         `${opsConfig().slaEscalationMinutes} min sin atender.`,
       ]
         .filter((line) => line !== "")

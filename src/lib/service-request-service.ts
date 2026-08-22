@@ -12,6 +12,7 @@ export type ServiceRequestInput = {
   service: string;
   message: string;
   photos: BufferedPhoto[];
+  factsJson?: string;
 };
 
 export async function persistServiceRequest(input: ServiceRequestInput): Promise<SavedServiceRequest> {
