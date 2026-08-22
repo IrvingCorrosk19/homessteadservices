@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { outboxSnapshot } from "@/lib/automation-outbox";
+import { outboxSnapshot, getEngineState } from "@/lib/automation-outbox";
 import { inspectTelegramWebhook } from "@/lib/content-telegram";
 
 export const runtime = "nodejs";
@@ -26,5 +26,10 @@ export async function GET() {
           lastError: webhook.lastError,
         }
       : { match: false },
+    ops: {
+      lastOpsEngineAt: getEngineState("last_ops_engine_at")?.value || null,
+      lastDailyBriefAt: getEngineState("last_daily_brief_at")?.value || null,
+      lastSchedulerAt: box.lastSchedulerAt,
+    },
   });
 }

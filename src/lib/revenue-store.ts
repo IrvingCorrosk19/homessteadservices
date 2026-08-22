@@ -630,6 +630,7 @@ export function createAppointment(
     .prepare("UPDATE revenue_leads SET visit_proposed_at = COALESCE(visit_proposed_at, ?), updated_at = ? WHERE lead_id = ?")
     .run(nowIso(), nowIso(), leadId);
   addRevenueEvent(leadId, normalized === "REQUESTED" ? "APPOINTMENT_REQUESTED" : "APPOINTMENT_CREATED");
+  void import("@/lib/ops-store").then((mod) => mod.markRescuedToBooking(leadId)).catch(() => undefined);
   return id;
 }
 

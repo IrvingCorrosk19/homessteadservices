@@ -19,6 +19,14 @@ export function shouldForceN8nFailure() {
   return process.env.AUTOMATION_N8N_FAIL === "true";
 }
 
+async function deliverOpsEvent(data: Record<string, unknown>, eventType: string) {
+  if (String(data.event || "") === "ops.telegram.alert" || eventType.startsWith("lead.") || eventType.startsWith("sla.") || eventType.startsWith("daily.")) {
+    const { deliverOpsTelegram } = await import("@/lib/ops-telegram");
+    return deliverOpsTelegram(data);
+  }
+  return { ok: false as const, cause: "unknown_event" };
+}
+
 export async function drainAutomationOutbox(limit = 8) {
   if (!isAutomationDispatchEnabled()) return { claimed: 0, delivered: 0, failed: 0 };
   const due = listDueOutbox(limit);
@@ -41,11 +49,15 @@ export async function drainAutomationOutbox(limit = 8) {
         throw new Error("forced_n8n_fail");
       }
       const envelope = JSON.parse(row.payloadJson) as AutomationEnvelope;
-      const result = await postN8nPayload(envelope.data as never, {
-        eventId: row.eventId,
-        idempotencyKey: row.idempotencyKey,
-        correlationId: row.correlationId,
-      });
+      const eventType = row.eventType || envelope.eventType;
+      const result =
+        eventType === "service_request.created"
+          ? await postN8nPayload(envelope.data as never, {
+              eventId: row.eventId,
+              idempotencyKey: row.idempotencyKey,
+              correlationId: row.correlationId,
+            })
+          : await deliverOpsEvent(envelope.data, eventType);
       if (!result.ok) {
         if (result.cause === "not_configured") {
           markOutboxSkipped(row.eventId, "n8n_not_configured");
@@ -71,8 +83,10 @@ export async function drainAutomationOutbox(limit = 8) {
         continue;
       }
       markOutboxDelivered(row.eventId);
-      const saved = getRequestByPublicId(row.correlationId);
-      if (saved) recordTelegramNotified(saved);
+      if (eventType === "service_request.created") {
+        const saved = getRequestByPublicId(row.correlationId);
+        if (saved) recordTelegramNotified(saved);
+      }
       delivered += 1;
       logInfo("AutomationDispatchSucceeded", {
         eventId: row.eventId,

@@ -24,6 +24,17 @@ export async function POST(request: Request) {
       });
     }
     try {
+      const { runOpsEngine } = await import("@/lib/ops-engine");
+      const ops = runOpsEngine();
+      setEngineState("last_ops_engine_at", new Date().toISOString());
+      void ops;
+    } catch (error) {
+      logError("AutomationDispatchFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+        stage: "ops_engine",
+      });
+    }
+    try {
       await drainAutomationOutbox();
     } catch (error) {
       logError("AutomationDispatchFailed", {
@@ -31,7 +42,7 @@ export async function POST(request: Request) {
       });
     }
     const result = await runContentScheduler();
-    let reminders: { sent: number } = { sent: 0 };
+    let reminders: { sent: number; checked?: number; minutes?: number } = { sent: 0 };
     try {
       reminders = await runHotLeadReminders();
     } catch (error) {

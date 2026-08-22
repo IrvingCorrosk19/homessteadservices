@@ -37,7 +37,6 @@ import {
   rescheduleAppointment,
   listLeads,
   listUnattendedHotLeads,
-  markHotReminded,
   markLeadAlerted,
   markLeadHumanAction,
   markQuoteSent,
@@ -251,15 +250,6 @@ function confirmKeyboard(leadId: string) {
   ];
 }
 
-function reminderKeyboard(leadId: string) {
-  return [
-    [
-      { text: "ATENDER AHORA", callback_data: `rv:${leadId}:now` },
-      { text: "RECORDAR MÁS TARDE", callback_data: `rv:${leadId}:later` },
-    ],
-  ];
-}
-
 function visitSummary(lead: NonNullable<ReturnType<typeof getLead>>, date: string, time: string) {
   return [
     "Propuesta interna (aún no confirmada con el cliente)",
@@ -309,32 +299,7 @@ export async function sendNewLeadAlert(leadId: string) {
 export async function runHotLeadReminders() {
   const minutes = contactRegion().hotLeadAttentionMinutes;
   const leads = listUnattendedHotLeads(minutes * 60_000);
-  let sent = 0;
-  for (const lead of leads) {
-    if (!lead || lead.doNotContact) continue;
-    markHotReminded(lead.leadId);
-    const waited = Math.max(
-      1,
-      Math.round((Date.now() - Date.parse(lead.leadCreatedAt || "")) / 60000) || 1,
-    );
-    const text = [
-      "━━━━━━━━━━━━━━━━━━━━",
-      "⏰ LEAD SIN ATENDER",
-      "━━━━━━━━━━━━━━━━━━━━",
-      "",
-      `Cliente: ${lead.name}`,
-      `Necesidad: ${lead.problem.slice(0, 180)}`,
-      `Tiempo pendiente: ${waited} min`,
-      "Siguiente acción: Programar visita.",
-      "",
-      lead.leadId,
-    ].join("\n");
-    for (const chatId of adminChatIds()) {
-      const id = await sendTelegramMessage({ chatId, text, keyboard: reminderKeyboard(lead.leadId) });
-      if (id) sent += 1;
-    }
-  }
-  return { sent, checked: leads.length, minutes };
+  return { sent: 0, checked: leads.length, minutes };
 }
 
 export async function applyRevenueCallback(data: string, chatId = ""): Promise<RevenueCallbackResult> {

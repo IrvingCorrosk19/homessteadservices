@@ -108,6 +108,7 @@ export function enqueueOutbox(
     idempotencyKey: string;
     data: Record<string, unknown>;
     status?: OutboxStatus;
+    nextAttemptAt?: string;
   },
 ) {
   const existing = database
@@ -140,7 +141,7 @@ export function enqueueOutbox(
       JSON.stringify(envelope),
       input.status || OPEN_CLAIM,
       MAX_ATTEMPTS,
-      now,
+      input.nextAttemptAt || now,
       now,
       now,
     );

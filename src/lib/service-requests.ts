@@ -594,6 +594,37 @@ function migrateLeadHandoff(database: Database.Database) {
   addLead("visit_confirmed_at", "visit_confirmed_at TEXT");
   addLead("hot_reminded_at", "hot_reminded_at TEXT");
   addLead("pending_operator", "pending_operator TEXT NOT NULL DEFAULT ''");
+  addLead("snoozed_until", "snoozed_until TEXT");
+  addLead("dismissed_at", "dismissed_at TEXT");
+  addLead("rescue_cycle", "rescue_cycle INTEGER NOT NULL DEFAULT 0");
+  addLead("rescue_alerted_at", "rescue_alerted_at TEXT");
+  addLead("rescued_to_booking", "rescued_to_booking INTEGER NOT NULL DEFAULT 0");
+  migrateOpsWaveB(database);
+}
+
+function migrateOpsWaveB(database: Database.Database) {
+  const reqCols = columnNames(database, "service_requests");
+  const addReq = (name: string, ddl: string) => {
+    if (reqCols.includes(name)) return;
+    database.exec(`ALTER TABLE service_requests ADD COLUMN ${ddl}`);
+  };
+  addReq("sla_first_alerted_at", "sla_first_alerted_at TEXT");
+  addReq("sla_escalated_at", "sla_escalated_at TEXT");
+  addReq("snoozed_until", "snoozed_until TEXT");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ops_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '',
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ops_audit_entity ON ops_audit (entity_type, entity_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_leads_rescue ON revenue_leads (dismissed_at, first_human_action_at, rescue_alerted_at);
+    CREATE INDEX IF NOT EXISTS idx_requests_sla ON service_requests (status, sla_first_alerted_at, sla_escalated_at);
+  `);
 }
 
 export function getHomesteadDb() {

@@ -89,10 +89,16 @@ async function remindReceiving(chatId: string, publicId: string, count: number, 
   if (sent) updateJob(publicId, { telegramStatusMessageId: sent });
 }
 
+function studioEnabled() {
+  return Boolean(process.env.CONTENT_STUDIO_ENABLED) && process.env.CONTENT_STUDIO_ENABLED !== "false";
+}
+
+function isOpsCommand(text: string) {
+  const command = text.split("@")[0].toLowerCase();
+  return ["/homestead", "/hoy", "/leads", "/calientes", "/agenda", "/trabajos"].includes(command);
+}
+
 export async function handleTelegramUpdate(update: TelegramUpdate) {
-  if (!process.env.CONTENT_STUDIO_ENABLED || process.env.CONTENT_STUDIO_ENABLED === "false") {
-    return { ok: true, skipped: "disabled" };
-  }
   if (seenTelegramUpdate(update.update_id)) {
     return { ok: true, duplicate: true };
   }
@@ -107,6 +113,20 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true, denied: true };
     }
     await answerCallback(callback.id);
+    if (callback.data.startsWith("cc:")) {
+      const { applyCommandCenterCallback } = await import("@/lib/ops-telegram");
+      await applyCommandCenterCallback(callback.data, chatId, callback.message?.message_id);
+      return { ok: true };
+    }
+    if (callback.data.startsWith("rv:")) {
+      const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
+      const result = await applyRevenueCallback(callback.data, chatId);
+      await sendTelegramMessage({ chatId, text: result.text, keyboard: result.keyboard });
+      return { ok: true };
+    }
+    if (!studioEnabled()) {
+      return { ok: true, skipped: "disabled" };
+    }
     if (callback.data.startsWith("mi:")) {
       const bits = callback.data.split(":");
       const action = bits[1];
@@ -121,12 +141,6 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
               ? "Shadow: guardé tu aprobación. No moví la programación. Si quieres programarla de verdad, abre la pieza y toca APROBAR HORARIO."
               : "Buscaré otro contenido en la próxima /recomendar.",
       });
-      return { ok: true };
-    }
-    if (callback.data.startsWith("rv:")) {
-      const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
-      const result = await applyRevenueCallback(callback.data, chatId);
-      await sendTelegramMessage({ chatId, text: result.text, keyboard: result.keyboard });
       return { ok: true };
     }
     const parsed = parseCallback(callback.data);
@@ -287,7 +301,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   const text = (message.text || "").trim();
   if (!isTelegramAdmin(chatId, userId)) {
     logError("ContentStudioUnauthorized", { stage: "message", contentJobId: chatId.slice(0, 24) });
-    if (text === "/publicar" || text.startsWith("/publicar@")) {
+    if (isOpsCommand(text) || text === "/publicar" || text.startsWith("/publicar@")) {
       await sendTelegramMessage({ chatId, text: "No autorizado." });
     }
     return { ok: true, denied: true };
@@ -300,6 +314,51 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       await sendTelegramMessage({ chatId, text: consumed.text, keyboard: consumed.keyboard });
       return { ok: true };
     }
+  }
+
+  const nl = text.toLowerCase();
+  if (text === "/homestead" || text.startsWith("/homestead@")) {
+    const { sendCommandCenter } = await import("@/lib/ops-telegram");
+    await sendCommandCenter(chatId);
+    return { ok: true };
+  }
+  if (
+    nl.includes("qué tengo pendiente") ||
+    nl.includes("que tengo pendiente") ||
+    nl === "qué hago hoy?" ||
+    nl === "¿qué hago hoy?" ||
+    nl.includes("qué debo hacer ahora")
+  ) {
+    const { sendCommandCenter } = await import("@/lib/ops-telegram");
+    await sendCommandCenter(chatId);
+    return { ok: true };
+  }
+  if (text === "/hoy" || text.startsWith("/hoy@")) {
+    const { agendaView } = await import("@/lib/ops-telegram");
+    const view = agendaView(0, false);
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+  if (text === "/leads" || text.startsWith("/leads@") || text === "/calientes" || text.startsWith("/calientes@")) {
+    const { rescueView } = await import("@/lib/ops-telegram");
+    const view = rescueView(0, false);
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+  if (nl.includes("a quién debo llamar") || nl.includes("a quien contacto")) {
+    const { rescueView } = await import("@/lib/ops-telegram");
+    const view = rescueView(0, false);
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+  if (text === "/agenda" || text.startsWith("/agenda@") || text === "/trabajos" || text.startsWith("/trabajos@")) {
+    const { agendaView } = await import("@/lib/ops-telegram");
+    const view = agendaView(0, false);
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+  if (!studioEnabled()) {
+    return { ok: true, skipped: "disabled" };
   }
 
   if (text === "/pendientes" || text.startsWith("/pendientes@")) {
@@ -377,40 +436,6 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return { ok: true };
   }
 
-  const nl = text.toLowerCase();
-  if (
-    text === "/hoy" ||
-    text.startsWith("/hoy@") ||
-    nl.includes("qué tengo pendiente") ||
-    nl.includes("que tengo pendiente") ||
-    nl === "qué hago hoy?" ||
-    nl === "¿qué hago hoy?" ||
-    nl.includes("qué debo hacer ahora")
-  ) {
-    const { formatHoy, formatQueHago } = await import("@/lib/revenue-telegram");
-    const body = nl.includes("debo hacer") || nl.includes("hago hoy") ? formatQueHago() : formatHoy();
-    await sendTelegramMessage({ chatId, text: body });
-    return { ok: true };
-  }
-  if (text === "/leads" || text.startsWith("/leads@")) {
-    const { formatLeads } = await import("@/lib/revenue-telegram");
-    await sendTelegramMessage({ chatId, text: formatLeads("all") });
-    return { ok: true };
-  }
-  if (text === "/calientes" || text.startsWith("/calientes@") || nl.includes("a quién debo llamar") || nl.includes("a quien contacto")) {
-    const { formatLeads, leadKeyboard } = await import("@/lib/revenue-telegram");
-    const { listLeads } = await import("@/lib/revenue-store");
-    await sendTelegramMessage({ chatId, text: formatLeads("hot") });
-    const first = listLeads({ temperature: "HOT", limit: 1 })[0];
-    if (first) {
-      await sendTelegramMessage({
-        chatId,
-        text: `Acciones para ${first.leadId}`,
-        keyboard: leadKeyboard(first.leadId),
-      });
-    }
-    return { ok: true };
-  }
   if (text === "/seguimientos" || text.startsWith("/seguimientos@")) {
     const { formatFollowups } = await import("@/lib/revenue-telegram");
     await sendTelegramMessage({ chatId, text: formatFollowups() });
@@ -419,15 +444,6 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (text === "/cotizaciones" || text.startsWith("/cotizaciones@") || nl.includes("cotizaciones están")) {
     const { formatQuotes } = await import("@/lib/revenue-telegram");
     await sendTelegramMessage({ chatId, text: formatQuotes() });
-    return { ok: true };
-  }
-  if (text === "/agenda" || text.startsWith("/agenda@") || text === "/trabajos" || text.startsWith("/trabajos@")) {
-    const { revenueSnapshot } = await import("@/lib/revenue-store");
-    const snap = revenueSnapshot();
-    await sendTelegramMessage({
-      chatId,
-      text: `Citas internas: ${snap.scheduled}\nTrabajos ganados: ${snap.won}\nNo hay Google Calendar conectado.`,
-    });
     return { ok: true };
   }
   if (text === "/clientes" || text.startsWith("/clientes@")) {
