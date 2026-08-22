@@ -46,7 +46,8 @@ const LABELED_PHONE =
 export function extractEmbeddedPhone(text: string) {
   const labeled = text.match(LABELED_PHONE);
   if (labeled?.[1]) return labeled[1].trim();
-  const e164 = text.match(/\+507[\s\-]?\d{4}[\s\-]?\d{4}/);
+  const region = defaultPhoneRegion();
+  const e164 = text.match(new RegExp(`\\+${region.countryCode}[\\s\\-]?\\d{4}[\\s\\-]?\\d{4}`));
   if (e164) return e164[0];
   const candidates = text.match(/\b\d{4}[\s\-]?\d{4}\b/g) || [];
   for (const candidate of candidates) {
