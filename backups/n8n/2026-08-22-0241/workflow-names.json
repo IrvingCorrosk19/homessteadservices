@@ -1,0 +1,18 @@
+[
+  {"id": "i4t4Bw8JTQB8A2KE", "name": "HOMESTEAD — Nueva solicitud → Telegram", "active": true, "trigger": "webhook"},
+  {"id": "l10Rh1i8NDrdkfUa", "name": "HOMESTEAD — Content Studio", "active": true, "trigger": "webhook"},
+  {"id": "nGiCm9Yt3PzPzDP9", "name": "HOMESTEAD — Content Scheduler", "active": true, "trigger": "schedule"},
+  {"id": "ZiQfUIPtEq3RsqVW", "name": "HOMESTEAD — Marketing Analytics Collector", "active": true, "trigger": "schedule"},
+  {"id": "aSGBqm6D5SjSsYGL", "name": "HOMESTEAD — Weekly Marketing Report", "active": true, "trigger": "schedule"},
+  {"id": "LI7KLkZukkb3bHLnJhxdQ3XesgTaZNhDA2PJ", "name": "1BP_ERROR_LOGGER_V1", "active": false, "trigger": "errorTrigger"},
+  {"id": "OsoNotYcVbwBO6hR6epjzuhINTU7muFp4zEp", "name": "2BP_LEAD_INGEST_V1", "active": false, "trigger": "webhook"},
+  {"id": "V07lH1w8FvcLw3cdiVAZaXh4EbIBnhO5HVO8", "name": "3BP_LEAD_SCORE_V1", "active": false, "trigger": "webhook"},
+  {"id": "8URRFdasLYqXXAZnh0McsdP3YEVTvnzhYdND", "name": "4BP_FOLLOWUP_IMMEDIATE_V1", "active": false, "trigger": "webhook"},
+  {"id": "Yp8aHEi9Js6JIgGUg0IDk0LSsJH3Ugz9YNBx", "name": "5BP_FOLLOWUP_24H_V1", "active": false, "trigger": "webhook"},
+  {"id": "KlWShv1IAPV835asczHhsexSdXN0K7HHKPYh", "name": "6BP_FOLLOWUP_72H_V1", "active": false, "trigger": "webhook"},
+  {"id": "N9FWizGdY133eY8snIFQ08eNWefqNz0rtRGD", "name": "7BP_FOLLOWUP_CANCEL_V1", "active": false, "trigger": "webhook"},
+  {"id": "lZo2mOnDpunIv6MRchSttsSyF2lym1XUvvzh", "name": "9TG_GATEWAY_V1", "active": false, "trigger": "telegramTrigger"},
+  {"id": "2x6h1fcy4isK-OCTYGg0i", "name": "PT Bot Mentor v2", "active": false, "trigger": "webhook"},
+  {"id": "H5IBew9jehthLV3Iqv9VA", "name": "My workflow", "active": false, "trigger": "none"},
+  {"id": "mmq-Fh57QIC03OIgiNEmV", "name": "test1", "active": false, "trigger": "manual"}
+]
