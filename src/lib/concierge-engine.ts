@@ -22,6 +22,7 @@ import { logError } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
 import { CONCIERGE_TOOLS, executeConciergeTool, mergeParsedWhen, type ToolContext } from "@/lib/concierge-tools";
 import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/concierge-intelligence";
+import { formatPanamaSlot } from "@/lib/concierge-datetime";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SniffedImage } from "@/lib/photos";
 
@@ -289,10 +290,18 @@ export async function conciergeTurn(input: {
         ? "Cuando quieras, revisamos un horario real para la visita. ¿Qué día te queda mejor?"
         : "Cuando quieras te ayudo a dejar los datos para que el equipo te contacte. ¿Me compartes un teléfono?";
     }
-    const availability = enforceAvailabilityIntegrity(reply, ctx.lastSlots);
-    reply = availability.text;
-    const booked = enforceBookingIntegrity(reply, ctx.bookedThisTurn || Boolean(state.appointmentId && /agendad|confirmad/i.test(reply)));
-    reply = booked.text;
+    if (ctx.bookedThisTurn) {
+      const slot = state.pendingSlot;
+      const when = slot?.date && slot?.time ? formatPanamaSlot(slot.date, slot.time) : "el horario acordado";
+      if (!/\b(agendad|confirmad)\b/i.test(reply) || /estos horarios sí están libres/i.test(reply)) {
+        reply = `Listo. La visita quedó agendada para ${when}. Ya está en nuestro calendario.`;
+      }
+    } else {
+      const availability = enforceAvailabilityIntegrity(reply, ctx.lastSlots);
+      reply = availability.text;
+      const booked = enforceBookingIntegrity(reply, false);
+      reply = booked.text;
+    }
 
     const ended = HUMAN_RE.test(text) && state.humanRequested;
     if (HUMAN_RE.test(text)) state.humanRequested = true;
