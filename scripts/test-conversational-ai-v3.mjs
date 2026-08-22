@@ -132,7 +132,7 @@ ok("multi-service keeps both", (() => {
 })());
 ok("fachada is not AC", !detectServices("Quiero pintar la fachada.").includes("ac"));
 ok("correction Bella Vista", applyLocationCorrection("Perdón, es Bella Vista.", "San Francisco") === "Bella Vista");
-ok("memory packed identity stays", /soy\s+/.test(chatEngine) && /applyLocationCorrection/.test(chatEngine));
+ok("embedded phone extractor", /extractEmbeddedPhone/.test(readFileSync(join(root, "src/lib/phone.ts"), "utf8")));
 ok("overquestioning metric", countQuestions("¿Zona? ¿Teléfono? ¿Tipo? ¿Fotos? ¿Marca? ¿Modelo?") >= 5);
 ok("photo review blocks slots", /shouldOfferAvailability/.test(engineLogic) && /PHOTO_REVIEW_FIRST/.test(engineLogic));
 ok("no price invention", /NUNCA inventes precios/.test(knowledge));

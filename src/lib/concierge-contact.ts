@@ -1,4 +1,4 @@
-import { classifyPhone, looksLikePhoneAttempt, type PhoneStatus } from "@/lib/phone";
+import { classifyPhone, looksLikePhoneAttempt, extractEmbeddedPhone, type PhoneStatus } from "@/lib/phone";
 import { isStopSignal } from "@/lib/revenue-score";
 
 const PASSIVE_CLOSE =
@@ -48,6 +48,11 @@ export function assessUserContact(text: string, extractedPhone: string): { statu
   if (looksLikePhoneAttempt(text)) {
     const assessed = classifyPhone(text);
     return { status: assessed.status, raw: text };
+  }
+  const embedded = extractEmbeddedPhone(text);
+  if (embedded) {
+    const assessed = classifyPhone(embedded);
+    return { status: assessed.status, raw: embedded };
   }
   if (extractedPhone.trim()) {
     const assessed = classifyPhone(extractedPhone);

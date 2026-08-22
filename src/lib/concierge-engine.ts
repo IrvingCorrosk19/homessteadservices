@@ -16,7 +16,7 @@ import {
 } from "@/lib/concierge-store";
 import { assessUserContact, isPassiveClose, shouldStopCommercial } from "@/lib/concierge-contact";
 import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
-import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
+import { classifyPhone, looksLikePhoneAttempt, extractEmbeddedPhone } from "@/lib/phone";
 import { whatsappHref } from "@/lib/site";
 import { logError } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
@@ -72,6 +72,16 @@ function extractCasualFacts(state: ConversationState, text: string) {
   if (zone && !looksLikePhoneAttempt(zone[1])) next.location = zone[1].trim();
   next.location = applyLocationCorrection(text, next.location);
   if (next.location) next.facts.location = next.location;
+  const embeddedPhone = extractEmbeddedPhone(text);
+  if (embeddedPhone) {
+    const phone = classifyPhone(embeddedPhone);
+    if (phone.status === "VALID") {
+      next.phone = phone.e164 || phone.display;
+      next.contactStatus = "VALID";
+    } else if (phone.status === "INCOMPLETE") {
+      next.contactStatus = "INCOMPLETE";
+    }
+  }
   const detected = detectServices(text);
   next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
   next.primaryService = choosePrimary(next.detectedServices, next.primaryService || next.service);

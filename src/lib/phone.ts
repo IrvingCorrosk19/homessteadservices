@@ -40,6 +40,21 @@ export function looksLikePhoneAttempt(text: string) {
   return trimmed.replace(/\D/g, "").length >= 3;
 }
 
+const LABELED_PHONE =
+  /(?:n[uú]mero|tel[eé]fono|celular|cel|whatsapp|ll[aá]mame|contacto|mi\s+n[uú]m(?:ero)?)\s*(?:es\s*|[:=]\s*)?(\+?\d[\d\s\-().]{5,}\d)/i;
+
+export function extractEmbeddedPhone(text: string) {
+  const labeled = text.match(LABELED_PHONE);
+  if (labeled?.[1]) return labeled[1].trim();
+  const e164 = text.match(/\+507[\s\-]?\d{4}[\s\-]?\d{4}/);
+  if (e164) return e164[0];
+  const candidates = text.match(/\b\d{4}[\s\-]?\d{4}\b/g) || [];
+  for (const candidate of candidates) {
+    if (classifyPhone(candidate).status === "VALID") return candidate;
+  }
+  return "";
+}
+
 function panamaNational(digits: string, countryCode: string, nationalLength: number) {
   if (digits.length === nationalLength) return digits;
   if (digits.length === countryCode.length + nationalLength && digits.startsWith(countryCode)) {
