@@ -66,16 +66,14 @@ Esta instalación de n8n 2.3.6 bloquea `$env` en nodos (Code e IF: `access to en
 
 Por eso n8n autentica con **Variables de n8n** (`$vars`), no con el `.env` del contenedor.
 
-Ya configurada en n8n:
+Ya configuradas en n8n → Settings → Variables (no en Git, no en nodos Code):
 
 - `HOMESTEAD_WEBHOOK_SECRET` — mismo valor que `N8N_HOMESTEAD_WEBHOOK_SECRET` de Homestead
+- `TELEGRAM_BOT_TOKEN` — BotFather, @HomesteadServicesNotifyBot
+- `HOMESTEAD_TELEGRAM_CHAT_ID` — chat privado del administrador (también en Homestead como `HOMESTEAD_TELEGRAM_ADMIN_CHAT_IDS`)
+- `TELEGRAM_WEBHOOK_SECRET` — secret token del webhook de Telegram
 
-Pendientes de introducir en **n8n → Settings → Variables** (no en Git, no en nodos Code):
-
-```text
-TELEGRAM_BOT_TOKEN              # configurado en n8n (no está en Git)
-HOMESTEAD_TELEGRAM_CHAT_ID      # configurado; el administrador debe abrir el bot y enviar /start
-```
+No volver a pegar el token en chats ni en Git. Si se filtró, regenerarlo en BotFather y actualizar solo la variable de n8n y el `.env` del VPS.
 
 Bot: `t.me/HomesteadServicesNotifyBot`
 
@@ -135,7 +133,7 @@ Campos reales del formulario (no se inventan otros):
 - **Apagar Telegram y n8n:** vaciar `N8N_HOMESTEAD_WEBHOOK_URL` en Homestead y recrear `homestead_web`.
 - **Apagar solo el workflow:** desactivarlo en n8n. Homestead guarda la solicitud, envía email y registra `N8nNotificationFailed`.
 - **Workflow activo sin token:** n8n responde 200, no envía Telegram.
-- **Encender Telegram:** crear `TELEGRAM_BOT_TOKEN` y `HOMESTEAD_TELEGRAM_CHAT_ID` en Variables de n8n. No hace falta redeploy de Homestead.
+- **Encender Telegram:** las variables `TELEGRAM_BOT_TOKEN` y `HOMESTEAD_TELEGRAM_CHAT_ID` ya existen en n8n. Si alguien las vació, restaurarlas en Settings → Variables (no en Git). No hace falta redeploy de Homestead.
 
 ## Rollback
 
