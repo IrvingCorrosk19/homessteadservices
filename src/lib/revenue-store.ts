@@ -586,33 +586,47 @@ export function createAppointment(
   const lead = getLead(leadId);
   if (!lead) return null;
   const normalized = isAppointmentStatus(status) ? status : "PROPOSED";
-  const open = getHomesteadDb()
+  const database = getHomesteadDb();
+  const openSameLead = database
     .prepare(
       `SELECT appointment_id FROM revenue_appointments
        WHERE lead_id = ? AND date = ? AND start_time = ? AND status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED') LIMIT 1`,
     )
     .get(leadId, date, startTime) as { appointment_id: string } | undefined;
-  if (open) return open.appointment_id;
-  const id = `HA-${randomBytes(4).toString("hex")}`;
-  getHomesteadDb()
+  if (openSameLead) return openSameLead.appointment_id;
+  const taken = database
     .prepare(
-      `INSERT INTO revenue_appointments
-        (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at, notes, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `SELECT appointment_id, lead_id FROM revenue_appointments
+       WHERE date = ? AND start_time = ? AND status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED') LIMIT 1`,
     )
-    .run(
-      id,
-      leadId,
-      lead.customerId,
-      date,
-      startTime,
-      lead.service,
-      normalized,
-      nowIso(),
-      extra.notes || "",
-      extra.source || "",
-    );
-  getHomesteadDb()
+    .get(date, startTime) as { appointment_id: string; lead_id: string } | undefined;
+  if (taken) return null;
+  const id = `HA-${randomBytes(4).toString("hex")}`;
+  try {
+    database
+      .prepare(
+        `INSERT INTO revenue_appointments
+          (appointment_id, lead_id, customer_id, date, start_time, service, status, created_at, notes, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        leadId,
+        lead.customerId,
+        date,
+        startTime,
+        lead.service,
+        normalized,
+        nowIso(),
+        extra.notes || "",
+        extra.source || "",
+      );
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: string }).code) : "";
+    if (code === "SQLITE_CONSTRAINT_UNIQUE" || /UNIQUE/i.test(String(error))) return null;
+    throw error;
+  }
+  database
     .prepare("UPDATE revenue_leads SET visit_proposed_at = COALESCE(visit_proposed_at, ?), updated_at = ? WHERE lead_id = ?")
     .run(nowIso(), nowIso(), leadId);
   addRevenueEvent(leadId, normalized === "REQUESTED" ? "APPOINTMENT_REQUESTED" : "APPOINTMENT_CREATED");

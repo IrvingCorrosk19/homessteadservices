@@ -1,4 +1,4 @@
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -128,6 +128,53 @@ export async function downloadTelegramFile(fileId: string) {
   const fileRes = await fetch(`${TELEGRAM_API}/file/bot${token}/${filePath}`);
   if (!fileRes.ok) return null;
   return Buffer.from(await fileRes.arrayBuffer());
+}
+
+export function expectedTelegramWebhookUrl() {
+  return (
+    process.env.TELEGRAM_EXPECTED_WEBHOOK_URL?.trim() ||
+    "https://n8n.autonomousflow.lat/webhook/homestead-content-studio"
+  );
+}
+
+export async function inspectTelegramWebhook(options: { repair?: boolean } = {}) {
+  const repair = options.repair !== false;
+  const token = telegramBotToken();
+  const expected = expectedTelegramWebhookUrl();
+  if (!token) return { ok: false as const, match: false, url: "", expected, pending: 0, lastError: "no_token", repaired: false };
+  const response = await fetch(`${TELEGRAM_API}/bot${token}/getWebhookInfo`);
+  const json = (await response.json()) as {
+    ok: boolean;
+    result?: { url?: string; pending_update_count?: number; last_error_message?: string | null };
+  };
+  const url = json.result?.url || "";
+  const match = url === expected;
+  logInfo("TelegramWebhookIntegrityCheck", { stage: match ? "ok" : "drift" });
+  let repaired = false;
+  if (!match) {
+    logError("TelegramWebhookDriftDetected", { stage: url ? "mismatch" : "empty" });
+    if (repair) {
+      const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim() || "";
+      const body: Record<string, string> = { url: expected };
+      if (secret) body.secret_token = secret;
+      const set = await fetch(`${TELEGRAM_API}/bot${token}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const setJson = (await set.json()) as { ok?: boolean };
+      repaired = Boolean(setJson.ok);
+    }
+  }
+  return {
+    ok: Boolean(json.ok),
+    match,
+    url,
+    expected,
+    pending: json.result?.pending_update_count || 0,
+    lastError: json.result?.last_error_message || null,
+    repaired,
+  };
 }
 
 export type TelegramUpdate = {

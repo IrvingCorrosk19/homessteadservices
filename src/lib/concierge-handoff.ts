@@ -2,7 +2,6 @@ import { classifyPhone, maskPhone } from "@/lib/phone";
 import { logInfo } from "@/lib/log";
 import { recordLead } from "@/lib/marketing-store";
 import { ingestCanonicalLead, saveLeadPreference, stopFollowUps } from "@/lib/revenue-store";
-import { sendNewLeadAlert } from "@/lib/revenue-telegram";
 import { conciergeKnowledge } from "@/lib/concierge-knowledge";
 import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
 import { isConciergeDryRun } from "@/lib/concierge-flags";
@@ -95,9 +94,6 @@ export async function createLeadFromConcierge(input: {
   recordLead({ publicId: saved.publicId, channel: "website_ai_concierge", outcome: "CONTACT" });
   const notify = !isConciergeDryRun();
   await dispatchServiceRequest(saved, { email: notify, n8n: notify, photos: [] });
-  if (input.escalate && notify) {
-    await sendNewLeadAlert(saved.publicId);
-  }
   recordFunnelEvent(input.conversationId, "ServiceRequestCreated", { service, lead: saved.publicId });
   logInfo("ConciergeLeadCreated", {
     contentJobId: saved.publicId,

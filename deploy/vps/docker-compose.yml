@@ -55,6 +55,8 @@ services:
       REVENUE_ENGINE_ENABLED: ${REVENUE_ENGINE_ENABLED:-true}
       REVENUE_ENGINE_DRY_RUN: ${REVENUE_ENGINE_DRY_RUN:-true}
       AUTO_FOLLOW_UP: ${AUTO_FOLLOW_UP:-false}
-      REVENUE_BRIEFING_SEND: ${REVENUE_BRIEFING_SEND:-false}
+      AUTOMATION_DISPATCH_ENABLED: ${AUTOMATION_DISPATCH_ENABLED:-true}
+      AUTOMATION_N8N_FAIL: ${AUTOMATION_N8N_FAIL:-false}
+      TELEGRAM_EXPECTED_WEBHOOK_URL: ${TELEGRAM_EXPECTED_WEBHOOK_URL:-https://n8n.autonomousflow.lat/webhook/homestead-content-studio}
     volumes:
       - /opt/apps/homestead/data:/app/data

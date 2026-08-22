@@ -272,14 +272,20 @@ export function clearProcessLock(publicId: string) {
 
 export function seenTelegramUpdate(updateId: number) {
   const database = getHomesteadDb();
-  const existing = database
-    .prepare("SELECT update_id FROM content_telegram_updates WHERE update_id = ?")
-    .get(updateId);
-  if (existing) return true;
-  database
-    .prepare("INSERT INTO content_telegram_updates (update_id, created_at) VALUES (?, ?)")
-    .run(updateId, new Date().toISOString());
-  return false;
+  try {
+    database
+      .prepare("INSERT INTO content_telegram_updates (update_id, created_at) VALUES (?, ?)")
+      .run(updateId, new Date().toISOString());
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export function forgetTelegramUpdate(updateId: number) {
+  getHomesteadDb()
+    .prepare("DELETE FROM content_telegram_updates WHERE update_id = ?")
+    .run(updateId);
 }
 
 export function listAssets(

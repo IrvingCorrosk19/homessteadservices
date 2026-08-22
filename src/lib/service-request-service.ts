@@ -1,7 +1,8 @@
 import { isMailConfigured, sendContactEmail } from "@/lib/mail";
 import { logError, logInfo } from "@/lib/log";
-import { notifyN8n } from "@/lib/n8n";
 import { saveServiceRequest, type BufferedPhoto, type SavedServiceRequest } from "@/lib/service-requests";
+import { drainAutomationOutbox } from "@/lib/automation-dispatch";
+import { skipOutboxForCorrelation } from "@/lib/automation-outbox";
 
 export type ServiceRequestInput = {
   name: string;
@@ -23,7 +24,9 @@ export async function dispatchServiceRequest(
 ) {
   if (options.n8n) {
     logInfo("TelegramNotificationRequested", { requestId: saved.publicId, stage: "n8n" });
-    void notifyN8n(saved);
+    void drainAutomationOutbox();
+  } else {
+    skipOutboxForCorrelation(saved.publicId, "dispatch_disabled");
   }
   if (options.email && isMailConfigured()) {
     try {

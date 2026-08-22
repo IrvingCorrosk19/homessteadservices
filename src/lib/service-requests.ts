@@ -8,6 +8,8 @@ import {
   PUBLIC_ID_PATTERN,
   type RequestStatus,
 } from "@/lib/admin-format";
+import { enqueueOutbox } from "@/lib/automation-outbox";
+import { buildN8nPayload } from "@/lib/n8n";
 
 export type SavedPhoto = {
   name: string;
@@ -501,6 +503,7 @@ function migrateRevenueEngine(database: Database.Database) {
   `);
   migrateLeadHandoff(database);
   migrateAppointmentCalendar(database);
+  migrateAutomationOutbox(database);
 }
 
 function migrateAppointmentCalendar(database: Database.Database) {
@@ -524,6 +527,54 @@ function migrateAppointmentCalendar(database: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_rev_appt_date ON revenue_appointments (date, start_time);
     CREATE INDEX IF NOT EXISTS idx_rev_appt_status ON revenue_appointments (status);
+  `);
+  try {
+    database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_rev_appt_open_slot
+      ON revenue_appointments (date, start_time)
+      WHERE status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED');
+    `);
+  } catch {
+    // Existing overlapping open slots would block boot. App continues; uniqueness still enforced in createAppointment.
+  }
+}
+
+function migrateAutomationOutbox(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS automation_outbox (
+      event_id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      correlation_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 8,
+      next_attempt_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_attempt_at TEXT,
+      delivered_at TEXT,
+      last_error TEXT NOT NULL DEFAULT '',
+      processing_until TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_outbox_status_next
+      ON automation_outbox (status, next_attempt_at);
+    CREATE INDEX IF NOT EXISTS idx_outbox_correlation
+      ON automation_outbox (correlation_id);
+    CREATE TABLE IF NOT EXISTS automation_engine_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS automation_outbox_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
   `);
 }
 
@@ -681,6 +732,13 @@ export function saveServiceRequest(input: {
       body: input.message,
       status: "RECORDED",
       sentAt: createdAt,
+    });
+    const payload = buildN8nPayload(saved);
+    enqueueOutbox(database, {
+      eventType: "service_request.created",
+      correlationId: publicId,
+      idempotencyKey: `service_request.created:${publicId}`,
+      data: payload as unknown as Record<string, unknown>,
     });
     return saved;
   })();

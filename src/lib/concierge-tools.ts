@@ -162,7 +162,7 @@ export async function executeConciergeTool(
   args: Record<string, unknown>,
   ctx: ToolContext,
 ): Promise<ToolResult> {
-  let state = { ...ctx.state };
+  const state = { ...ctx.state };
   let leadId = ctx.leadId;
 
   if (name === "remember_customer_facts") {

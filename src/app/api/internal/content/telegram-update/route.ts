@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleTelegramUpdate } from "@/lib/content-handler";
 import type { TelegramUpdate } from "@/lib/content-telegram";
+import { forgetTelegramUpdate } from "@/lib/content-catalog";
 import {
   telegramWebhookSecret,
   verifyInternalHomesteadRequest,
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (error) {
+    forgetTelegramUpdate(update.update_id);
     logError("ContentTelegramUpdateFailed", {
       cause: error instanceof Error ? error.name : "unknown",
     });

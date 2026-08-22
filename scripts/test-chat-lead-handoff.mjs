@@ -78,7 +78,7 @@ assert("prompt one question", /UNA pregunta/.test(prompt));
 assert("score uses validator", /classifyPhone\(input\.phone\)/.test(scoreSrc));
 assert("next action program visit", /PROGRAM_SITE_VISIT/.test(scoreSrc));
 assert("alert idempotent", /internal_alert_at IS NULL/.test(store));
-assert("telegram awaits send", /await sendNewLeadAlert/.test(handoff));
+assert("solicitud telegram via outbox not duplicate lead alert", !/sendNewLeadAlert/.test(handoff) && /dispatchServiceRequest/.test(handoff));
 assert("telegram not marked before send", /if \(lead\.internalAlertAt\)/.test(tg) && /markLeadAlerted\(leadId\)/.test(tg));
 assert("alert action copy", /Coordinar visita de evaluación/.test(tg));
 assert("alert phone national", /alertPhone/.test(tg));

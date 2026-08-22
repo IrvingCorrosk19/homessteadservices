@@ -86,7 +86,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [680, 220],
-      "continueOnFail": true
+      "continueOnFail": false,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -99,6 +100,18 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [920, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": false, \"error\": \"upstream\" }",
+        "options": { "responseCode": 503 }
+      },
+      "id": "hs-cs-503",
+      "name": "Responder 503",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 400]
     }
   ],
   "connections": {
@@ -112,7 +125,10 @@
       ]
     },
     "Homestead Content API": {
-      "main": [[{ "node": "Responder", "type": "main", "index": 0 }]]
+      "main": [
+        [{ "node": "Responder", "type": "main", "index": 0 }],
+        [{ "node": "Responder 503", "type": "main", "index": 0 }]
+      ]
     }
   },
   "settings": {

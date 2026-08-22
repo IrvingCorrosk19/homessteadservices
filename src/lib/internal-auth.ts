@@ -12,6 +12,7 @@ export function homesteadInternalSecret() {
 export function verifyInternalHomesteadRequest(
   request: Request,
   payload: unknown,
+  options: { requireHmac?: boolean } = {},
 ) {
   const secret = homesteadInternalSecret();
   if (!secret) return false;
@@ -25,7 +26,10 @@ export function verifyInternalHomesteadRequest(
     return false;
   }
   if (headerSecret !== secret) return false;
-  if (signature) {
+  // n8n 2.3.6 Code/Crypto cannot HMAC the live payload. Scheduler and Content Studio
+  // send secret + timestamp only. HMAC is generated on Homestead → n8n outbound.
+  if (options.requireHmac || signature) {
+    if (!signature) return false;
     const expected = signHomesteadPayload(secret, timestamp, payload);
     return signaturesMatch(expected, signature);
   }
