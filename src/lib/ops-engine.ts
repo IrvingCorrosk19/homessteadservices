@@ -181,11 +181,14 @@ export function enqueueDailyBrief(force = false) {
       `📅 ${snap.appointmentsToday} citas`,
       `🔥 ${snap.rescue} oportunidades por atender`,
       `📥 ${snap.pendingRequests} solicitudes nuevas pendientes`,
-      `⏱ ${snap.overdueFollowups} seguimientos vencidos`,
-      `📸 ${snap.contentPending} contenidos pendientes`,
+      `🔧 ${snap.jobsActive} trabajos`,
+      snap.serviceRecovery ? `🚨 ${snap.serviceRecovery} cliente requiere seguimiento` : "",
+      `📸 ${snap.contentPending + snap.contentCandidates} contenidos pendientes`,
       "",
       `Solicitudes hoy: ${metrics.requests}`,
-    ].join("\n"),
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
     keyboard: [[{ text: "🏠 Abrir Command Center", callback_data: "cc:h" }]],
   });
   setEngineState("last_daily_brief_at", new Date().toISOString());

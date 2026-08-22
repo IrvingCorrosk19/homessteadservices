@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { outboxSnapshot, getEngineState } from "@/lib/automation-outbox";
 import { inspectTelegramWebhook } from "@/lib/content-telegram";
+import { failedWaveCOutbox, jobMetrics } from "@/lib/job-store";
 
 export const runtime = "nodejs";
 
@@ -31,5 +32,7 @@ export async function GET() {
       lastDailyBriefAt: getEngineState("last_daily_brief_at")?.value || null,
       lastSchedulerAt: box.lastSchedulerAt,
     },
+    jobs: jobMetrics(false),
+    waveCOutboxFailed: failedWaveCOutbox(),
   });
 }

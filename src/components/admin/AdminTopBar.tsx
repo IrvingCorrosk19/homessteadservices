@@ -6,7 +6,13 @@ import { usePathname, useRouter } from "next/navigation";
 export function AdminTopBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const citas = pathname.startsWith("/admin/citas");
+  const title = pathname.startsWith("/admin/citas")
+    ? "Citas"
+    : pathname.startsWith("/admin/trabajos")
+      ? "Trabajos"
+      : pathname.startsWith("/admin/clientes")
+        ? "Cliente"
+        : "Solicitudes";
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
@@ -21,13 +27,16 @@ export function AdminTopBar() {
           <p className="text-[0.68rem] tracking-[0.18em] uppercase text-accent">
             Homestead Services
           </p>
-          <p className="mt-1 font-display text-2xl">{citas ? "Citas" : "Solicitudes"}</p>
+          <p className="mt-1 font-display text-2xl">{title}</p>
           <nav className="mt-3 flex flex-wrap gap-4 text-[0.72rem] tracking-[0.14em] uppercase" aria-label="Administración">
-            <Link className={citas ? "text-cream/60 hover:text-cream" : "text-accent"} href="/admin/solicitudes">
+            <Link className={pathname.startsWith("/admin/solicitudes") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/solicitudes">
               Solicitudes
             </Link>
-            <Link className={citas ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/citas">
+            <Link className={pathname.startsWith("/admin/citas") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/citas">
               Citas
+            </Link>
+            <Link className={pathname.startsWith("/admin/trabajos") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/trabajos">
+              Trabajos
             </Link>
           </nav>
         </div>

@@ -121,3 +121,28 @@ export async function sendAdminReply(input: {
     clearReplyLock(request.publicId);
   }
 }
+
+export async function sendTransactionalEmail(input: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}) {
+  if (!isMailConfigured()) return { ok: false as const, error: "smtp_not_configured" };
+  const to = input.to.trim();
+  if (!to.includes("@")) return { ok: false as const, error: "invalid_email" };
+  const from = process.env.SMTP_USER?.trim() || inbox;
+  try {
+    await transporter().sendMail({
+      from: `"${site.name}" <${from}>`,
+      to,
+      replyTo: inbox || from,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+    });
+    return { ok: true as const };
+  } catch {
+    return { ok: false as const, error: "smtp_failed" };
+  }
+}

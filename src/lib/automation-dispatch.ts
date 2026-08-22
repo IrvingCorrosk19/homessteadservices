@@ -20,7 +20,29 @@ export function shouldForceN8nFailure() {
 }
 
 async function deliverOpsEvent(data: Record<string, unknown>, eventType: string) {
-  if (String(data.event || "") === "ops.telegram.alert" || eventType.startsWith("lead.") || eventType.startsWith("sla.") || eventType.startsWith("daily.")) {
+  if (eventType === "post_service.followup_due") {
+    const { deliverPostServiceFollowup } = await import("@/lib/post-service");
+    return deliverPostServiceFollowup(String(data.jobId || ""));
+  }
+  if (eventType === "review.request_due") {
+    const { deliverReviewReminder } = await import("@/lib/post-service");
+    return deliverReviewReminder(String(data.jobId || ""));
+  }
+  if (
+    String(data.event || "") === "ops.telegram.alert" ||
+    eventType.startsWith("lead.") ||
+    eventType.startsWith("sla.") ||
+    eventType.startsWith("daily.") ||
+    eventType === "job.completed" ||
+    eventType === "customer.service_recovery_requested" ||
+    eventType === "job.content.candidate"
+  ) {
+    if (eventType === "job.completed") {
+      const { markContentPrompted } = await import("@/lib/job-store");
+      const jobId = String(data.jobId || "");
+      if (jobId) markContentPrompted(jobId);
+    }
+    if (!String(data.text || "").trim()) return { ok: true as const, cause: "no_telegram" };
     const { deliverOpsTelegram } = await import("@/lib/ops-telegram");
     return deliverOpsTelegram(data);
   }

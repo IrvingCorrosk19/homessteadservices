@@ -63,6 +63,7 @@ export type ContentJob = {
   format: string;
   businessPriority: number;
   validUntil: string | null;
+  sourceJobId: string;
 };
 
 export type ContentAsset = {

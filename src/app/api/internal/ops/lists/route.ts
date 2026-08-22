@@ -7,6 +7,7 @@ import {
   panamaToday,
   upcomingAgenda,
 } from "@/lib/ops-store";
+import { listActiveJobs, listFollowups } from "@/lib/job-store";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,26 @@ export async function GET(request: Request) {
         appointmentId: item.appointmentId,
         date: item.date,
         startTime: item.startTime,
+      })),
+    });
+  }
+  if (kind === "jobs") {
+    return NextResponse.json({
+      ok: true,
+      rows: listActiveJobs(includeTest).map((job) => ({
+        jobId: job.jobId,
+        status: job.status,
+        service: job.serviceLabel,
+      })),
+    });
+  }
+  if (kind === "followups") {
+    return NextResponse.json({
+      ok: true,
+      rows: listFollowups(includeTest).map((job) => ({
+        jobId: job.jobId,
+        recoveryStatus: job.recoveryStatus,
+        followupStatus: job.followupStatus,
       })),
     });
   }

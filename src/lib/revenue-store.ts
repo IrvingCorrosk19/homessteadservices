@@ -16,6 +16,7 @@ import {
   isAppointmentStatus,
   reminderEligibleStatus,
 } from "@/lib/appointment-time";
+import { completeServiceJob, createServiceJob } from "@/lib/job-store";
 
 function nowIso() {
   return new Date().toISOString();
@@ -735,69 +736,50 @@ export function claimAppointmentNotice(noticeKey: string, appointmentId: string,
 }
 
 export function createJobFromLead(leadId: string) {
-  const lead = getLead(leadId);
-  if (!lead) return null;
-  if (lead.jobId) return lead.jobId;
-  const jobNumber = nextNumber("revenue_job_counters", "HJ");
-  getHomesteadDb()
-    .prepare(
-      `INSERT INTO revenue_jobs
-        (job_id, job_number, lead_id, customer_id, quote_id, service, scope, status, payment_status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'SCHEDULED', 'UNPAID', ?)`,
-    )
-    .run(jobNumber, jobNumber, leadId, lead.customerId, lead.quoteId, lead.service, lead.problem, nowIso());
-  setPipeline(leadId, "SCHEDULED", { jobId: jobNumber });
-  addRevenueEvent(leadId, "JOB_STARTED");
-  return jobNumber;
+  const created = createServiceJob({ leadId, actor: "revenue" });
+  return created.jobId || null;
 }
 
 export function completeJob(jobId: string, input: { satisfaction: "YES" | "NO" | "UNKNOWN"; photoPermission?: boolean; finalAmount?: number }) {
   const job = getHomesteadDb()
     .prepare("SELECT * FROM revenue_jobs WHERE job_id = ?")
-    .get(jobId) as { lead_id: string; customer_id: number; service: string } | undefined;
+    .get(jobId) as { lead_id: string; customer_id: number; service: string; status: string } | undefined;
   if (!job) return null;
+  completeServiceJob(jobId, "revenue", { skipFollowup: input.satisfaction !== "UNKNOWN" });
   getHomesteadDb()
-    .prepare(
-      "UPDATE revenue_jobs SET status = 'COMPLETED', satisfaction = ?, photo_permission = ?, final_amount = ?, completed_at = ? WHERE job_id = ?",
-    )
-    .run(input.satisfaction, input.photoPermission ? 1 : 0, input.finalAmount ?? null, nowIso(), jobId);
+    .prepare("UPDATE revenue_jobs SET satisfaction = ?, photo_permission = ?, final_amount = COALESCE(?, final_amount) WHERE job_id = ?")
+    .run(input.satisfaction, input.photoPermission ? 1 : 0, input.finalAmount ?? null, jobId);
   if (input.finalAmount && input.finalAmount > 0) {
     getHomesteadDb().prepare("UPDATE revenue_jobs SET payment_status = 'PAID' WHERE job_id = ?").run(jobId);
     addRevenueEvent(job.lead_id, "PAYMENT_RECORDED");
     setPipeline(job.lead_id, "WON");
     addRevenueEvent(job.lead_id, "JOB_WON");
-  } else {
-    setPipeline(job.lead_id, "JOB_COMPLETED");
   }
-  addRevenueEvent(job.lead_id, "JOB_COMPLETED");
   if (input.satisfaction === "NO") {
-    setPipeline(job.lead_id, "JOB_COMPLETED");
     getHomesteadDb()
       .prepare("UPDATE revenue_leads SET next_action = 'SERVICE_RECOVERY', updated_at = ? WHERE lead_id = ?")
       .run(nowIso(), job.lead_id);
+    getHomesteadDb()
+      .prepare(
+        "UPDATE revenue_jobs SET satisfaction_response = CASE WHEN satisfaction_response = '' THEN 'NEEDS_HELP' ELSE satisfaction_response END, recovery_status = CASE WHEN recovery_status = '' THEN 'OPEN' ELSE recovery_status END, recovery_at = COALESCE(recovery_at, ?) WHERE job_id = ?",
+      )
+      .run(nowIso(), jobId);
     addRevenueEvent(job.lead_id, "SERVICE_RECOVERY");
     return { recovery: true, review: false };
   }
   if (input.satisfaction === "YES") {
+    getHomesteadDb()
+      .prepare(
+        "UPDATE revenue_jobs SET satisfaction_response = CASE WHEN satisfaction_response = '' THEN 'GOOD' ELSE satisfaction_response END WHERE job_id = ?",
+      )
+      .run(jobId);
     const reviewId = `RR-${randomBytes(4).toString("hex")}`;
     getHomesteadDb()
       .prepare(
-        "INSERT INTO revenue_reviews (review_id, customer_id, job_id, platform, status, created_at) VALUES (?, ?, ?, '', 'ELIGIBLE', ?)",
+        "INSERT OR IGNORE INTO revenue_reviews (review_id, customer_id, job_id, platform, status, created_at) VALUES (?, ?, ?, '', 'ELIGIBLE', ?)",
       )
       .run(reviewId, job.customer_id, jobId, nowIso());
     addRevenueEvent(job.lead_id, "REVIEW_ELIGIBLE");
-    const days = (revenueConfig.maintenanceIntervalsDays as Record<string, number>)[job.service] || 0;
-    if (days > 0) {
-      const when = new Date(Date.now() + days * 86400000).toISOString();
-      getHomesteadDb()
-        .prepare(
-          `INSERT INTO revenue_maintenance
-            (opportunity_id, customer_id, lead_id, service, eligible_at, recommended_at, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?)`,
-        )
-        .run(`MO-${randomBytes(4).toString("hex")}`, job.customer_id, job.lead_id, job.service, when, when, nowIso());
-      addRevenueEvent(job.lead_id, "MAINTENANCE_CREATED");
-    }
     return { recovery: false, review: true };
   }
   return { recovery: false, review: false };

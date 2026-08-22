@@ -16,7 +16,7 @@ export function canHandoffLead(state: ConversationState) {
 
 export function isTestHandoff(state: ConversationState, utm: Record<string, string> = {}) {
   const blob = `${state.name} ${state.problem} ${utm.hs_test || ""}`;
-  if (/TEST-HS-E2E|AUDIT-CHATBOT-TEST|V2-TEST/i.test(blob) || utm.hs_test === "1") return true;
+  if (/TEST-HS-E2E|AUDIT-CHATBOT-TEST|V2-TEST|WAVE-C-TEST|WAVE-B-TEST|WAVE-A-TEST/i.test(blob) || utm.hs_test === "1") return true;
   const national = classifyPhone(state.phone).national;
   return national === "60001111" || national === "60000000";
 }

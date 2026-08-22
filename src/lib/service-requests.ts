@@ -192,6 +192,7 @@ function migrateContentStudio(database: Database.Database) {
   addJobCol("format", "format TEXT NOT NULL DEFAULT 'SINGLE_IMAGE'");
   addJobCol("business_priority", "business_priority INTEGER NOT NULL DEFAULT 0");
   addJobCol("valid_until", "valid_until TEXT");
+  addJobCol("source_job_id", "source_job_id TEXT NOT NULL DEFAULT ''");
   database.exec(`
     CREATE TABLE IF NOT EXISTS content_publications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -504,6 +505,7 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateLeadHandoff(database);
   migrateAppointmentCalendar(database);
   migrateAutomationOutbox(database);
+  migrateWaveC(database);
 }
 
 function migrateAppointmentCalendar(database: Database.Database) {
@@ -627,6 +629,73 @@ function migrateOpsWaveB(database: Database.Database) {
   `);
 }
 
+function migrateWaveC(database: Database.Database) {
+  const jobCols = columnNames(database, "revenue_jobs");
+  const addJob = (name: string, ddl: string) => {
+    if (jobCols.includes(name)) return;
+    database.exec(`ALTER TABLE revenue_jobs ADD COLUMN ${ddl}`);
+  };
+  addJob("started_at", "started_at TEXT");
+  addJob("started_by", "started_by TEXT NOT NULL DEFAULT ''");
+  addJob("completed_by", "completed_by TEXT NOT NULL DEFAULT ''");
+  addJob("cancelled_at", "cancelled_at TEXT");
+  addJob("cancel_reason", "cancel_reason TEXT NOT NULL DEFAULT ''");
+  addJob("followup_due_at", "followup_due_at TEXT");
+  addJob("followup_sent_at", "followup_sent_at TEXT");
+  addJob("followup_status", "followup_status TEXT NOT NULL DEFAULT ''");
+  addJob("followup_cycle", "followup_cycle INTEGER NOT NULL DEFAULT 0");
+  addJob("satisfaction_response", "satisfaction_response TEXT NOT NULL DEFAULT ''");
+  addJob("satisfaction_received_at", "satisfaction_received_at TEXT");
+  addJob("review_requested_at", "review_requested_at TEXT");
+  addJob("review_link_opened_at", "review_link_opened_at TEXT");
+  addJob("review_reminder_at", "review_reminder_at TEXT");
+  addJob("marketing_usage_approved", "marketing_usage_approved INTEGER NOT NULL DEFAULT 0");
+  addJob("marketing_usage_approved_at", "marketing_usage_approved_at TEXT");
+  addJob("recommended_next_service_at", "recommended_next_service_at TEXT");
+  addJob("source_content_id", "source_content_id TEXT NOT NULL DEFAULT ''");
+  addJob("photo_count", "photo_count INTEGER NOT NULL DEFAULT 0");
+  addJob("is_test", "is_test INTEGER NOT NULL DEFAULT 0");
+  addJob("recovery_status", "recovery_status TEXT NOT NULL DEFAULT ''");
+  addJob("recovery_at", "recovery_at TEXT");
+  addJob("recovery_contacted_at", "recovery_contacted_at TEXT");
+  addJob("feedback_cycle", "feedback_cycle INTEGER NOT NULL DEFAULT 0");
+  addJob("content_prompted_at", "content_prompted_at TEXT");
+  addJob("content_skipped_at", "content_skipped_at TEXT");
+  const custCols = columnNames(database, "revenue_customers");
+  if (custCols.length && !custCols.includes("marketing_opt_in")) {
+    database.exec(`ALTER TABLE revenue_customers ADD COLUMN marketing_opt_in INTEGER NOT NULL DEFAULT 0`);
+  }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS job_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      original_relpath TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      mime TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'WORK',
+      marketing_usage_approved INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      UNIQUE (job_id, sha256)
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_photos_job ON job_photos (job_id, created_at);
+    CREATE TABLE IF NOT EXISTS job_feedback_tokens (
+      token TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      cycle INTEGER NOT NULL DEFAULT 1,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      response TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_feedback_job ON job_feedback_tokens (job_id, cycle);
+    CREATE INDEX IF NOT EXISTS idx_jobs_status ON revenue_jobs (status, is_test, created_at);
+    CREATE INDEX IF NOT EXISTS idx_jobs_customer ON revenue_jobs (customer_id, status);
+    CREATE INDEX IF NOT EXISTS idx_jobs_appointment ON revenue_jobs (appointment_id);
+  `);
+}
+
 export function getHomesteadDb() {
   return getDb();
 }
@@ -640,6 +709,7 @@ function getDb() {
   mkdirSync(join(dataDir(), "photos"), { recursive: true });
   mkdirSync(join(dataDir(), "content"), { recursive: true });
   mkdirSync(join(dataDir(), "concierge"), { recursive: true });
+  mkdirSync(join(dataDir(), "jobs"), { recursive: true });
   const instance = new Database(dbPath());
   instance.pragma("journal_mode = WAL");
   instance.pragma("busy_timeout = 4000");

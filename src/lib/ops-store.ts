@@ -8,6 +8,12 @@ import { addRevenueEvent, getLead, listAppointments, markLeadHumanAction, setPip
 import { opsConfig } from "@/lib/ops-config";
 import { businessYmd, reminderEligibleStatus } from "@/lib/appointment-time";
 import { logInfo } from "@/lib/log";
+import {
+  countActiveJobs,
+  countContentCandidates,
+  countFollowups,
+  countServiceRecovery,
+} from "@/lib/job-store";
 
 const OPEN_APPT = "('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED')";
 const BOOKED_STAGES = "('SCHEDULED','JOB_IN_PROGRESS','JOB_COMPLETED','WON')";
@@ -100,6 +106,10 @@ export function commandCenterSummary(includeTest = false) {
     appointmentsToday: todayAppt.n,
     overdueFollowups: overdue.n,
     contentPending: content.n,
+    jobsActive: countActiveJobs(includeTest),
+    serviceRecovery: countServiceRecovery(includeTest),
+    followupsOpen: countFollowups(includeTest),
+    contentCandidates: countContentCandidates(includeTest),
     includeTest,
   };
 }

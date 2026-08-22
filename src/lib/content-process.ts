@@ -259,6 +259,18 @@ function textSummary(analysis: Awaited<ReturnType<typeof analyzeAndWriteCopy>>) 
 export async function processContentJob(publicId: string, kind: "full" | "image" = "full") {
   const job = getJobByPublicId(publicId);
   if (!job) return;
+  if (job.sourceJobId) {
+    const { getServiceJob } = await import("@/lib/job-store");
+    const source = getServiceJob(job.sourceJobId);
+    if (source && !source.marketingUsageApproved) {
+      await sendTelegramMessage({
+        chatId: job.telegramChatId,
+        text: "Homestead no procesa estas fotos hasta que autorices su uso para marketing en el trabajo.",
+      });
+      clearProcessLock(publicId);
+      return;
+    }
+  }
   if (originalCount(publicId) < 1) {
     await sendTelegramMessage({
       chatId: job.telegramChatId,

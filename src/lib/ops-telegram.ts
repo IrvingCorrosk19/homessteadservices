@@ -1,6 +1,6 @@
 import { site } from "@/lib/site";
 import { customerWhatsAppUrl, getRequestByPublicId } from "@/lib/service-requests";
-import { getAppointment, getLead, latestAppointment } from "@/lib/revenue-store";
+import { getAppointment, getLead, latestAppointment, setOperatorPending } from "@/lib/revenue-store";
 import { listJobsByStatus } from "@/lib/content-catalog";
 import {
   appointmentServiceLabel,
@@ -25,6 +25,22 @@ import {
 } from "@/lib/ops-store";
 import { sendTelegramMessage, type TelegramButton } from "@/lib/content-telegram";
 import { logInfo } from "@/lib/log";
+import {
+  JOB_STATUS_LABELS,
+  adminJobUrl,
+  approveMarketingUsage,
+  cancelServiceJob,
+  completeServiceJob,
+  countActiveJobs,
+  getServiceJob,
+  listActiveJobs,
+  listFollowups,
+  skipJobContent,
+  startServiceJob,
+} from "@/lib/job-store";
+import { followupKind, markRecoveryContacted } from "@/lib/post-service";
+import { createContentFromJob } from "@/lib/job-content";
+import { jobPhotoCount } from "@/lib/job-photos";
 
 const USER_ERROR = "No pudimos actualizarlo en este momento. Intenta nuevamente.";
 
@@ -37,10 +53,13 @@ function homeKeyboard(includeTest: boolean): TelegramButton[][] {
     ],
     [
       { text: "📥 Solicitudes", callback_data: `cc:r:0${flag}` },
-      { text: "🔧 Seguimiento", callback_data: `cc:l:0${flag}` },
+      { text: "🔧 Trabajos", callback_data: `cc:j:0${flag}` },
     ],
     [
+      { text: "❤️ Seguimientos", callback_data: `cc:f:0${flag}` },
       { text: "📸 Marketing", callback_data: "cc:m" },
+    ],
+    [
       { text: "📊 Resumen", callback_data: `cc:s${flag}` },
     ],
     [
@@ -65,17 +84,23 @@ function pager(prefix: string, page: number, total: number, includeTest: boolean
 export function commandCenterHome(includeTest = false) {
   const snap = commandCenterSummary(includeTest);
   recordOpsAudit({ action: "COMMAND_CENTER_OPENED", entityType: "ops", entityId: includeTest ? "test" : "live" });
+  const recovery =
+    snap.serviceRecovery > 0
+      ? `🚨 ${snap.serviceRecovery} ${snap.serviceRecovery === 1 ? "cliente necesita atención" : "clientes necesitan atención"}`
+      : "";
   return {
     text: [
       "🏠 HOMESTEAD",
       "Centro de operaciones",
       includeTest ? "Modo pruebas" : "",
       "",
-      `🔥 ${snap.rescue} oportunidades necesitan atención`,
-      `📥 ${snap.pendingRequests} solicitudes nuevas`,
+      recovery,
+      `🔥 ${snap.rescue} oportunidades`,
+      `📥 ${snap.pendingRequests} solicitudes`,
       `📅 ${snap.appointmentsToday} citas hoy`,
-      `⏱ ${snap.overdueFollowups} seguimientos vencidos`,
-      `📸 ${snap.contentPending} contenido pendiente`,
+      `🔧 ${snap.jobsActive} trabajos activos`,
+      snap.followupsOpen ? `❤️ ${snap.followupsOpen} seguimientos` : "",
+      snap.contentCandidates ? `📸 ${snap.contentCandidates} listos para contenido` : `📸 ${snap.contentPending} contenido pendiente`,
     ]
       .filter((line) => line !== "")
       .join("\n"),
@@ -274,6 +299,8 @@ export function appointmentDetail(appointmentId: string) {
   if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
   contact.push({ text: "🌐 Abrir calendario", url: calendar });
   if (contact.length) keyboard.push(contact);
+  const jobId = item.jobId;
+  if (jobId) keyboard.push([{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]);
   keyboard.push([{ text: "⬅ Agenda", callback_data: "cc:a:0" }]);
   return {
     text: [
@@ -311,6 +338,7 @@ export function marketingView() {
 
 export function summaryView(includeTest = false) {
   const metrics = todayMetrics(includeTest);
+  const snap = commandCenterSummary(includeTest);
   const conversion =
     metrics.conversionPct === null ? "" : `\nSolicitud → cita: ${metrics.conversionPct}%`;
   return {
@@ -321,13 +349,119 @@ export function summaryView(includeTest = false) {
       `🔥 Pendientes: ${metrics.pending}`,
       `📞 Atendidas: ${metrics.contacted}`,
       `📅 Citas creadas: ${metrics.appointmentsCreated}`,
-      `🔧 Citas de hoy: ${metrics.appointmentsToday}`,
+      `🔧 Trabajos activos: ${snap.jobsActive}`,
+      snap.serviceRecovery ? `🚨 Recuperación: ${snap.serviceRecovery}` : "",
       conversion,
     ]
       .filter((line) => line !== "")
       .join("\n"),
     keyboard: [[{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]],
   };
+}
+
+export function jobsView(page = 0, includeTest = false) {
+  const total = countActiveJobs(includeTest);
+  const rows = listActiveJobs(includeTest, page * opsConfig().pageSize);
+  if (!rows.length) {
+    return {
+      text: "🔧 TRABAJOS — HOY\n\nNo hay trabajos activos.",
+      keyboard: [[{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]],
+    };
+  }
+  const lines = ["🔧 TRABAJOS — HOY", ""];
+  const buttons: TelegramButton[][] = [[]];
+  rows.forEach((job, index) => {
+    const clock = job.appointmentTime ? formatAppointmentClock(job.appointmentTime) : "";
+    lines.push(`${index + 1}. ${job.jobNumber}`);
+    lines.push(`   ${job.serviceLabel}`);
+    if (clock) lines.push(`   ${clock}`);
+    lines.push(`   ${JOB_STATUS_LABELS[job.status].toUpperCase()}`);
+    lines.push("");
+    buttons[0].push({ text: String(index + 1), callback_data: `cc:k:${job.jobId}` });
+  });
+  const nav = pager("cc:j", page, total, includeTest);
+  if (nav.length) buttons.push(nav);
+  buttons.push([{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]);
+  return { text: lines.join("\n").trim(), keyboard: buttons };
+}
+
+export function jobDetail(jobId: string) {
+  const job = getServiceJob(jobId);
+  if (!job) return { text: "Este trabajo ya no está disponible.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+  const wa = customerWhatsAppUrl(job.phone);
+  const photos = jobPhotoCount(job.jobId);
+  const keyboard: TelegramButton[][] = [];
+  const contact: TelegramButton[] = [];
+  if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
+  contact.push({ text: "🌐 Abrir ficha", url: adminJobUrl(job.jobId) });
+  if (contact.length) keyboard.push(contact);
+  if (job.status === "SCHEDULED") {
+    keyboard.push([{ text: "▶ Iniciar trabajo", callback_data: `cc:b:${job.jobId}` }]);
+  }
+  if (job.status === "SCHEDULED" || job.status === "IN_PROGRESS") {
+    keyboard.push([{ text: "✅ Completar trabajo", callback_data: `cc:q:${job.jobId}` }]);
+  }
+  keyboard.push([{ text: "📸 Fotos", callback_data: `cc:p:${job.jobId}` }]);
+  if (!job.marketingUsageApproved && photos > 0) {
+    keyboard.push([{ text: "✅ Autorizar fotos", callback_data: `cc:y:${job.jobId}` }]);
+  }
+  if (job.status === "COMPLETED" && photos > 0 && !job.sourceContentId && job.marketingUsageApproved) {
+    keyboard.push([{ text: "✨ Crear contenido", callback_data: `cc:o:${job.jobId}` }]);
+  }
+  if (job.recoveryStatus === "OPEN") {
+    keyboard.push([{ text: "✅ Recuperación atendida", callback_data: `cc:t:${job.jobId}` }]);
+  }
+  if (job.status === "SCHEDULED" || job.status === "IN_PROGRESS") {
+    keyboard.push([{ text: "No se presentó", callback_data: `cc:ns:${job.jobId}` }]);
+  }
+  keyboard.push([{ text: "⬅ Trabajos", callback_data: "cc:j:0" }]);
+  const first = job.customerName.split(/\s+/)[0] || job.customerName;
+  return {
+    text: [
+      "🔧 TRABAJO",
+      "",
+      job.jobNumber,
+      job.isTest ? "TEST · no es un cliente real" : "",
+      "",
+      first ? `👤 ${first}` : "",
+      `🛠 ${job.serviceLabel}`,
+      job.zone ? `📍 ${job.zone}` : "",
+      job.appointmentDate ? `📅 ${formatAppointmentDay(job.appointmentDate)}${job.appointmentTime ? ` · ${formatAppointmentClock(job.appointmentTime)}` : ""}` : "",
+      "",
+      `Estado:\n${JOB_STATUS_LABELS[job.status].toUpperCase()}`,
+      "",
+      job.leadId.startsWith("HS-") ? `Solicitud:\n${job.leadId}` : "",
+      job.appointmentId ? `Cita:\n${job.appointmentId}` : "",
+      photos ? `Fotos: ${photos}` : "",
+      job.phone ? `📞 ${job.phone}` : "",
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
+    keyboard,
+  };
+}
+
+export function followupsView(page = 0, includeTest = false) {
+  const rows = listFollowups(includeTest, page * opsConfig().pageSize);
+  if (!rows.length) {
+    return {
+      text: "❤️ SEGUIMIENTOS\n\nNada pendiente.",
+      keyboard: [[{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]],
+    };
+  }
+  const lines = ["❤️ SEGUIMIENTOS", ""];
+  const buttons: TelegramButton[][] = [[]];
+  rows.forEach((job, index) => {
+    const kind = followupKind(job);
+    const label = kind === "recovery" ? "🚨 Necesita atención" : kind === "review" ? "⭐ Reseña" : "❤️ Post-servicio";
+    lines.push(`${index + 1}. ${job.jobNumber}`);
+    lines.push(`   ${job.serviceLabel}`);
+    lines.push(`   ${label}`);
+    lines.push("");
+    buttons[0].push({ text: String(index + 1), callback_data: `cc:k:${job.jobId}` });
+  });
+  buttons.push([{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]);
+  return { text: lines.join("\n").trim(), keyboard: buttons };
 }
 
 function parseFlag(parts: string[], index: number) {
@@ -350,7 +484,92 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
     else if (action === "g") view = appointmentDetail(parts.slice(2).join(":"));
     else if (action === "m") view = marketingView();
     else if (action === "s") view = summaryView(parseFlag(parts, 2));
-    else if (action === "c") {
+    else if (action === "j") view = jobsView(Number(parts[2] || 0), parseFlag(parts, 3));
+    else if (action === "k") view = jobDetail(parts.slice(2).join(":"));
+    else if (action === "f") view = followupsView(Number(parts[2] || 0), parseFlag(parts, 3));
+    else if (action === "q") {
+      const jobId = parts.slice(2).join(":");
+      view = {
+        text: "¿Confirmas que el trabajo fue realizado?",
+        keyboard: [
+          [{ text: "✅ Sí, completar", callback_data: `cc:w:${jobId}` }],
+          [{ text: "↩ Cancelar", callback_data: `cc:k:${jobId}` }],
+        ],
+      };
+    } else if (action === "w") {
+      const jobId = parts.slice(2).join(":");
+      const result = completeServiceJob(jobId, chatId.slice(0, 24));
+      if (!result.ok && result.reason === "missing") view = { text: USER_ERROR, keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      else if (result.already) {
+        view = {
+          text: `✅ Este trabajo ya estaba completado.\n\n${jobId}`,
+          keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+        };
+      } else {
+        view = {
+          text: `✅ Trabajo completado.\n\n${jobId}\n\nHomestead programará un seguimiento al cliente. No se publica contenido ni se pide reseña todavía.`,
+          keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+        };
+      }
+    } else if (action === "b") {
+      const jobId = parts.slice(2).join(":");
+      startServiceJob(jobId, chatId.slice(0, 24));
+      view = jobDetail(jobId);
+    } else if (action === "p") {
+      const jobId = parts.slice(2).join(":");
+      setOperatorPending(chatId, jobId, "job_photos");
+      view = {
+        text: `📸 FOTOS DEL TRABAJO\n\n${jobId}\n\nEnvía ahora las fotografías del trabajo realizado.\nSe guardan como originales y no se mezclan con las fotos del cliente.\n\nCuando termines, vuelve al trabajo.`,
+        keyboard: [[{ text: "⬅ Trabajo", callback_data: `cc:k:${jobId}` }]],
+      };
+    } else if (action === "y") {
+      const jobId = parts.slice(2).join(":");
+      approveMarketingUsage(jobId, chatId.slice(0, 24));
+      view = {
+        text: "✅ Uso de fotos autorizado para marketing.\n\nHomestead todavía no publica nada hasta que apruebes el contenido.",
+        keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+      };
+    } else if (action === "o") {
+      const jobId = parts.slice(2).join(":");
+      const created = createContentFromJob({ jobId, chatId, userId: chatId, actor: chatId.slice(0, 24) });
+      if (!created.ok && created.reason === "marketing_not_approved") {
+        view = {
+          text: "Primero autoriza el uso de las fotos para marketing.",
+          keyboard: [
+            [{ text: "✅ Autorizar fotos", callback_data: `cc:y:${jobId}` }],
+            [{ text: "⬅ Trabajo", callback_data: `cc:k:${jobId}` }],
+          ],
+        };
+      } else if (!created.ok) {
+        view = { text: "No pudimos crear el contenido todavía.", keyboard: [[{ text: "⬅ Trabajo", callback_data: `cc:k:${jobId}` }]] };
+      } else {
+        view = {
+          text: `📸 Content Studio listo\n\n${created.contentId}\nTrabajo ${jobId}\n\nLas fotos originales se copiaron. Pulsa PROCESAR cuando quieras. Homestead no llama a la IA hasta ese momento y no publica solo.`,
+          keyboard: [[{ text: "⬅ Trabajo", callback_data: `cc:k:${jobId}` }]],
+        };
+      }
+    } else if (action === "u") {
+      const jobId = parts.slice(2).join(":");
+      skipJobContent(jobId, chatId.slice(0, 24));
+      view = {
+        text: "De acuerdo. No creamos contenido ahora.",
+        keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
+      };
+    } else if (action === "t") {
+      const jobId = parts.slice(2).join(":");
+      const result = markRecoveryContacted(jobId, chatId.slice(0, 24));
+      view = {
+        text: result.already ? "✅ Ya estaba atendida." : "✅ Recuperación marcada como atendida.",
+        keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+      };
+    } else if (action === "ns") {
+      const jobId = parts.slice(2).join(":");
+      cancelServiceJob(jobId, "NO_SHOW", chatId.slice(0, 24));
+      view = {
+        text: "Registramos que el cliente no se presentó.",
+        keyboard: [[{ text: "⬅ Trabajos", callback_data: "cc:j:0" }]],
+      };
+    } else if (action === "c") {
       const id = parts.slice(2).join(":");
       const result = markEntityContacted(id, chatId.slice(0, 24));
       if (!result.ok) view = { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };

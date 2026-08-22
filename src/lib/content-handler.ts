@@ -351,11 +351,56 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
     return { ok: true };
   }
-  if (text === "/agenda" || text.startsWith("/agenda@") || text === "/trabajos" || text.startsWith("/trabajos@")) {
+  if (text === "/agenda" || text.startsWith("/agenda@")) {
     const { agendaView } = await import("@/lib/ops-telegram");
     const view = agendaView(0, false);
     await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
     return { ok: true };
+  }
+  if (text === "/trabajos" || text.startsWith("/trabajos@")) {
+    const { jobsView } = await import("@/lib/ops-telegram");
+    const view = jobsView(0, false);
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+
+  const { getOperatorPending } = await import("@/lib/revenue-store");
+  const pendingPhotos = getOperatorPending(chatId);
+  if (pendingPhotos?.expect === "job_photos") {
+    const incomingPhoto = Boolean(message.photo?.length || message.document);
+    if (incomingPhoto) {
+      const photo = message.photo?.length
+        ? message.photo.reduce((best, item) => ((item.file_size || 0) > (best.file_size || 0) ? item : best))
+        : null;
+      const fileId = photo?.file_id || (message.document ? message.document.file_id : "");
+      const bytes = fileId ? await downloadTelegramFile(fileId) : null;
+      if (!bytes) {
+        await sendTelegramMessage({ chatId, text: "No pude descargar esa fotografía. Intenta de nuevo." });
+        return { ok: true };
+      }
+      const sniffed = sniffImage(bytes, MAX_CONTENT_PHOTO_BYTES);
+      if (!sniffed) {
+        await sendTelegramMessage({ chatId, text: "Solo acepto JPEG, PNG o WebP, hasta 8 MB." });
+        return { ok: true };
+      }
+      const { storeJobOriginal, jobPhotoCount } = await import("@/lib/job-photos");
+      const stored = storeJobOriginal({ jobId: pendingPhotos.lead_id, bytes, sniffed, actor: userId });
+      if (!stored.ok) {
+        await sendTelegramMessage({
+          chatId,
+          text: stored.error === "too_many" ? "Ya hay suficientes fotos en este trabajo." : "No pude guardar esa fotografía.",
+        });
+        return { ok: true };
+      }
+      const count = jobPhotoCount(pendingPhotos.lead_id);
+      await sendTelegramMessage({
+        chatId,
+        text: stored.duplicate
+          ? `Esa foto ya estaba guardada.\n\n${pendingPhotos.lead_id}\n${count} originales.`
+          : `📸 Foto del trabajo guardada (${count})\n\n${pendingPhotos.lead_id}\nOriginal intacto. Puedes enviar más.`,
+      });
+      return { ok: true };
+    }
   }
   if (!studioEnabled()) {
     return { ok: true, skipped: "disabled" };

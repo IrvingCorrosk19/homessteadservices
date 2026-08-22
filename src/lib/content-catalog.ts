@@ -39,6 +39,7 @@ type JobRow = {
   format: string | null;
   business_priority: number | null;
   valid_until: string | null;
+  source_job_id: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -67,6 +68,7 @@ function mapJob(row: JobRow): ContentJob {
     format: row.format || "SINGLE_IMAGE",
     businessPriority: row.business_priority || 0,
     validUntil: row.valid_until ?? null,
+    sourceJobId: row.source_job_id || "",
   };
 }
 
