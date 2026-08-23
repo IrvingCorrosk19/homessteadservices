@@ -22,7 +22,13 @@ export type TelegramPermission =
   | "jobs.manage"
   | "operators.read"
   | "operators.manage"
-  | "operators.promote_owner";
+  | "operators.promote_owner"
+  | "retention.read"
+  | "retention.manage"
+  | "recovery.read"
+  | "recovery.manage"
+  | "reviews.read"
+  | "reviews.manage";
 
 export type NotifyPref =
   | "notify_requests"
@@ -69,6 +75,12 @@ const ROLE_PERMISSIONS: Record<TelegramRole, ReadonlySet<TelegramPermission>> = 
     "operators.read",
     "operators.manage",
     "operators.promote_owner",
+    "retention.read",
+    "retention.manage",
+    "recovery.read",
+    "recovery.manage",
+    "reviews.read",
+    "reviews.manage",
   ]),
   ADMIN: new Set([
     "dashboard.read",
@@ -83,6 +95,12 @@ const ROLE_PERMISSIONS: Record<TelegramRole, ReadonlySet<TelegramPermission>> = 
     "jobs.read",
     "jobs.manage",
     "operators.read",
+    "retention.read",
+    "retention.manage",
+    "recovery.read",
+    "recovery.manage",
+    "reviews.read",
+    "reviews.manage",
   ]),
   SALES: new Set([
     "dashboard.read",
@@ -92,9 +110,11 @@ const ROLE_PERMISSIONS: Record<TelegramRole, ReadonlySet<TelegramPermission>> = 
     "appointments.manage",
     "leads.read",
     "leads.manage",
+    "retention.read",
+    "recovery.read",
   ]),
-  CONTENT: new Set(["dashboard.read", "content.read", "content.approve"]),
-  TECHNICIAN: new Set(["dashboard.read", "jobs.read", "jobs.manage", "appointments.read"]),
+  CONTENT: new Set(["dashboard.read", "content.read", "content.approve", "reviews.read"]),
+  TECHNICIAN: new Set(["dashboard.read", "jobs.read", "jobs.manage", "appointments.read", "recovery.read"]),
   PENDING: new Set(),
 };
 

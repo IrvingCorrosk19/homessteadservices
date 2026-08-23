@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node scripts/test-appointment-time.mjs && node scripts/test-ai-sales-concierge.mjs && node scripts/test-chat-lead-handoff.mjs && node scripts/test-conversational-ai-v2.mjs && node scripts/test-conversational-ai-v3.mjs && node scripts/test-conversational-ai-v3.1-golden.mjs && node scripts/test-automation-wave-a.mjs && node scripts/test-automation-wave-b.mjs && node scripts/test-automation-wave-c.mjs && node scripts/test-telegram-multi-operator.mjs",
+    "test": "node scripts/test-appointment-time.mjs && node scripts/test-ai-sales-concierge.mjs && node scripts/test-chat-lead-handoff.mjs && node scripts/test-conversational-ai-v2.mjs && node scripts/test-conversational-ai-v3.mjs && node scripts/test-conversational-ai-v3.1-golden.mjs && node scripts/test-automation-wave-a.mjs && node scripts/test-automation-wave-b.mjs && node scripts/test-automation-wave-c.mjs && node scripts/test-telegram-multi-operator.mjs && node scripts/test-automation-wave-e.mjs",
     "images": "node scripts/convert-images.mjs"
   },
   "dependencies": {

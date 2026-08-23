@@ -40,7 +40,7 @@ import {
   skipJobContent,
   startServiceJob,
 } from "@/lib/job-store";
-import { followupKind, markRecoveryContacted } from "@/lib/post-service";
+import { followupKind, markRecoveryContacted, markRecoveryResolved } from "@/lib/post-service";
 import { createContentFromJob } from "@/lib/job-content";
 import { jobPhotoCount } from "@/lib/job-photos";
 
@@ -63,6 +63,7 @@ function homeKeyboard(includeTest: boolean, canManageOperators = false): Telegra
     ],
     [
       { text: "📊 Resumen", callback_data: `cc:s${flag}` },
+      { text: "❤️ Clientes", callback_data: "cc:ret" },
     ],
     [
       {
@@ -590,6 +591,43 @@ export async function applyCommandCenterCallback(
         text: "De acuerdo. No creamos contenido ahora.",
         keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
       };
+    } else if (action === "ret") {
+      const { retentionDashboard } = await import("@/lib/retention-engine");
+      const snap = retentionDashboard(false);
+      view = {
+        text: [
+          "❤️ CLIENTES — RETENCIÓN",
+          "",
+          `⚠️ Recovery abiertos: ${snap.recoveryOpen}`,
+          `📞 Recovery en curso: ${snap.recoveryContacted}`,
+          `📬 Aftercare pendiente: ${snap.aftercarePending}`,
+          `⭐ Reviews solicitadas: ${snap.reviewsRequested}`,
+          `🔧 Mantenimiento due: ${snap.maintenanceDue}`,
+          `♻️ Reactivación elegible: ${snap.reactivationEligible}`,
+        ].join("\n"),
+        keyboard: [
+          [{ text: "⚠️ Recovery", callback_data: "cc:f:0" }],
+          [{ text: "⬅ Inicio", callback_data: "cc:h" }],
+        ],
+      };
+    } else if (action === "rr") {
+      const jobId = parts.slice(2).join(":");
+      const result = markRecoveryResolved(jobId, actor);
+      if (!result.ok && result.reason === "missing") {
+        view = { text: USER_ERROR, keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else if (!result.ok) {
+        view = {
+          text: "Esta acción ya no está disponible porque el estado cambió.",
+          keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+        };
+      } else {
+        view = {
+          text: result.already
+            ? "✅ Esta recuperación ya estaba resuelta."
+            : "✅ Recuperación marcada como resuelta.\n\nHomestead programará un seguimiento para confirmar que ahora quedó bien. No se pide reseña automáticamente.",
+          keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
+        };
+      }
     } else if (action === "t") {
       const jobId = parts.slice(2).join(":");
       const result = markRecoveryContacted(jobId, actor);

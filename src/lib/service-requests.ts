@@ -516,6 +516,12 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateAutomationOutbox(database);
   migrateWaveC(database);
   migrateTelegramOperatorsTable(database);
+  migrateRetentionWaveETable(database);
+}
+
+function migrateRetentionWaveETable(database: Database.Database) {
+  const { migrateRetentionWaveE } = require("@/lib/retention-engine") as typeof import("@/lib/retention-engine");
+  migrateRetentionWaveE(database);
 }
 
 function migrateAppointmentCalendar(database: Database.Database) {

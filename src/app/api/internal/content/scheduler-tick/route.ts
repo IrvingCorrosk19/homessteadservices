@@ -35,6 +35,16 @@ export async function POST(request: Request) {
       });
     }
     try {
+      const { runRetentionEngine } = await import("@/lib/retention-processor");
+      await runRetentionEngine(8);
+      setEngineState("last_retention_engine_at", new Date().toISOString());
+    } catch (error) {
+      logError("AutomationDispatchFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+        stage: "retention_engine",
+      });
+    }
+    try {
       await drainAutomationOutbox(24);
     } catch (error) {
       logError("AutomationDispatchFailed", {

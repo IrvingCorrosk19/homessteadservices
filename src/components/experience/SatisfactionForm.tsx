@@ -5,6 +5,7 @@ import { useState } from "react";
 const OPTIONS = [
   { id: "EXCELLENT", label: "Excelente", hint: "Quedó como esperaba" },
   { id: "GOOD", label: "Bien", hint: "Todo funcionando" },
+  { id: "NEUTRAL", label: "Más o menos", hint: "Todavía estoy evaluando" },
   { id: "NEEDS_HELP", label: "Necesito ayuda", hint: "Hay algo por revisar" },
 ] as const;
 

@@ -22,6 +22,12 @@ import {
 } from "@/lib/job-store";
 import { buildPostServiceEmail, buildReviewRequestEmail } from "@/lib/post-service-email";
 import { site } from "@/lib/site";
+import {
+  canSendMarketingRetention,
+  canSendTransactionalAftercare,
+  classifyRecoveryPriority,
+  recordMarketingContact,
+} from "@/lib/retention-engine";
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 
@@ -104,6 +110,11 @@ export async function deliverPostServiceFollowup(jobId: string) {
   if (job.doNotContact) {
     markFollowupSkipped(jobId, "do_not_contact");
     return { ok: true as const, cause: "do_not_contact" };
+  }
+  const aftercareGate = canSendTransactionalAftercare(job.customerId);
+  if (!aftercareGate.ok) {
+    markFollowupSkipped(jobId, aftercareGate.reason);
+    return { ok: true as const, cause: aftercareGate.reason };
   }
   const email = job.email.trim();
   if (!email || !email.includes("@")) {
@@ -196,22 +207,27 @@ export function recordSatisfaction(token: string, response: string) {
   if (job.leadId) addRevenueEvent(job.leadId, "SATISFACTION_RECEIVED");
   audit("SATISFACTION_RECEIVED", job.jobId, "customer", response);
   if (response === "NEEDS_HELP") {
-    openServiceRecovery(job.jobId);
+    openServiceRecovery(job.jobId, "customer indicated needs help");
     return { ok: true as const, already: false, response, reviewUrl: "", needsHelp: true };
+  }
+  if (response === "NEUTRAL") {
+    audit("SATISFACTION_NEUTRAL", job.jobId, "customer");
+    return { ok: true as const, already: false, response, reviewUrl: "", needsHelp: false };
   }
   const reviewUrl = maybeRequestReview(job.jobId);
   return { ok: true as const, already: false, response, reviewUrl, needsHelp: false };
 }
 
-function openServiceRecovery(jobId: string) {
+function openServiceRecovery(jobId: string, problemText = "") {
   const job = getServiceJob(jobId);
   if (!job) return;
+  const priority = classifyRecoveryPriority(problemText);
   const opened = getHomesteadDb()
     .prepare(
-      `UPDATE revenue_jobs SET recovery_status = 'OPEN', recovery_at = ?
+      `UPDATE revenue_jobs SET recovery_status = 'OPEN', recovery_at = ?, recovery_priority = ?
        WHERE job_id = ? AND (recovery_status = '' OR recovery_status IS NULL)`,
     )
-    .run(nowIso(), jobId);
+    .run(nowIso(), priority, jobId);
   if (opened.changes !== 1) return;
   if (job.leadId) {
     getHomesteadDb()
@@ -219,23 +235,25 @@ function openServiceRecovery(jobId: string) {
       .run(nowIso(), job.leadId);
     addRevenueEvent(job.leadId, "SERVICE_RECOVERY_REQUESTED");
   }
-  audit("SERVICE_RECOVERY_REQUESTED", jobId, "customer");
+  audit("SERVICE_RECOVERY_REQUESTED", jobId, "customer", priority);
   const cycle = Math.max(1, job.feedbackCycle || 1);
   const wa = customerWhatsAppUrl(job.phone);
   const chats = adminChatIds("recovery");
+  const priorityLabel = priority === "URGENT" ? "🚨 URGENTE" : priority === "HIGH" ? "⚠️ ALTA" : "NORMAL";
   enqueueOutbox(getHomesteadDb(), {
     eventType: "customer.service_recovery_requested",
     correlationId: jobId,
     idempotencyKey: `customer.service_recovery:${jobId}:${cycle}`,
     data: {
       event: "ops.telegram.alert",
-      priority: "ACTION",
+      priority: priority === "URGENT" ? "CRITICAL" : "ACTION",
       jobId,
       chats,
       text: [
-        "🚨 CLIENTE NECESITA ATENCIÓN",
+        "⚠️ CLIENTE REQUIERE ATENCIÓN",
         "",
         job.isTest ? "TEST · no es un cliente real\n" : "",
+        `Prioridad: ${priorityLabel}`,
         job.jobNumber,
         job.serviceLabel,
         job.zone ? `📍 ${job.zone}` : "",
@@ -254,9 +272,10 @@ function openServiceRecovery(jobId: string) {
           { text: "🌐 Ver trabajo", url: adminJobUrl(jobId) },
         ],
         [
-          { text: "✅ Atendido", callback_data: `cc:t:${jobId}` },
-          { text: "🔧 Detalle", callback_data: `cc:k:${jobId}` },
+          { text: "✅ Atender", callback_data: `cc:t:${jobId}` },
+          { text: "✅ Resolver", callback_data: `cc:rr:${jobId}` },
         ],
+        [{ text: "🔧 Detalle", callback_data: `cc:k:${jobId}` }],
       ],
     },
   });
@@ -266,6 +285,9 @@ function maybeRequestReview(jobId: string) {
   const job = getServiceJob(jobId);
   if (!job) return "";
   if (job.reviewRequestedAt) return configuredReviewUrl();
+  if (job.recoveryStatus === "OPEN" || job.recoveryStatus === "CONTACTED") return "";
+  const gate = canSendMarketingRetention(job.customerId, "review");
+  if (!gate.ok) return "";
   const url = configuredReviewUrl();
   if (!url) return "";
   const now = nowIso();
@@ -283,6 +305,7 @@ function maybeRequestReview(jobId: string) {
     .run(reviewId, job.customerId, jobId, now, now);
   if (job.leadId) addRevenueEvent(job.leadId, "REVIEW_REQUESTED");
   audit("REVIEW_REQUESTED", jobId, "system");
+  recordMarketingContact(job.customerId);
   const hours = jobConfig().reviewReminderHours;
   if (hours > 0) {
     enqueueOutbox(getHomesteadDb(), {
@@ -299,10 +322,14 @@ function maybeRequestReview(jobId: string) {
 export async function deliverReviewReminder(jobId: string) {
   const job = getServiceJob(jobId);
   if (!job) return { ok: true as const, cause: "missing" };
-  if (job.recoveryStatus === "OPEN") return { ok: true as const, cause: "recovery_open" };
+  if (job.recoveryStatus === "OPEN" || job.recoveryStatus === "CONTACTED") {
+    return { ok: true as const, cause: "recovery_open" };
+  }
   if (!isPositiveSatisfaction(job.satisfactionResponse)) return { ok: true as const, cause: "not_positive" };
   if (job.reviewLinkOpenedAt) return { ok: true as const, cause: "already_opened" };
   if (job.reviewReminderAt) return { ok: true as const, cause: "already_reminded" };
+  const gate = canSendMarketingRetention(job.customerId, "review");
+  if (!gate.ok) return { ok: true as const, cause: gate.reason };
   const url = configuredReviewUrl();
   if (!url || !job.email.includes("@") || !isMailConfigured()) {
     return { ok: true as const, cause: "not_configured" };
@@ -323,6 +350,7 @@ export async function deliverReviewReminder(jobId: string) {
   });
   if (!sent.ok) return { ok: false as const, cause: sent.error };
   getHomesteadDb().prepare("UPDATE revenue_jobs SET review_reminder_at = ? WHERE job_id = ?").run(nowIso(), jobId);
+  recordMarketingContact(job.customerId);
   return { ok: true as const, cause: "sent" };
 }
 
@@ -346,6 +374,7 @@ export function markRecoveryContacted(jobId: string, actor = "telegram") {
   const job = getServiceJob(jobId);
   if (!job) return { ok: false as const, already: false };
   if (job.recoveryStatus === "CONTACTED") return { ok: true as const, already: true };
+  if (job.recoveryStatus === "RESOLVED") return { ok: true as const, already: true };
   if (job.recoveryStatus !== "OPEN") return { ok: false as const, already: false };
   const result = getHomesteadDb()
     .prepare(
@@ -361,8 +390,64 @@ export function markRecoveryContacted(jobId: string, actor = "telegram") {
   return { ok: true as const, already: false };
 }
 
+export function markRecoveryResolved(
+  jobId: string,
+  actor = "telegram",
+  input: { resolutionType?: string; notes?: string } = {},
+) {
+  const job = getServiceJob(jobId);
+  if (!job) return { ok: false as const, already: false, reason: "missing" as const };
+  if (job.recoveryStatus === "RESOLVED") return { ok: true as const, already: true };
+  if (job.recoveryStatus !== "OPEN" && job.recoveryStatus !== "CONTACTED") {
+    return { ok: false as const, already: false, reason: "not_open" as const };
+  }
+  const now = nowIso();
+  const result = getHomesteadDb()
+    .prepare(
+      `UPDATE revenue_jobs SET
+        recovery_status = 'RESOLVED',
+        recovery_resolved_at = ?,
+        recovery_resolved_by = ?,
+        recovery_resolution_type = ?,
+        recovery_notes = ?
+       WHERE job_id = ? AND recovery_status IN ('OPEN','CONTACTED')`,
+    )
+    .run(
+      now,
+      actor.slice(0, 40),
+      (input.resolutionType || "OPERATOR").slice(0, 40),
+      (input.notes || "").slice(0, 180),
+      jobId,
+    );
+  if (result.changes !== 1) return { ok: true as const, already: true };
+  if (job.leadId) addRevenueEvent(job.leadId, "SERVICE_RECOVERY_RESOLVED");
+  audit("SERVICE_RECOVERY_RESOLVED", jobId, actor, input.resolutionType || "OPERATOR");
+  // Schedule recovery follow-up aftercare (cycle+1) — ask if now OK; no auto-review.
+  const cycle = Math.max(1, (job.feedbackCycle || 1) + 1);
+  getHomesteadDb()
+    .prepare(
+      `UPDATE revenue_jobs SET
+        feedback_cycle = ?,
+        followup_status = 'PENDING',
+        followup_due_at = ?,
+        followup_sent_at = NULL,
+        satisfaction_response = '',
+        satisfaction_received_at = NULL
+       WHERE job_id = ?`,
+    )
+    .run(cycle, new Date(Date.now() + 120 * 60_000).toISOString(), jobId);
+  enqueueOutbox(getHomesteadDb(), {
+    eventType: "post_service.followup_due",
+    correlationId: jobId,
+    idempotencyKey: `post_service.followup_due:${jobId}:${cycle}`,
+    nextAttemptAt: new Date(Date.now() + 120 * 60_000).toISOString(),
+    data: { event: "post_service.followup_due", jobId, cycle, aftercare_source: "recovery_followup" },
+  });
+  return { ok: true as const, already: false };
+}
+
 export function followupKind(job: ServiceJob) {
-  if (job.recoveryStatus === "OPEN") return "recovery";
+  if (job.recoveryStatus === "OPEN" || job.recoveryStatus === "CONTACTED") return "recovery";
   if (job.followupStatus === "PENDING" || job.followupStatus === "FAILED") return "followup";
   if (isPositiveSatisfaction(job.satisfactionResponse) && !job.reviewRequestedAt && configuredReviewUrl()) {
     return "review";

@@ -45,7 +45,7 @@ check("no escalate duplicate lead telegram", !handoffSrc.includes("sendNewLeadAl
 check("telegram update_id insert atomic", catalogSrc.includes("INSERT INTO content_telegram_updates") && catalogSrc.includes("catch"));
 check("hmac still generated outbound", n8nSrc.includes("X-Homestead-Signature"));
 check("n8n inbound hmac optional documented", authSrc.includes("n8n 2.3.6"));
-check("admin callback gate", handlerSrc.includes("isTelegramAdmin") && handlerSrc.includes("denied"));
+check("admin callback gate", handlerSrc.includes("gateOperator") && handlerSrc.includes("denied"));
 check("n8n request idempotency kept", tgSrc.includes("staticData.seen"));
 check("webhook expected content-studio", readFileSync(join(root, "src/lib/content-telegram.ts"), "utf8").includes("homestead-content-studio"));
 

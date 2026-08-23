@@ -28,6 +28,9 @@ async function deliverOpsEvent(data: Record<string, unknown>, eventType: string)
     const { deliverReviewReminder } = await import("@/lib/post-service");
     return deliverReviewReminder(String(data.jobId || ""));
   }
+  if (eventType === "retention.reactivation_sent" || eventType === "retention.maintenance_sent") {
+    return { ok: true as const, cause: "recorded" };
+  }
   if (
     String(data.event || "") === "ops.telegram.alert" ||
     eventType.startsWith("lead.") ||

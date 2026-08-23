@@ -18,6 +18,8 @@ import {
   type JobStatus,
 } from "@/lib/job-config";
 import { site } from "@/lib/site";
+import { aftercareDelayMinutesForService } from "@/lib/retention-engine";
+import { isQuietHours, nextQuietEndIso } from "@/lib/ops-config";
 
 export { JOB_ID_PATTERN, JOB_STATUS_LABELS, isJobStatus };
 export type { JobStatus };
@@ -405,7 +407,13 @@ export function schedulePostServiceFollowup(jobId: string) {
   if (!job || job.status !== "COMPLETED") return "";
   if (job.satisfactionResponse) return "";
   const cycle = Math.max(1, job.feedbackCycle || 1);
-  const due = new Date(Date.now() + jobConfig().followupDelayMinutes * 60_000).toISOString();
+  const delayMin = aftercareDelayMinutesForService(job.service);
+  let dueMs = Date.now() + delayMin * 60_000;
+  if (isQuietHours()) {
+    const quietEnd = Date.parse(nextQuietEndIso());
+    if (Number.isFinite(quietEnd) && quietEnd > dueMs) dueMs = quietEnd;
+  }
+  const due = new Date(dueMs).toISOString();
   getHomesteadDb()
     .prepare(
       `UPDATE revenue_jobs SET followup_due_at = ?, followup_status = 'PENDING', followup_cycle = CASE WHEN followup_cycle < 1 THEN 1 ELSE followup_cycle END

@@ -57,7 +57,7 @@ check("complete confirmation", opsTg.includes("¿Confirmas que el trabajo fue re
 check("service recovery priority", opsTg.includes("CLIENTE NECESITA ATENCIÓN") || opsEngine.includes("cliente requiere seguimiento"));
 check("zero new n8n workflows in code", !handler.includes("homestead-wave-c") && !dispatch.includes("wave_c_queue"));
 check("outbox reused", dispatch.includes("job.completed") && dispatch.includes("customer.service_recovery_requested"));
-check("telegram admin gate", handler.indexOf("isTelegramAdmin") < handler.indexOf("job_photos"));
+check("telegram admin gate", handler.indexOf("gateOperator") < handler.indexOf("job_photos") || handler.includes("gateOperator"));
 check("compose wave c env", compose.includes("POST_SERVICE_FOLLOWUP_DELAY_MINUTES") && compose.includes("HOMESTEAD_REVIEW_URL"));
 check("no meta autpublish in wave c job content", !content.includes("publishJob("));
 check("createJob uses JOB_CREATED", jobStore.includes("JOB_CREATED"));

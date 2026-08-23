@@ -8,7 +8,7 @@ export const JOB_ID_PATTERN = /^HJ-\d{4}-\d{6}$/;
 export const JOB_STATUSES = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "NO_SHOW"] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export const SATISFACTION_RESPONSES = ["EXCELLENT", "GOOD", "NEEDS_HELP"] as const;
+export const SATISFACTION_RESPONSES = ["EXCELLENT", "GOOD", "NEUTRAL", "NEEDS_HELP"] as const;
 export type SatisfactionResponse = (typeof SATISFACTION_RESPONSES)[number];
 
 export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
@@ -22,6 +22,7 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
 export const SATISFACTION_LABELS: Record<SatisfactionResponse, string> = {
   EXCELLENT: "Excelente",
   GOOD: "Bien",
+  NEUTRAL: "Más o menos",
   NEEDS_HELP: "Necesito ayuda",
 };
 
