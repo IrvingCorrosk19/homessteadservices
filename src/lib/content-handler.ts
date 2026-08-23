@@ -6,6 +6,7 @@ import {
   getContentSettings,
   getJobByPublicId,
   jobAwaitingInput,
+  latestVersion,
   listJobsByStatus,
   originalCount,
   recordContentEvent,
@@ -16,7 +17,7 @@ import {
   tryRejectContentJob,
   updateJob,
 } from "@/lib/content-catalog";
-import { processContentJob, regenerateCopy } from "@/lib/content-process";
+import { processContentJob, regenerateCopy, processAiCampaignJob, startAiCampaignFromChat } from "@/lib/content-process";
 import { formatPanama, parsePanamaDateTime } from "@/lib/content-queue";
 import { publishJob } from "@/lib/content-publish";
 import { metadataOf } from "@/lib/content-images";
@@ -51,6 +52,10 @@ import { latestRecommendation, recordLead, hisForPublicId, markRecommendationDec
 import { mapServiceCategory } from "@/lib/marketing-config";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { logError, logInfo } from "@/lib/log";
+import {
+  buildAiCampaignBrief,
+  interpretContentCampaignIntent,
+} from "@/lib/content-campaign-intent";
 
 function receivingKeyboard(publicId: string) {
   return [
@@ -81,8 +86,20 @@ function rejectKeyboard(publicId: string) {
 
 function parseCallback(data: string) {
   const parts = data.split(":");
-  if (parts.length !== 3 || parts[0] !== "cs") return null;
-  return { publicId: parts[1], action: parts[2] };
+  if (parts.length < 3 || parts[0] !== "cs") return null;
+  const versionToken = parts[3] || "";
+  const version = /^v\d+$/i.test(versionToken) ? Number(versionToken.slice(1)) : null;
+  return { publicId: parts[1], action: parts[2], version };
+}
+
+function assertCallbackVersion(jobPublicId: string, version: number | null) {
+  if (version === null) return { ok: true as const };
+  const current = latestVersion(jobPublicId);
+  if (!current) return { ok: false as const, reason: "missing" as const };
+  if (current.version !== version) {
+    return { ok: false as const, reason: "stale_version" as const, current: current.version };
+  }
+  return { ok: true as const };
 }
 
 async function remindReceiving(chatId: string, publicId: string, count: number, messageId?: number | null) {
@@ -194,6 +211,29 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     const job = getJobByPublicId(parsed.publicId);
     if (!job) return { ok: true };
     const actor = actorLabel(operator);
+    const versionGate = assertCallbackVersion(job.publicId, parsed.version);
+    if (
+      !versionGate.ok &&
+      ["approve", "now", "slot", "edit", "alt", "drop", "date"].includes(parsed.action)
+    ) {
+      incrementTelegramMetric("telegram_stale_callback");
+      await sendTelegramMessage({
+        chatId,
+        text:
+          versionGate.reason === "stale_version"
+            ? `Esa versión ya fue reemplazada. La actual es V${versionGate.current}.`
+            : "Esta acción ya no está disponible.",
+      });
+      return { ok: true };
+    }
+    if (parsed.action === "aigen") {
+      if (!beginProcessLock(job.publicId)) {
+        await sendTelegramMessage({ chatId, text: "Ya hay un procesamiento en curso. Espera un momento." });
+        return { ok: true };
+      }
+      void processAiCampaignJob(job.publicId);
+      return { ok: true };
+    }
     if (parsed.action === "process" || parsed.action === "retry" || parsed.action === "reimage") {
       if (!beginProcessLock(job.publicId)) {
         await sendTelegramMessage({
@@ -442,6 +482,88 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     const welcome = copilotWelcome();
     await sendTelegramMessage({ chatId, text: welcome.text, keyboard: welcome.keyboard });
     return { ok: true };
+  }
+
+  // Content Studio V3 — marketing NL before Copilot (¿questions about publishing)
+  if (studioEnabled() && text && !text.startsWith("/") && hasTelegramPermission(operator, "content.read")) {
+    const intent = interpretContentCampaignIntent(text);
+    if (intent.kind === "AI_CAMPAIGN") {
+      if (!hasTelegramPermission(operator, "content.approve") && !hasTelegramPermission(operator, "content.read")) {
+        await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+        return { ok: true, denied: true };
+      }
+      const brief = buildAiCampaignBrief({
+        serviceHint: intent.serviceHint,
+        platformHint: intent.platformHint,
+        raw: intent.raw,
+      });
+      if (!brief.service || brief.service === "servicios del hogar") {
+        await sendTelegramMessage({
+          chatId,
+          text: [
+            "Puedo preparar una publicidad AI.",
+            "",
+            "Indica el servicio. Ejemplos:",
+            "• Crea una publicidad de cerrajería",
+            "• Haz un post de mantenimiento de aire",
+            "• Prepárame algo para pintura en Instagram",
+          ].join("\n"),
+        });
+        return { ok: true };
+      }
+      const existing = activeJobForChat(chatId);
+      if (existing) {
+        await sendTelegramMessage({
+          chatId,
+          text: `Ya tienes una pieza en preparación:\n\n${existing.publicId}\n\nTermínala o cancélala antes de crear otra.`,
+          keyboard: existingKeyboard(existing.publicId),
+        });
+        return { ok: true };
+      }
+      await sendTelegramMessage({
+        chatId,
+        text: `Voy a preparar 1 propuesta para ${brief.service} (${brief.platform}).\nSin publicar hasta que apruebes.`,
+      });
+      const publicId = await startAiCampaignFromChat({
+        chatId,
+        userId,
+        service: brief.service,
+        platform: brief.platform,
+        note: brief.note,
+      });
+      return { ok: true, publicId };
+    }
+    if (intent.kind === "IDEATION") {
+      const ready = listJobsByStatus(["AWAITING_APPROVAL", "APPROVED", "SCHEDULED"]);
+      const published = listJobsByStatus(["PUBLISHED"]);
+      const services = ["aire acondicionado", "cerrajería", "pintura", "plomería"];
+      const counts = new Map<string, number>();
+      for (const job of [...ready, ...published]) {
+        const cat = mapServiceCategory(job.serviceType);
+        counts.set(cat, (counts.get(cat) || 0) + 1);
+      }
+      const lines = [
+        "Ideas para esta semana (sin generar imágenes todavía):",
+        "",
+        "1. Mantenimiento de aire acondicionado — demanda recurrente en Panamá.",
+        ready.some((j) => /aire|ac/i.test(j.serviceType))
+          ? "2. Reusar un trabajo real de aire ya en repositorio."
+          : "2. Creatividad AI de cerrajería (si quieres clientes de emergencia).",
+        "3. Pintura — portafolio si hay fotos reales; si no, campaña AI.",
+        "",
+        counts.size
+          ? `Inventario reciente: ${[...counts.entries()].map(([k, n]) => `${k}:${n}`).join(" · ")}`
+          : "Inventario: aún pocos contenidos listos.",
+        "",
+        "Research web externo: NO CONFIGURADO — no invento tendencias.",
+        "",
+        "Responde con el servicio, por ejemplo:",
+        "«Crea una publicidad de cerrajería»",
+      ];
+      await sendTelegramMessage({ chatId, text: lines.filter(Boolean).join("\n") });
+      void services;
+      return { ok: true };
+    }
   }
 
   // Wave G — Business Copilot natural language (before legacy NL shortcuts)

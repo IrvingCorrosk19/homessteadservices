@@ -168,6 +168,128 @@ JSON: {"full":"","cta":"","hashtags":[]}`,
 
 const ENHANCE_PROMPT = `Ajusta únicamente presentación fotográfica de un trabajo REAL de mantenimiento/reparación: iluminación, exposición, color, nitidez y ruido. No inventes reparaciones, no reemplaces equipos, no agregues instalaciones, no hagas parecer nuevo algo que no lo está, no alteres la evidencia material del trabajo. Conserva el encuadre esencial.`;
 
+export async function writeAiCampaignCopy(input: {
+  publicId: string;
+  service: string;
+  platform: string;
+  note: string;
+}): Promise<{ full: string; cta: string; hashtags: string[]; commercial: string; warm: string; educational: string }> {
+  if (!apiKey()) throw new Error("openai_unconfigured");
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: textModel(),
+      temperature: 0.55,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM },
+        {
+          role: "user",
+          content: `Crea copy publicitario para Homestead Services (Panamá).
+Servicio: ${input.service}
+Plataforma: ${input.platform}
+Pedido: ${input.note || "(sin nota extra)"}
+Reglas: NO inventes precios, descuentos, garantías ni testimonios. NO digas que es un trabajo ya realizado. Es creatividad publicitaria, no evidencia de obra.
+JSON: {"full":"","commercial":"","warm":"","educational":"","cta":"","hashtags":[]}`,
+        },
+      ],
+    }),
+  });
+  const json = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+  };
+  if (!response.ok) throw new Error(json.error?.message || `openai_${response.status}`);
+  recordUsage(input.publicId, "openai", "ai_campaign_copy");
+  const parsed = JSON.parse(json.choices?.[0]?.message?.content || "{}") as {
+    full?: string;
+    commercial?: string;
+    warm?: string;
+    educational?: string;
+    cta?: string;
+    hashtags?: string[];
+  };
+  const full =
+    parsed.full ||
+    parsed.commercial ||
+    `Homestead Services · ${input.service} en Panamá.\nTe orientamos con claridad y seguimiento.\nAgenda en homestead.lat`;
+  return {
+    full,
+    commercial: parsed.commercial || full,
+    warm: parsed.warm || full,
+    educational: parsed.educational || full,
+    cta: parsed.cta || "Agenda tu servicio en homestead.lat",
+    hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : ["#HomesteadServices", "#Panama"],
+  };
+}
+
+export async function generateCampaignImage(input: {
+  publicId: string;
+  service: string;
+  platform: string;
+  note: string;
+}): Promise<Buffer | null> {
+  if (!apiKey()) return null;
+  const prompt = [
+    "Create a clean, premium advertising photograph-style image for a home services company in Panama.",
+    `Service theme: ${input.service}.`,
+    "Professional tools/home environment, calm lighting, realistic, no logos, no readable text, no watermarks, no prices, no phone numbers.",
+    "Do not depict a specific finished customer job as proof. Composition should leave space for branding overlay later.",
+    input.note ? `Creative brief: ${input.note.slice(0, 280)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const response = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: imageModel(),
+        prompt,
+        size: "1024x1024",
+        n: 1,
+      }),
+      signal: controller.signal,
+    });
+    const json = (await response.json()) as {
+      data?: Array<{ b64_json?: string; url?: string }>;
+      error?: { message?: string };
+    };
+    if (!response.ok) {
+      logError("ImageGenerationFailed", {
+        publicId: input.publicId,
+        cause: json.error?.message || `openai_${response.status}`,
+      });
+      return null;
+    }
+    recordUsage(input.publicId, "openai", "image_generation");
+    const b64 = json.data?.[0]?.b64_json;
+    if (b64) return Buffer.from(b64, "base64");
+    const url = json.data?.[0]?.url;
+    if (!url) return null;
+    const downloaded = await fetch(url);
+    return Buffer.from(await downloaded.arrayBuffer());
+  } catch (error) {
+    logError("ImageGenerationFailed", {
+      publicId: input.publicId,
+      cause: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function enhanceWithOpenAi(input: {
   publicId: string;
   bytes: Buffer;

@@ -1,5 +1,7 @@
 import {
+  beginProcessLock,
   clearProcessLock,
+  createContentJob,
   getJobByPublicId,
   latestVersion,
   listAssets,
@@ -11,6 +13,7 @@ import {
   saveVersion,
   sha256Of,
   storeDerivedAsset,
+  storeOriginal,
   updateJob,
   getContentSettings,
 } from "@/lib/content-catalog";
@@ -23,7 +26,9 @@ import {
 import {
   analyzeAndWriteCopy,
   enhanceWithOpenAi,
+  generateCampaignImage,
   rewriteCopyOnly,
+  writeAiCampaignCopy,
 } from "@/lib/content-openai";
 import { sendTelegramMessage, sendTelegramPhotos } from "@/lib/content-telegram";
 import { enqueueForApproval, formatPanama } from "@/lib/content-queue";
@@ -31,17 +36,18 @@ import { logError, logInfo } from "@/lib/log";
 import type { ContentAssetRole } from "@/lib/content-types";
 import type { ContentJob } from "@/lib/content-types";
 
-function reviewKeyboard(publicId: string) {
+function reviewKeyboard(publicId: string, version: number) {
   return [
-    [{ text: "PUBLICAR AHORA", callback_data: `cs:${publicId}:now` }],
-    [{ text: "APROBAR HORARIO", callback_data: `cs:${publicId}:slot` }],
+    [{ text: "✅ APROBAR", callback_data: `cs:${publicId}:approve:v${version}` }],
+    [{ text: "PUBLICAR AHORA", callback_data: `cs:${publicId}:now:v${version}` }],
+    [{ text: "APROBAR HORARIO", callback_data: `cs:${publicId}:slot:v${version}` }],
     [
-      { text: "CAMBIAR FECHA", callback_data: `cs:${publicId}:date` },
-      { text: "CAMBIAR TEXTO", callback_data: `cs:${publicId}:edit` },
+      { text: "✏️ CAMBIAR", callback_data: `cs:${publicId}:edit:v${version}` },
+      { text: "🔄 OTRA VERSIÓN", callback_data: `cs:${publicId}:alt:v${version}` },
     ],
     [
-      { text: "OTRA VERSIÓN", callback_data: `cs:${publicId}:alt` },
-      { text: "DESCARTAR", callback_data: `cs:${publicId}:drop` },
+      { text: "CAMBIAR FECHA", callback_data: `cs:${publicId}:date:v${version}` },
+      { text: "❌ DESCARTAR", callback_data: `cs:${publicId}:drop:v${version}` },
     ],
   ];
 }
@@ -80,21 +86,24 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
   const when = fresh.recommendedPublishAt
     ? formatPanama(fresh.recommendedPublishAt, settings)
     : "por definir";
+  const isAi = fresh.contentType === "AI_CAMPAIGN";
   const text = [
     "HOMESTEAD CONTENT",
     "",
     fresh.publicId,
+    `Versión: V${version}`,
     "",
-    `Trabajo: ${fresh.serviceType || fresh.mixType || "mantenimiento"}`,
-    "Destino: Instagram + Facebook",
+    `Servicio: ${fresh.serviceType || fresh.mixType || "mantenimiento"}`,
+    `Origen: ${isAi ? "Creatividad AI (no es evidencia de trabajo real)" : "Fotos de trabajo real"}`,
+    `Formato: ${fresh.format || "Instagram"}`,
     `Recomendado: ${when}`,
     "",
     copy,
     "",
     hashtags,
     "",
-    `Estado: LISTO PARA PUBLICAR`,
-    settings.dryRun ? "Modo: DRY RUN (no publica en redes hasta que lo actives)" : "",
+    "Estado: LISTO PARA REVISIÓN",
+    settings.dryRun ? "Modo: DRY RUN (no publica en redes sin configuración Meta)" : "",
     ...extra,
   ]
     .filter(Boolean)
@@ -102,7 +111,7 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
   await sendTelegramMessage({
     chatId: job.telegramChatId,
     text,
-    keyboard: reviewKeyboard(job.publicId),
+    keyboard: reviewKeyboard(job.publicId, version),
   });
 }
 
@@ -287,6 +296,7 @@ export async function processContentJob(publicId: string, kind: "full" | "image"
     });
     const result = await renderVersion(job, kind);
     const queued = getJobByPublicId(publicId) || job;
+    updateJob(publicId, { approvedAt: null });
     enqueueForApproval(queued);
     recordContentEvent(publicId, "CONTENT_READY", `v${result.version}`);
     logInfo("PreviewSent", { contentJobId: publicId, stage: `v${result.version}` });
@@ -345,6 +355,164 @@ export async function regenerateCopy(publicId: string, instruction?: string) {
     });
   }
   logInfo("ContentRegenerated", { contentJobId: publicId, stage: `copy-v${next}` });
-  updateJob(publicId, { selectedCaption: rewritten.full, pendingInput: null });
-  await sendPreview(job, next, rewritten.full, rewritten.hashtags.join(" "), []);
+  updateJob(publicId, {
+    selectedCaption: rewritten.full,
+    pendingInput: null,
+    status: "AWAITING_APPROVAL",
+    approvedAt: null,
+  });
+  recordContentEvent(publicId, "CONTENT_REVISION", `v${next}`);
+  await sendPreview(job, next, rewritten.full, rewritten.hashtags.join(" "), [
+    "La versión anterior ya no está aprobada. Revisa V" + next + ".",
+  ]);
+}
+
+export async function processAiCampaignJob(publicId: string) {
+  const job = getJobByPublicId(publicId);
+  if (!job) return;
+  try {
+    updateJob(publicId, { status: "PROCESSING", lastError: null, contentType: "AI_CAMPAIGN" });
+    await sendTelegramMessage({
+      chatId: job.telegramChatId,
+      text: `Preparé una propuesta AI.\n\n${publicId}\n\nGenerando 1 visual + copy. Esto puede tomar un minuto.`,
+    });
+    logInfo("ImageGenerationStarted", { contentJobId: publicId, stage: "AI_CAMPAIGN" });
+    const generated = await generateCampaignImage({
+      publicId,
+      service: job.serviceType || "servicios del hogar",
+      platform: job.format || "Instagram",
+      note: job.description,
+    });
+    if (!generated) {
+      throw new Error("image_generation_failed");
+    }
+    const jpeg = await toJpeg(generated);
+    const meta = await metadataOf(jpeg);
+    if (originalCount(publicId) < 1) {
+      storeOriginal({
+        job,
+        bytes: jpeg,
+        mime: "image/jpeg",
+        ext: "jpg",
+        width: meta.width,
+        height: meta.height,
+      });
+    }
+    const copy = await writeAiCampaignCopy({
+      publicId,
+      service: job.serviceType || "servicios del hogar",
+      platform: job.format || "Instagram",
+      note: job.description,
+    });
+    const version = nextVersionNumber(publicId);
+    const enhanced = await enhanceDeterministic(jpeg);
+    const enhancedMeta = await metadataOf(enhanced);
+    storeDerivedAsset({
+      job,
+      version,
+      assetType: "ENHANCED",
+      role: "PRIMARY",
+      bytes: enhanced,
+      mime: "image/jpeg",
+      ext: "jpg",
+      folder: "enhanced",
+      filename: `enhanced-v${version}-001.jpg`,
+      width: enhancedMeta.width,
+      height: enhancedMeta.height,
+    });
+    const branded = await brandedSocialSet(enhanced);
+    storeDerivedAsset({
+      job,
+      version,
+      assetType: "BRANDED",
+      role: "PRIMARY",
+      bytes: branded.feed.bytes,
+      mime: "image/jpeg",
+      ext: "jpg",
+      folder: "branded",
+      filename: `branded-v${version}-001-feed.jpg`,
+      width: branded.feed.width,
+      height: branded.feed.height,
+    });
+    storeDerivedAsset({
+      job,
+      version,
+      assetType: "BRANDED",
+      role: "PRIMARY",
+      bytes: branded.square.bytes,
+      mime: "image/jpeg",
+      ext: "jpg",
+      folder: "branded",
+      filename: `branded-v${version}-001-square.jpg`,
+      width: branded.square.width,
+      height: branded.square.height,
+    });
+    const hashtags = copy.hashtags.join(" ");
+    saveVersion({
+      job,
+      version,
+      kind: "full",
+      copy: copy.full,
+      cta: copy.cta,
+      hashtags,
+      prompt: "ai_campaign_v3",
+      privacyNote: "AI_GENERATED — no es evidencia de trabajo real",
+    });
+    updateJob(publicId, {
+      selectedCaption: copy.full,
+      captionsJson: JSON.stringify({
+        commercial: copy.commercial,
+        warm: copy.warm,
+        educational: copy.educational,
+      }),
+      mixType: "AI_CAMPAIGN",
+      contentType: "AI_CAMPAIGN",
+      approvedAt: null,
+    });
+    recordUsage(publicId, "openai", "ai_campaign");
+    recordContentEvent(publicId, "CONTENT_PROCESSED", `ai-v${version}`);
+    const queued = getJobByPublicId(publicId) || job;
+    enqueueForApproval(queued);
+    logInfo("PreviewSent", { contentJobId: publicId, stage: `ai-v${version}` });
+    await sendPreview(queued, version, copy.full, hashtags, [
+      "⚠️ Creatividad generada por IA. No representa un trabajo real de Homestead.",
+    ]);
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : "unknown";
+    logError("ContentProcessingFailed", { contentJobId: publicId, cause: cause.slice(0, 180) });
+    updateJob(publicId, { status: "FAILED", lastError: cause.slice(0, 180) });
+    await sendTelegramMessage({
+      chatId: job.telegramChatId,
+      text: "Tuve un problema preparando la imagen.\n¿Quieres que lo intente otra vez?",
+      keyboard: [[{ text: "🔄 REINTENTAR", callback_data: `cs:${publicId}:aigen` }]],
+    });
+  } finally {
+    clearProcessLock(publicId);
+  }
+}
+
+export async function startAiCampaignFromChat(input: {
+  chatId: string;
+  userId: string;
+  service: string;
+  platform: string;
+  note: string;
+}) {
+  const job = createContentJob({ chatId: input.chatId, userId: input.userId });
+  updateJob(job.publicId, {
+    status: "PROCESSING",
+    description: input.note.slice(0, 2000),
+    serviceType: input.service,
+    format: input.platform,
+    contentType: "AI_CAMPAIGN",
+    mixType: "AI_CAMPAIGN",
+    ctaType: "BOOK",
+  });
+  recordContentEvent(job.publicId, "CAMPAIGN_INTENT", "AI_CAMPAIGN");
+  logInfo("ContentJobCreated", { contentJobId: job.publicId, stage: "AI_CAMPAIGN" });
+  if (!beginProcessLock(job.publicId)) {
+    return job.publicId;
+  }
+  void processAiCampaignJob(job.publicId);
+  return job.publicId;
 }
