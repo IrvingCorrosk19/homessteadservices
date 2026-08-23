@@ -46,9 +46,9 @@ import { jobPhotoCount } from "@/lib/job-photos";
 
 const USER_ERROR = "No pudimos actualizarlo en este momento. Intenta nuevamente.";
 
-function homeKeyboard(includeTest: boolean): TelegramButton[][] {
+function homeKeyboard(includeTest: boolean, canManageOperators = false): TelegramButton[][] {
   const flag = includeTest ? ":1" : "";
-  return [
+  const rows: TelegramButton[][] = [
     [
       { text: "🔥 Oportunidades", callback_data: `cc:l:0${flag}` },
       { text: "📅 Agenda", callback_data: `cc:a:0${flag}` },
@@ -71,6 +71,10 @@ function homeKeyboard(includeTest: boolean): TelegramButton[][] {
       },
     ],
   ];
+  if (canManageOperators) {
+    rows.push([{ text: "⚙️ Configuración", callback_data: "cc:cfg" }]);
+  }
+  return rows;
 }
 
 function pager(prefix: string, page: number, total: number, includeTest: boolean): TelegramButton[] {
@@ -83,7 +87,7 @@ function pager(prefix: string, page: number, total: number, includeTest: boolean
   return buttons;
 }
 
-export function commandCenterHome(includeTest = false) {
+export function commandCenterHome(includeTest = false, canManageOperators = false) {
   const snap = commandCenterSummary(includeTest);
   recordOpsAudit({ action: "COMMAND_CENTER_OPENED", entityType: "ops", entityId: includeTest ? "test" : "live" });
   const recovery =
@@ -106,7 +110,7 @@ export function commandCenterHome(includeTest = false) {
     ]
       .filter((line) => line !== "")
       .join("\n"),
-    keyboard: homeKeyboard(includeTest),
+    keyboard: homeKeyboard(includeTest, canManageOperators),
   };
 }
 
@@ -479,13 +483,31 @@ function parseFlag(parts: string[], index: number) {
   return parts[index] === "1";
 }
 
-export async function applyCommandCenterCallback(data: string, chatId: string, messageId?: number) {
+export async function applyCommandCenterCallback(
+  data: string,
+  chatId: string,
+  messageId?: number,
+  operator?: import("@/lib/telegram-operators").TelegramOperator | null,
+) {
   const parts = data.split(":");
   if (parts[0] !== "cc") return { text: "Acción no reconocida." };
   const action = parts[1] || "h";
+  const actor =
+    operator
+      ? `op:${operator.id}:${operator.role}`.slice(0, 40)
+      : chatId.slice(0, 24);
+  const canOps = Boolean(operator && (operator.role === "OWNER" || operator.role === "ADMIN"));
   let view: { text: string; keyboard?: TelegramButton[][] };
   try {
-    if (action === "h") view = commandCenterHome(parseFlag(parts, 2));
+    if (action === "cfg") {
+      const { settingsView } = await import("@/lib/telegram-operator-flow");
+      if (!operator) view = { text: "No autorizado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      else view = settingsView(operator);
+    } else if (action === "op") {
+      const { applyOperatorCallback } = await import("@/lib/telegram-operator-flow");
+      if (!operator) view = { text: "No autorizado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      else view = await applyOperatorCallback(data, operator);
+    } else if (action === "h") view = commandCenterHome(parseFlag(parts, 2), canOps);
     else if (action === "r") view = requestsView(Number(parts[2] || 0), parseFlag(parts, 3));
     else if (action === "d") view = requestDetail(parts.slice(2).join(":"));
     else if (action === "l") view = rescueView(Number(parts[2] || 0), parseFlag(parts, 3));
@@ -509,9 +531,11 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
       };
     } else if (action === "w") {
       const jobId = parts.slice(2).join(":");
-      const result = completeServiceJob(jobId, chatId.slice(0, 24));
+      const result = completeServiceJob(jobId, actor);
       if (!result.ok && result.reason === "missing") view = { text: USER_ERROR, keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
       else if (result.already) {
+        const { incrementTelegramMetric } = await import("@/lib/telegram-operators");
+        incrementTelegramMetric("telegram_stale_callback");
         view = {
           text: `✅ Este trabajo ya estaba completado.\n\n${jobId}`,
           keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
@@ -524,7 +548,7 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
       }
     } else if (action === "b") {
       const jobId = parts.slice(2).join(":");
-      startServiceJob(jobId, chatId.slice(0, 24));
+      startServiceJob(jobId, actor);
       view = jobDetail(jobId);
     } else if (action === "p") {
       const jobId = parts.slice(2).join(":");
@@ -535,14 +559,14 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
       };
     } else if (action === "y") {
       const jobId = parts.slice(2).join(":");
-      approveMarketingUsage(jobId, chatId.slice(0, 24));
+      approveMarketingUsage(jobId, actor);
       view = {
         text: "✅ Uso de fotos autorizado para marketing.\n\nHomestead todavía no publica nada hasta que apruebes el contenido.",
         keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
       };
     } else if (action === "o") {
       const jobId = parts.slice(2).join(":");
-      const created = createContentFromJob({ jobId, chatId, userId: chatId, actor: chatId.slice(0, 24) });
+      const created = createContentFromJob({ jobId, chatId, userId: operator?.telegramUserId || chatId, actor });
       if (!created.ok && created.reason === "marketing_not_approved") {
         view = {
           text: "Primero autoriza el uso de las fotos para marketing.",
@@ -561,32 +585,57 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
       }
     } else if (action === "u") {
       const jobId = parts.slice(2).join(":");
-      skipJobContent(jobId, chatId.slice(0, 24));
+      skipJobContent(jobId, actor);
       view = {
         text: "De acuerdo. No creamos contenido ahora.",
         keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
       };
     } else if (action === "t") {
       const jobId = parts.slice(2).join(":");
-      const result = markRecoveryContacted(jobId, chatId.slice(0, 24));
+      const result = markRecoveryContacted(jobId, actor);
       view = {
         text: result.already ? "✅ Ya estaba atendida." : "✅ Recuperación marcada como atendida.",
         keyboard: [[{ text: "🔧 Ver trabajo", callback_data: `cc:k:${jobId}` }]],
       };
     } else if (action === "ns") {
       const jobId = parts.slice(2).join(":");
-      cancelServiceJob(jobId, "NO_SHOW", chatId.slice(0, 24));
+      cancelServiceJob(jobId, "NO_SHOW", actor);
       view = {
         text: "Registramos que el cliente no se presentó.",
         keyboard: [[{ text: "⬅ Trabajos", callback_data: "cc:j:0" }]],
       };
     } else if (action === "c") {
       const id = parts.slice(2).join(":");
-      const result = markEntityContacted(id, chatId.slice(0, 24));
-      if (!result.ok) view = { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
-      else {
+      const result = markEntityContacted(id, actor);
+      if (!result.ok) {
+        const { incrementTelegramMetric, recordTelegramOperatorAudit } = await import("@/lib/telegram-operators");
+        incrementTelegramMetric("telegram_stale_callback");
+        if (operator) {
+          recordTelegramOperatorAudit({
+            operator,
+            action: "REQUEST_MARKED_CONTACTED",
+            entityType: "request",
+            entityId: id,
+            result: "missing",
+          });
+        }
+        view = { text: "Esta acción ya no está disponible porque el estado cambió.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else {
+        const { recordTelegramOperatorAudit, incrementTelegramMetric } = await import("@/lib/telegram-operators");
+        if (result.already) incrementTelegramMetric("telegram_stale_callback");
+        if (operator) {
+          recordTelegramOperatorAudit({
+            operator,
+            action: "REQUEST_MARKED_CONTACTED",
+            entityType: "request",
+            entityId: id,
+            result: result.already ? "already" : "ok",
+          });
+        }
         view = {
-          text: result.already ? "✅ Ya estaba atendida.\n\nEsta solicitud ya fue actualizada." : "✅ Marcado como atendido\n\nAtendido hace unos segundos.",
+          text: result.already
+            ? "✅ Esta solicitud ya fue atendida.\n\nEl estado no se modificó otra vez."
+            : `✅ Marcado como atendido\n\nAtendido por: ${operator?.displayName || "operador"}`,
           keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
         };
       }
@@ -594,21 +643,40 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
       const minutesRaw = Number(parts[parts.length - 1] || 15);
       const minutes = [15, 30, 60].includes(minutesRaw) ? minutesRaw : 15;
       const id = parts.slice(2, -1).join(":");
-      snoozeEntity(id, minutes, chatId.slice(0, 24));
-      view = {
-        text: `🕒 Recordatorio en ${minutes} min.\n\nNo te avisaremos antes.`,
-        keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
-      };
+      const lead = getLead(id);
+      const request = getRequestByPublicId(id);
+      if (lead?.firstHumanActionAt || (request && request.status !== "NEW")) {
+        const { incrementTelegramMetric } = await import("@/lib/telegram-operators");
+        incrementTelegramMetric("telegram_stale_callback");
+        view = {
+          text: "Esta acción ya no está disponible porque el estado cambió.",
+          keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
+        };
+      } else {
+        snoozeEntity(id, minutes, actor);
+        view = {
+          text: `🕒 Recordatorio en ${minutes} min.\n\nNo te avisaremos antes.`,
+          keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
+        };
+      }
     } else if (action === "v") {
       view = { text: "No hay un teléfono válido para llamar.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
     } else if (action === "x") {
       const id = parts.slice(2).join(":");
-      const result = dismissLead(id, chatId.slice(0, 24));
+      const result = dismissLead(id, actor);
+      if (result.already) {
+        const { incrementTelegramMetric } = await import("@/lib/telegram-operators");
+        incrementTelegramMetric("telegram_stale_callback");
+      }
       view = {
-        text: result.ok ? "❌ Oportunidad descartada.\n\nEl lead no se borró." : USER_ERROR,
+        text: !result.ok
+          ? USER_ERROR
+          : result.already
+            ? "Esta oportunidad ya estaba cerrada."
+            : "❌ Oportunidad descartada.\n\nEl lead no se borró.",
         keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
       };
-    } else view = commandCenterHome();
+    } else view = commandCenterHome(false, canOps);
   } catch {
     view = { text: USER_ERROR, keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   }
@@ -621,8 +689,13 @@ export async function applyCommandCenterCallback(data: string, chatId: string, m
   return view;
 }
 
-export async function sendCommandCenter(chatId: string, includeTest = false) {
-  const view = commandCenterHome(includeTest);
+export async function sendCommandCenter(
+  chatId: string,
+  includeTest = false,
+  operator?: import("@/lib/telegram-operators").TelegramOperator | null,
+) {
+  const canOps = Boolean(operator && (operator.role === "OWNER" || operator.role === "ADMIN"));
+  const view = commandCenterHome(includeTest, canOps);
   await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
 }
 
@@ -631,11 +704,29 @@ export async function deliverOpsTelegram(data: Record<string, unknown>) {
   const chats = Array.isArray(data.chats) ? data.chats.map(String) : [];
   const keyboard = Array.isArray(data.keyboard) ? (data.keyboard as TelegramButton[][]) : undefined;
   if (!text || !chats.length) return { ok: false as const, cause: "invalid_payload" };
+  const { incrementTelegramMetric } = await import("@/lib/telegram-operators");
   let sent = 0;
+  let failed = 0;
   for (const chatId of chats) {
-    const id = await sendTelegramMessage({ chatId, text, keyboard });
-    if (id) sent += 1;
+    try {
+      const id = await sendTelegramMessage({ chatId, text, keyboard });
+      if (id) {
+        sent += 1;
+        incrementTelegramMetric("telegram_delivery_success");
+      } else {
+        failed += 1;
+        incrementTelegramMetric("telegram_delivery_failure");
+      }
+    } catch {
+      failed += 1;
+      incrementTelegramMetric("telegram_delivery_failure");
+    }
   }
-  logInfo("AutomationDispatchSucceeded", { stage: "ops_telegram", attempt: sent });
-  return sent ? { ok: true as const, cause: "ok" } : { ok: false as const, cause: "telegram_zero" };
+  logInfo("AutomationDispatchSucceeded", {
+    stage: "ops_telegram",
+    attempt: sent,
+    contentJobId: failed ? `fail:${failed}` : undefined,
+  });
+  // One recipient failure must not invalidate deliveries that already succeeded.
+  return sent ? { ok: true as const, cause: "ok", sent, failed } : { ok: false as const, cause: "telegram_zero", sent, failed };
 }

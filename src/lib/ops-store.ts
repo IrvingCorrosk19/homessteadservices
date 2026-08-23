@@ -2,7 +2,6 @@ import { classifyPhone } from "@/lib/phone";
 import {
   getHomesteadDb,
   getRequestByPublicId,
-  updateRequestStatus,
 } from "@/lib/service-requests";
 import { addRevenueEvent, getLead, listAppointments, markLeadHumanAction, setPipeline } from "@/lib/revenue-store";
 import { opsConfig } from "@/lib/ops-config";
@@ -381,8 +380,12 @@ export function markEntityContacted(entityId: string, actor = "telegram") {
     .get(entityId) as { sla_first_alerted_at: string | null; status: string } | undefined;
   let already = false;
   if (request) {
-    if (request.status !== "NEW") already = true;
-    else updateRequestStatus(entityId, "CONTACTED");
+    const claimed = getHomesteadDb()
+      .prepare(
+        "UPDATE service_requests SET status = 'CONTACTED', updated_at = ? WHERE public_id = ? AND status = 'NEW'",
+      )
+      .run(nowIso(), entityId);
+    already = claimed.changes !== 1;
   }
   const lead = getLead(entityId);
   const rescueRow = lead

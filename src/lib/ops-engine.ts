@@ -22,8 +22,18 @@ function enqueueOpsAlert(input: {
   text: string;
   keyboard: TelegramButton[][];
   priority: "INFO" | "ACTION" | "WARNING" | "CRITICAL";
+  deliveryKind?: "requests" | "appointments" | "leads" | "sla" | "content" | "daily_brief" | "jobs" | "recovery";
 }) {
-  const chats = adminChatIds();
+  const kind =
+    input.deliveryKind ||
+    (input.eventType.startsWith("lead.")
+      ? "leads"
+      : input.eventType.startsWith("sla.")
+        ? "sla"
+        : input.eventType.startsWith("daily.")
+          ? "daily_brief"
+          : "requests");
+  const chats = adminChatIds(kind);
   if (!chats.length) return "";
   const nextAttemptAt = input.priority === "INFO" && isQuietHours() ? nextQuietEndIso() : undefined;
   return enqueueOutbox(getHomesteadDb(), {
@@ -37,6 +47,7 @@ function enqueueOpsAlert(input: {
       text: input.text,
       keyboard: input.keyboard,
       chats,
+      deliveryKind: kind,
     },
   });
 }
@@ -182,7 +193,7 @@ export function enqueueDailyBrief(force = false) {
   const cfg = opsConfig();
   const parts = panamaParts();
   if (!force && parts.hour !== cfg.dailyBriefHour) return 0;
-  if (!adminChatIds().length) return 0;
+  if (!adminChatIds("daily_brief").length) return 0;
   const ymd = panamaToday().ymd;
   const key = `daily.brief:${ymd}`;
   if (getOutboxByIdempotency(key)) return 0;

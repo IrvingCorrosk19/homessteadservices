@@ -222,7 +222,7 @@ function openServiceRecovery(jobId: string) {
   audit("SERVICE_RECOVERY_REQUESTED", jobId, "customer");
   const cycle = Math.max(1, job.feedbackCycle || 1);
   const wa = customerWhatsAppUrl(job.phone);
-  const chats = adminChatIds();
+  const chats = adminChatIds("recovery");
   enqueueOutbox(getHomesteadDb(), {
     eventType: "customer.service_recovery_requested",
     correlationId: jobId,

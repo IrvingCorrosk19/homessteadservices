@@ -359,7 +359,7 @@ function applyMaintenanceFoundation(jobId: string) {
 function enqueueJobCompleted(jobId: string) {
   const job = getServiceJob(jobId);
   if (!job) return "";
-  const chats = adminChatIds();
+  const chats = adminChatIds("content");
   const photos = job.photoCount > 0;
   return enqueueOutbox(getHomesteadDb(), {
     eventType: "job.completed",

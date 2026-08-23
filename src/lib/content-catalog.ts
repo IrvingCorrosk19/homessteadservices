@@ -248,6 +248,44 @@ export function updateJob(
   return getJobByPublicId(publicId);
 }
 
+export function tryApproveContentJob(publicId: string, actor: string) {
+  const now = new Date().toISOString();
+  const result = getHomesteadDb()
+    .prepare(
+      `UPDATE content_jobs SET status = 'APPROVED', approved_at = ?, updated_at = ?
+       WHERE public_id = ? AND status IN ('READY_FOR_REVIEW', 'AWAITING_APPROVAL')`,
+    )
+    .run(now, now, publicId);
+  if (result.changes === 1) {
+    recordContentEvent(publicId, "CONTENT_APPROVED", actor.slice(0, 80));
+    return { ok: true as const, already: false };
+  }
+  const job = getJobByPublicId(publicId);
+  if (!job) return { ok: false as const, reason: "missing" as const, already: false };
+  if (job.status === "APPROVED" || job.status === "SCHEDULED" || job.status === "PUBLISHED") {
+    return { ok: true as const, already: true };
+  }
+  return { ok: false as const, reason: "stale" as const, already: false };
+}
+
+export function tryRejectContentJob(publicId: string, actor: string) {
+  const now = new Date().toISOString();
+  const result = getHomesteadDb()
+    .prepare(
+      `UPDATE content_jobs SET status = 'REJECTED', rejected_at = ?, updated_at = ?
+       WHERE public_id = ? AND status NOT IN ('PUBLISHED', 'REJECTED')`,
+    )
+    .run(now, now, publicId);
+  if (result.changes === 1) {
+    recordContentEvent(publicId, "CONTENT_REJECTED", actor.slice(0, 80));
+    return { ok: true as const, already: false };
+  }
+  const job = getJobByPublicId(publicId);
+  if (!job) return { ok: false as const, reason: "missing" as const, already: false };
+  if (job.status === "REJECTED") return { ok: true as const, already: true };
+  return { ok: false as const, reason: "stale" as const, already: false };
+}
+
 export function beginProcessLock(publicId: string, ms = 180_000) {
   const database = getHomesteadDb();
   const now = Date.now();

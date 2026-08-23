@@ -12,7 +12,9 @@ export function AdminTopBar() {
       ? "Trabajos"
       : pathname.startsWith("/admin/clientes")
         ? "Cliente"
-        : "Solicitudes";
+        : pathname.startsWith("/admin/configuracion")
+          ? "Configuración"
+          : "Solicitudes";
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
@@ -37,6 +39,9 @@ export function AdminTopBar() {
             </Link>
             <Link className={pathname.startsWith("/admin/trabajos") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/trabajos">
               Trabajos
+            </Link>
+            <Link className={pathname.startsWith("/admin/configuracion") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/configuracion/operadores">
+              Operadores
             </Link>
           </nav>
         </div>

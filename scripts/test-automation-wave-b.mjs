@@ -33,8 +33,8 @@ const actionApi = readFileSync(join(root, "src/app/api/internal/ops/action/route
 check("single webhook homestead-content-studio", readFileSync(join(root, "src/lib/content-telegram.ts"), "utf8").includes("homestead-content-studio"));
 check("command /homestead in router", handler.includes("/homestead") && handler.includes("sendCommandCenter"));
 check("ops callbacks cc:", handler.includes('startsWith("cc:")'));
-check("admin gate before ops", handler.indexOf("isTelegramAdmin") < handler.indexOf("sendCommandCenter"));
-check("unauthorized no PII", handler.includes("No autorizado.") && !handler.includes("No autorizado, ${"));
+check("admin gate before ops", handler.includes("gateOperator") && handler.indexOf("gateOperator") < handler.indexOf("sendCommandCenter"));
+check("unauthorized no PII", (handler.includes("No autorizado") || handler.includes("todavía no está autorizada")) && !handler.includes("No autorizado, ${"));
 check("ops works if content studio disabled", handler.includes("function studioEnabled") && handler.includes("isOpsCommand") && handler.includes("sendCommandCenter"));
 check("no second telegram trigger in homestead n8n json", !readFileSync(join(root, "n8n/homestead-n8n-content-studio.json"), "utf8").includes("homestead-command-center"));
 check("rescue eligibility deterministic", opsStore.includes("function isRescueEligible") && !opsEngine.includes("openai"));

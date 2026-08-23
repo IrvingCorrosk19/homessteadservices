@@ -80,6 +80,12 @@ export async function drainAutomationOutbox(limit = 8) {
               correlationId: row.correlationId,
             })
           : await deliverOpsEvent(envelope.data, eventType);
+      if (result.ok && eventType === "service_request.created") {
+        // One business event → N Telegram deliveries. n8n keeps primary chat;
+        // Homestead fans out to other eligible operators without duplicating HS/outbox.
+        const { fanOutServiceRequestTelegram } = await import("@/lib/telegram-fanout");
+        await fanOutServiceRequestTelegram(envelope.data as Record<string, unknown>);
+      }
       if (!result.ok) {
         if (result.cause === "not_configured") {
           markOutboxSkipped(row.eventId, "n8n_not_configured");

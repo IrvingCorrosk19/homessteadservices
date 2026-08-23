@@ -269,7 +269,7 @@ export async function sendNewLeadAlert(leadId: string) {
   const lead = getLead(leadId);
   if (!lead) return { sent: 0 };
   if (lead.internalAlertAt) return { sent: 0, duplicate: true as const };
-  const chats = adminChatIds();
+  const chats = adminChatIds("leads");
   if (!chats.length) {
     logError("TelegramLeadAlertFailed", { contentJobId: leadId, stage: "no_admin_chat" });
     return { sent: 0 };
@@ -558,7 +558,7 @@ export async function notifyAppointmentEvent(
   if (!claimAppointmentNotice(noticeKey, appointment.appointmentId, eventType, appointment.version)) {
     return { sent: 0, duplicate: true as const };
   }
-  const chats = adminChatIds();
+  const chats = adminChatIds("appointments");
   if (!chats.length) {
     releaseAppointmentNotice(noticeKey);
     return { sent: 0 };

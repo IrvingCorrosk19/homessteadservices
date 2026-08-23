@@ -12,6 +12,8 @@ import {
   seenTelegramUpdate,
   setContentPaused,
   storeOriginal,
+  tryApproveContentJob,
+  tryRejectContentJob,
   updateJob,
 } from "@/lib/content-catalog";
 import { processContentJob, regenerateCopy } from "@/lib/content-process";
@@ -22,10 +24,23 @@ import { sniffImage } from "@/lib/photos";
 import {
   answerCallback,
   downloadTelegramFile,
-  isTelegramAdmin,
+  isPrivateTelegramChat,
   sendTelegramMessage,
   type TelegramUpdate,
 } from "@/lib/content-telegram";
+import {
+  accessDeniedText,
+  displayNameFromTelegram,
+  gateOperator,
+  handleStartCommand,
+} from "@/lib/telegram-operator-flow";
+import {
+  actorLabel,
+  hasTelegramPermission,
+  incrementTelegramMetric,
+  recordTelegramOperatorAudit,
+  type TelegramOperator,
+} from "@/lib/telegram-operators";
 import {
   formatRecommendationMessage,
   recommendationKeyboard,
@@ -98,6 +113,18 @@ function isOpsCommand(text: string) {
   return ["/homestead", "/hoy", "/leads", "/calientes", "/agenda", "/trabajos"].includes(command);
 }
 
+function hasContentPermission(operator: TelegramOperator, callbackData: string) {
+  if (
+    callbackData.includes(":approve") ||
+    callbackData.includes(":reject") ||
+    callbackData.includes(":slot") ||
+    callbackData.includes(":now")
+  ) {
+    return hasTelegramPermission(operator, "content.approve");
+  }
+  return hasTelegramPermission(operator, "content.read");
+}
+
 export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (seenTelegramUpdate(update.update_id)) {
     return { ok: true, duplicate: true };
@@ -107,18 +134,33 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (callback?.data) {
     const chatId = String(callback.message?.chat.id || callback.from.id);
     const userId = String(callback.from.id);
-    if (!isTelegramAdmin(chatId, userId)) {
+    const chatType = callback.message?.chat.type;
+    if (!isPrivateTelegramChat(chatType)) {
+      await answerCallback(callback.id, "Solo chat privado");
+      return { ok: true, denied: true, reason: "group" };
+    }
+    const gate = gateOperator(userId, chatId);
+    if (!gate.ok) {
       logError("ContentStudioUnauthorized", { stage: "callback", contentJobId: chatId.slice(0, 24) });
+      incrementTelegramMetric("telegram_permission_denied");
       await answerCallback(callback.id, "No autorizado");
+      if (gate.reason === "unauthorized" || gate.reason === "pending" || gate.reason === "inactive") {
+        await sendTelegramMessage({ chatId, text: accessDeniedText(gate.reason) });
+      }
       return { ok: true, denied: true };
     }
+    const operator = gate.operator!;
     await answerCallback(callback.id);
     if (callback.data.startsWith("cc:")) {
       const { applyCommandCenterCallback } = await import("@/lib/ops-telegram");
-      await applyCommandCenterCallback(callback.data, chatId, callback.message?.message_id);
+      await applyCommandCenterCallback(callback.data, chatId, callback.message?.message_id, operator);
       return { ok: true };
     }
     if (callback.data.startsWith("rv:")) {
+      if (!gateOperator(userId, chatId, "appointments.manage").ok && !gateOperator(userId, chatId, "leads.manage").ok) {
+        await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+        return { ok: true, denied: true };
+      }
       const { applyRevenueCallback } = await import("@/lib/revenue-telegram");
       const result = await applyRevenueCallback(callback.data, chatId);
       await sendTelegramMessage({ chatId, text: result.text, keyboard: result.keyboard });
@@ -126,6 +168,10 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     }
     if (!studioEnabled()) {
       return { ok: true, skipped: "disabled" };
+    }
+    if (!hasContentPermission(operator, callback.data)) {
+      await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+      return { ok: true, denied: true };
     }
     if (callback.data.startsWith("mi:")) {
       const bits = callback.data.split(":");
@@ -146,7 +192,8 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     const parsed = parseCallback(callback.data);
     if (!parsed) return { ok: true };
     const job = getJobByPublicId(parsed.publicId);
-    if (!job || job.telegramChatId !== chatId) return { ok: true };
+    if (!job) return { ok: true };
+    const actor = actorLabel(operator);
     if (parsed.action === "process" || parsed.action === "retry" || parsed.action === "reimage") {
       if (!beginProcessLock(job.publicId)) {
         await sendTelegramMessage({
@@ -231,22 +278,49 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true };
     }
     if (parsed.action === "approve") {
-      if (job.status !== "READY_FOR_REVIEW" && job.status !== "AWAITING_APPROVAL") {
+      const result = tryApproveContentJob(job.publicId, actor);
+      if (result.already) {
+        incrementTelegramMetric("telegram_stale_callback");
+        recordTelegramOperatorAudit({
+          operator,
+          action: "CONTENT_APPROVE",
+          entityType: "content",
+          entityId: job.publicId,
+          result: "already",
+        });
         await sendTelegramMessage({
           chatId,
-          text: "Esta propuesta todavía no está lista para aprobar.",
+          text: "Este contenido ya fue aprobado.",
         });
         return { ok: true };
       }
-      const now = new Date().toISOString();
-      updateJob(job.publicId, { status: "APPROVED", approvedAt: now });
+      if (!result.ok) {
+        incrementTelegramMetric("telegram_stale_callback");
+        await sendTelegramMessage({
+          chatId,
+          text:
+            result.reason === "stale"
+              ? "Esta acción ya no está disponible porque el estado cambió."
+              : "Esta propuesta todavía no está lista para aprobar.",
+        });
+        return { ok: true };
+      }
       logInfo("ContentApproved", { contentJobId: job.publicId });
+      recordTelegramOperatorAudit({
+        operator,
+        action: "CONTENT_APPROVE",
+        entityType: "content",
+        entityId: job.publicId,
+        result: "ok",
+      });
       await sendTelegramMessage({
         chatId,
         text: [
           "✅ CONTENIDO APROBADO",
           "",
           job.publicId,
+          "",
+          `Aprobado por: ${operator.displayName}`,
           "",
           "Guardado en Homestead Content Studio.",
           "Originales conservados.",
@@ -267,11 +341,31 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true };
     }
     if (parsed.action === "rejectyes") {
-      updateJob(job.publicId, {
-        status: "REJECTED",
-        rejectedAt: new Date().toISOString(),
-      });
+      const result = tryRejectContentJob(job.publicId, actor);
+      if (result.already) {
+        incrementTelegramMetric("telegram_stale_callback");
+        await sendTelegramMessage({
+          chatId,
+          text: "Este contenido ya fue descartado.",
+        });
+        return { ok: true };
+      }
+      if (!result.ok) {
+        incrementTelegramMetric("telegram_stale_callback");
+        await sendTelegramMessage({
+          chatId,
+          text: "Esta acción ya no está disponible porque el estado cambió.",
+        });
+        return { ok: true };
+      }
       logInfo("ContentRejected", { contentJobId: job.publicId });
+      recordTelegramOperatorAudit({
+        operator,
+        action: "CONTENT_REJECT",
+        entityType: "content",
+        entityId: job.publicId,
+        result: "ok",
+      });
       await sendTelegramMessage({
         chatId,
         text: `Propuesta descartada.\n\n${job.publicId}\n\nLos originales se conservan.`,
@@ -299,13 +393,32 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   const chatId = String(message.chat.id);
   const userId = String(message.from?.id || message.chat.id);
   const text = (message.text || "").trim();
-  if (!isTelegramAdmin(chatId, userId)) {
+  const chatType = message.chat.type;
+  if (!isPrivateTelegramChat(chatType)) {
+    if (text === "/start" || text.startsWith("/start@") || isOpsCommand(text) || text === "/homestead" || text.startsWith("/homestead@")) {
+      await sendTelegramMessage({ chatId, text: accessDeniedText("group") });
+    }
+    return { ok: true, denied: true, reason: "group" };
+  }
+
+  if (text === "/start" || text.startsWith("/start@")) {
+    await handleStartCommand({
+      userId,
+      chatId,
+      displayName: displayNameFromTelegram(message.from),
+    });
+    return { ok: true };
+  }
+
+  const gate = gateOperator(userId, chatId);
+  if (!gate.ok) {
     logError("ContentStudioUnauthorized", { stage: "message", contentJobId: chatId.slice(0, 24) });
-    if (isOpsCommand(text) || text === "/publicar" || text.startsWith("/publicar@")) {
-      await sendTelegramMessage({ chatId, text: "No autorizado." });
+    if (isOpsCommand(text) || text === "/publicar" || text.startsWith("/publicar@") || text === "/homestead" || text.startsWith("/homestead@")) {
+      await sendTelegramMessage({ chatId, text: accessDeniedText(gate.reason) });
     }
     return { ok: true, denied: true };
   }
+  const operator = gate.operator!;
 
   if (text && !text.startsWith("/")) {
     const { consumeOperatorDate } = await import("@/lib/revenue-telegram");
@@ -319,7 +432,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   const nl = text.toLowerCase();
   if (text === "/homestead" || text.startsWith("/homestead@")) {
     const { sendCommandCenter } = await import("@/lib/ops-telegram");
-    await sendCommandCenter(chatId);
+    await sendCommandCenter(chatId, false, operator);
     return { ok: true };
   }
   if (

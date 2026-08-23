@@ -48,7 +48,9 @@ Admin links use real routes: `/admin/solicitudes/HS-…` and `/admin/citas`. App
 
 ## Authorization
 
-`HOMESTEAD_TELEGRAM_ADMIN_CHAT_IDS` is the allowlist. Both `chat.id` and `from.id` are checked server-side. Username is ignored. Unauthorized users receive `No autorizado.` with no customer data.
+Operator identity lives in SQLite `telegram_operators` (see `docs/HOMESTEAD-TELEGRAM-MULTI-OPERATOR.md`).
+
+`HOMESTEAD_TELEGRAM_ADMIN_CHAT_IDS` remains bootstrap / emergency allowlist: on migrate it seeds OWNER rows so the current admin never loses `/homestead`. Username is never used for auth. Unauthorized users receive a Spanish denial with no customer data. Group chats are denied in V1.
 
 Command Center remains available even if Content Studio is disabled. Content Studio photo/job paths still require `CONTENT_STUDIO_ENABLED`.
 

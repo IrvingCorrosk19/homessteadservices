@@ -1,4 +1,9 @@
 import { logError, logInfo } from "@/lib/log";
+import {
+  eligibleOperatorChatIds,
+  isAuthorizedTelegramOperator,
+  type DeliveryKind,
+} from "@/lib/telegram-operators";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -6,19 +11,14 @@ export function telegramBotToken() {
   return process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
 }
 
-export function adminChatIds() {
-  return (process.env.HOMESTEAD_TELEGRAM_ADMIN_CHAT_IDS || "")
-    .split(/[,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+/** Active operator chat IDs for fan-out (DB operators; env break-glass fallback). */
+export function adminChatIds(kind: DeliveryKind = "requests") {
+  return eligibleOperatorChatIds(kind);
 }
 
 export function isTelegramAdmin(chatId: string | number, userId?: string | number) {
-  const allowed = new Set(adminChatIds());
-  if (!allowed.size) return false;
-  if (allowed.has(String(chatId))) return true;
-  if (userId !== undefined && allowed.has(String(userId))) return true;
-  return false;
+  const uid = userId !== undefined ? userId : chatId;
+  return isAuthorizedTelegramOperator(uid, chatId);
 }
 
 type TelegramResponse = {
@@ -181,8 +181,8 @@ export type TelegramUpdate = {
   update_id: number;
   message?: {
     message_id: number;
-    chat: { id: number };
-    from?: { id: number };
+    chat: { id: number; type?: string };
+    from?: { id: number; first_name?: string; last_name?: string; username?: string };
     text?: string;
     caption?: string;
     photo?: Array<{ file_id: string; file_size?: number; width?: number; height?: number }>;
@@ -191,8 +191,12 @@ export type TelegramUpdate = {
   };
   callback_query?: {
     id: string;
-    from: { id: number };
-    message?: { chat: { id: number }; message_id: number };
+    from: { id: number; first_name?: string; last_name?: string; username?: string };
+    message?: { chat: { id: number; type?: string }; message_id: number };
     data?: string;
   };
 };
+
+export function isPrivateTelegramChat(chatType?: string) {
+  return !chatType || chatType === "private";
+}

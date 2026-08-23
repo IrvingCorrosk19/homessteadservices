@@ -68,7 +68,7 @@ assert("quote button", /PREPARAR COTIZACIÓN/.test(tg));
 assert("visit not confirmed silently", /no CONFIRMED/.test(tg));
 assert("site visit required quote", /SITE VISIT REQUIRED/.test(tg));
 assert("manual contact when no outbound", /CONTACT CUSTOMER MANUALLY/.test(tg));
-assert("callback after auth", /isTelegramAdmin/.test(handler) && handler.indexOf("isTelegramAdmin") < handler.indexOf("applyRevenueCallback"));
+assert("callback after auth", /gateOperator/.test(handler) && handler.indexOf("gateOperator") < handler.indexOf("applyRevenueCallback"));
 assert("unauthorized denied", /denied: true/.test(handler));
 assert("hot sla configurable", /hotLeadAttentionMinutes/.test(phoneSrc) && /HOT_LEAD_ATTENTION_MINUTES/.test(phoneSrc));
 assert("idempotent lead", /existingLeadId/.test(handoff) && /lead_id = \?/.test(store));

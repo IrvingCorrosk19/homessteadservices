@@ -515,6 +515,7 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateAppointmentCalendar(database);
   migrateAutomationOutbox(database);
   migrateWaveC(database);
+  migrateTelegramOperatorsTable(database);
 }
 
 function migrateAppointmentCalendar(database: Database.Database) {
@@ -611,6 +612,91 @@ function migrateLeadHandoff(database: Database.Database) {
   addLead("rescue_alerted_at", "rescue_alerted_at TEXT");
   addLead("rescued_to_booking", "rescued_to_booking INTEGER NOT NULL DEFAULT 0");
   migrateOpsWaveB(database);
+}
+
+function migrateTelegramOperatorsTable(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS telegram_operators (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_user_id TEXT NOT NULL UNIQUE,
+      telegram_chat_id TEXT NOT NULL DEFAULT '',
+      display_name TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'PENDING',
+      is_active INTEGER NOT NULL DEFAULT 0,
+      notify_requests INTEGER NOT NULL DEFAULT 0,
+      notify_appointments INTEGER NOT NULL DEFAULT 0,
+      notify_leads INTEGER NOT NULL DEFAULT 0,
+      notify_sla INTEGER NOT NULL DEFAULT 0,
+      notify_content INTEGER NOT NULL DEFAULT 0,
+      notify_daily_brief INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_seen_at TEXT,
+      approved_at TEXT,
+      approved_by_operator_id INTEGER,
+      deactivated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_telegram_operators_active
+      ON telegram_operators (is_active, role);
+    CREATE INDEX IF NOT EXISTS idx_telegram_operators_chat
+      ON telegram_operators (telegram_chat_id);
+    CREATE TABLE IF NOT EXISTS telegram_operator_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      operator_id INTEGER,
+      telegram_user_id TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT '',
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL DEFAULT '',
+      entity_id TEXT NOT NULL DEFAULT '',
+      result TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_telegram_operator_audit_entity
+      ON telegram_operator_audit (entity_type, entity_id, created_at);
+    CREATE TABLE IF NOT EXISTS telegram_operator_metrics (
+      key TEXT PRIMARY KEY,
+      value INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  const now = new Date().toISOString();
+  for (const key of [
+    "active_telegram_operators",
+    "pending_telegram_operators",
+    "telegram_delivery_success",
+    "telegram_delivery_failure",
+    "telegram_permission_denied",
+    "telegram_stale_callback",
+  ]) {
+    database
+      .prepare(
+        "INSERT OR IGNORE INTO telegram_operator_metrics (key, value, updated_at) VALUES (?, 0, ?)",
+      )
+      .run(key, now);
+  }
+  const ids = [
+    ...(process.env.HOMESTEAD_TELEGRAM_ADMIN_CHAT_IDS || "").split(/[,\s]+/),
+    process.env.HOMESTEAD_TELEGRAM_CHAT_ID || "",
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const unique = [...new Set(ids)];
+  for (const id of unique) {
+    const row = database
+      .prepare("SELECT id FROM telegram_operators WHERE telegram_user_id = ? OR telegram_chat_id = ?")
+      .get(id, id);
+    if (row) continue;
+    database
+      .prepare(
+        `INSERT INTO telegram_operators (
+          telegram_user_id, telegram_chat_id, display_name, role, is_active,
+          notify_requests, notify_appointments, notify_leads, notify_sla, notify_content, notify_daily_brief,
+          created_at, updated_at, approved_at
+        ) VALUES (?, ?, ?, 'OWNER', 1, 1, 1, 1, 1, 1, 1, ?, ?, ?)`,
+      )
+      .run(id, id, "Owner", now, now, now);
+  }
 }
 
 function migrateOpsWaveB(database: Database.Database) {
