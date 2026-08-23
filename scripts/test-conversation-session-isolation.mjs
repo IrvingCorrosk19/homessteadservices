@@ -99,9 +99,8 @@ function reconcileTransactionState(state, text, conversationLeadId) {
 
 function buildSessionSnapshot(state, now = Date.now()) {
   const active = areOfferedSlotsActive(state, now);
-  const chips = active ? state.offeredSlots.slice(0, 3).map((item) => item.label) : [];
-  const leadBanner =
-    active && state.activeLeadId && !state.activeLeadId.startsWith("DRY-") ? state.activeLeadId : null;
+  const chips = active && !state.bookingSuspended ? state.offeredSlots.slice(0, 3).map((item) => item.label) : [];
+  const leadBanner = null;
   return { chips, historicalChips: state.historicalSlotLabels || [], leadBanner, awaitingSlotSelection: active };
 }
 
@@ -126,7 +125,7 @@ ok("engine reconcile at turn start", /reconcileTransactionState/.test(engine));
 ok("engine leadBanner not sticky leadPublicId", /shouldShowLeadBanner/.test(engine) && /leadBanner/.test(engine));
 ok("GET returns session snapshot", /buildSessionSnapshot/.test(route) && /historicalChips/.test(route));
 ok("GET expires stale slots", /clearActiveTransactionState/.test(route));
-ok("widget uses leadBanner", /leadBanner/.test(widget) && !/Solicitud \{leadId\} registrada/.test(widget));
+ok("widget uses serviceContext not HS banner", /serviceContext/.test(widget) && !/Solicitud activa:/.test(widget));
 ok("widget historical chips disabled", /Horarios anteriores/.test(widget) && /aria-disabled/.test(widget));
 ok("widget clears chips on send", /setChips\(\[\]\)/.test(widget));
 
@@ -184,7 +183,7 @@ ok("widget clears chips on send", /setChips\(\[\]\)/.test(widget));
 {
   const active = baseState();
   const session = buildSessionSnapshot(active);
-  ok("ISO-12 active transaction shows banner", session.leadBanner === "HS-2026-000025");
+  ok("ISO-12 active transaction shows chips not HS banner", session.chips.length === 2 && session.leadBanner === null);
   ok("ISO-13 active transaction shows chips", session.chips.length === 2);
 }
 

@@ -42,7 +42,14 @@ function normalizeClock(value: string) {
   return "";
 }
 
-export function enforceAvailabilityIntegrity(reply: string, slots: AvailabilitySlot[]) {
+export function enforceAvailabilityIntegrity(
+  reply: string,
+  slots: AvailabilitySlot[],
+  options?: { skipRewrite?: boolean; allowResumeHint?: boolean },
+) {
+  if (options?.skipRewrite || !slots.length) {
+    return { text: reply, stripped: false };
+  }
   const clocks = [...reply.matchAll(INVENTED_CLOCK)]
     .map((item) => normalizeClock(item[1] || item[0]))
     .filter(Boolean);
@@ -58,6 +65,9 @@ export function enforceAvailabilityIntegrity(reply: string, slots: AvailabilityS
   const allowed = new Set(slots.map((item) => item.time));
   const invented = clocks.some((clock) => !allowed.has(clock));
   if (!invented) return { text: reply, stripped: false };
+  if (options?.allowResumeHint) {
+    return { text: reply, stripped: false };
+  }
   const offered = slots.map((item) => item.label).join("; ");
   return {
     text: `Revisé la agenda. Estos horarios sí están libres: ${offered}. ¿Cuál te queda mejor?`,

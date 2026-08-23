@@ -74,7 +74,16 @@ export async function GET(request: Request) {
       touchConversation(conversationId, { state });
     }
   }
-  const session = state ? buildSessionSnapshot(state) : { chips: [], historicalChips: [], leadBanner: null, awaitingSlotSelection: false };
+  const session = state ? buildSessionSnapshot(state) : {
+    chips: [],
+    historicalChips: [],
+    leadBanner: null,
+    awaitingSlotSelection: false,
+    bookingPending: false,
+    slotGroups: [],
+    serviceContext: null,
+    showResumeBooking: false,
+  };
   return NextResponse.json({
     ok: true,
     messages,
@@ -82,6 +91,10 @@ export async function GET(request: Request) {
     historicalChips: session.historicalChips,
     leadBanner: session.leadBanner,
     awaitingSlotSelection: session.awaitingSlotSelection,
+    bookingPending: session.bookingPending,
+    slotGroups: session.slotGroups,
+    serviceContext: session.serviceContext,
+    showResumeBooking: session.showResumeBooking,
   });
 }
 

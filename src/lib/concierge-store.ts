@@ -38,6 +38,7 @@ export type ConversationState = {
   urgency: string;
   bookingIntent: boolean;
   bookingStrategy: string;
+  bookingSuspended: boolean;
   questionsAsked: number;
   humanHandoffRequested: boolean;
   needsReview: boolean;
@@ -76,6 +77,7 @@ const emptyState = (): ConversationState => ({
   urgency: "normal",
   bookingIntent: false,
   bookingStrategy: "",
+  bookingSuspended: false,
   questionsAsked: 0,
   humanHandoffRequested: false,
   needsReview: false,

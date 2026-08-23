@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
+import type { SlotGroup } from "@/lib/concierge-turn-routing";
+import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routing";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
 export const OFFERED_SLOTS_TTL_MS = 45 * 60 * 1000;
@@ -10,6 +12,10 @@ export type ActiveSessionSnapshot = {
   historicalChips: string[];
   leadBanner: string | null;
   awaitingSlotSelection: boolean;
+  bookingPending: boolean;
+  slotGroups: SlotGroup[];
+  serviceContext: string | null;
+  showResumeBooking: boolean;
 };
 
 const SLOT_PICK =
@@ -73,6 +79,7 @@ export function clearActiveTransactionState(state: ConversationState, archiveSlo
     awaitingSlotSelection: false,
     slotOfferToken: "",
     bookingIntent: false,
+    bookingSuspended: false,
     historicalSlotLabels: archived,
     funnelStage: state.appointmentId ? "BOOKED" : state.funnelStage || "DISCOVERY",
   };
@@ -87,6 +94,7 @@ export function activateOfferedSlots(state: ConversationState, slots: OfferedSlo
     slotOfferToken: randomUUID(),
     lastAvailabilityAt: new Date().toISOString(),
     funnelStage: "BOOKING",
+    bookingSuspended: false,
   };
 }
 
@@ -188,24 +196,20 @@ export function validateActiveSlotBooking(state: ConversationState, date: string
 
 export function buildSessionSnapshot(state: ConversationState, now = Date.now()): ActiveSessionSnapshot {
   const active = areOfferedSlotsActive(state, now);
-  const chips = active ? state.offeredSlots.slice(0, 3).map((item) => item.label) : [];
-  const leadBanner =
-    active && state.activeLeadId && !state.activeLeadId.startsWith("DRY-") ? state.activeLeadId : null;
+  const showChips = active && !state.bookingSuspended;
+  const chips = showChips ? state.offeredSlots.slice(0, 6).map((item) => item.label) : [];
   return {
     chips,
     historicalChips: state.historicalSlotLabels || [],
-    leadBanner,
+    leadBanner: null,
     awaitingSlotSelection: active,
+    bookingPending: active && Boolean(state.bookingSuspended),
+    slotGroups: active ? buildSlotGroups(state.offeredSlots) : [],
+    serviceContext: serviceContextLabel(state),
+    showResumeBooking: active && Boolean(state.bookingSuspended),
   };
 }
 
-export function shouldShowLeadBanner(
-  state: ConversationState,
-  input: { leadCreatedThisTurn: boolean; bookedThisTurn: boolean; returningGreeting: boolean },
-) {
-  if (input.returningGreeting) return null;
-  if (input.bookedThisTurn) return null;
-  if (input.leadCreatedThisTurn && state.activeLeadId) return state.activeLeadId;
-  if (isActiveTransaction(state) && state.activeLeadId) return state.activeLeadId;
+export function shouldShowLeadBanner() {
   return null;
 }

@@ -19,7 +19,14 @@ type PendingPhoto = {
   preparing: boolean;
 };
 
+type SlotGroup = {
+  date: string;
+  dateLabel: string;
+  times: Array<{ label: string; date: string; time: string }>;
+};
+
 const GREET_KEY = "hs_concierge_invite_v1";
+const CHAT_OPEN_KEY = "hs_concierge_open_v1";
 
 function photoSrc(photoId?: string, previewUrl?: string) {
   if (previewUrl) return previewUrl;
@@ -34,9 +41,13 @@ export function ConciergeWidget() {
   const [pending, setPending] = useState(false);
   const [ended, setEnded] = useState(false);
   const [chips, setChips] = useState<string[]>([]);
+  const [slotGroups, setSlotGroups] = useState<SlotGroup[]>([]);
   const [historicalChips, setHistoricalChips] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState<string | null>(null);
-  const [leadBanner, setLeadBanner] = useState<string | null>(null);
+  const [serviceContext, setServiceContext] = useState<string | null>(null);
+  const [bookingPending, setBookingPending] = useState(false);
+  const [showResumeBooking, setShowResumeBooking] = useState(false);
+  const [bookingExpanded, setBookingExpanded] = useState(true);
   const [keyboardPad, setKeyboardPad] = useState(0);
   const [pendingPhoto, setPendingPhoto] = useState<PendingPhoto | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -73,6 +84,20 @@ export function ConciergeWidget() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  const applySessionState = useCallback((data: Record<string, unknown>) => {
+    setChips(Array.isArray(data.chips) ? (data.chips as string[]) : []);
+    setSlotGroups(Array.isArray(data.slotGroups) ? (data.slotGroups as SlotGroup[]) : []);
+    setHistoricalChips(Array.isArray(data.historicalChips) ? (data.historicalChips as string[]) : []);
+    setServiceContext(typeof data.serviceContext === "string" ? data.serviceContext : null);
+    const pending = Boolean(data.bookingPending);
+    setBookingPending(pending);
+    setShowResumeBooking(Boolean(data.showResumeBooking));
+    if (pending) setBookingExpanded(false);
+    else if (Array.isArray(data.chips) && data.chips.length) setBookingExpanded(true);
+    setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
+    setEnded(Boolean(data.ended));
+  }, []);
+
   useEffect(() => {
     void fetch("/api/concierge/chat")
       .then((res) => res.json())
@@ -86,12 +111,23 @@ export function ConciergeWidget() {
             })),
           );
         }
-        setChips(Array.isArray(data.chips) ? data.chips : []);
-        setHistoricalChips(Array.isArray(data.historicalChips) ? data.historicalChips : []);
-        setLeadBanner(typeof data.leadBanner === "string" ? data.leadBanner : null);
+        applySessionState(data);
       })
       .catch(() => undefined);
-  }, []);
+  }, [applySessionState]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        sessionStorage.setItem(CHAT_OPEN_KEY, "0");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   useEffect(() => {
     const node = scroller.current;
@@ -117,12 +153,8 @@ export function ConciergeWidget() {
   const applyTurnResponse = useCallback((data: Record<string, unknown>) => {
     const reply = typeof data.reply === "string" ? data.reply : "Cuéntame un poco más del problema para orientarlo.";
     setMessages((current) => [...current, { role: "assistant", body: reply }]);
-    setChips(Array.isArray(data.chips) ? (data.chips as string[]) : []);
-    setHistoricalChips(Array.isArray(data.historicalChips) ? (data.historicalChips as string[]) : []);
-    setLeadBanner(typeof data.leadBanner === "string" ? data.leadBanner : null);
-    setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
-    setEnded(Boolean(data.ended));
-  }, []);
+    applySessionState(data);
+  }, [applySessionState]);
 
   const sendChatTurn = useCallback(async (message: string) => {
     const utm = Object.fromEntries(new URLSearchParams(window.location.search).entries());
@@ -154,7 +186,7 @@ export function ConciergeWidget() {
     setInput("");
     setWhatsapp(null);
     setChips([]);
-    setLeadBanner(null);
+    setSlotGroups([]);
     setMessages((current) => [...current, { role: "user", body: message }]);
     try {
       await sendChatTurn(message);
@@ -218,7 +250,6 @@ export function ConciergeWidget() {
       setPhotoError(null);
       setWhatsapp(null);
       setChips([]);
-      setLeadBanner(null);
       const localKey = `photo-${Date.now()}`;
       const snapshot = photo;
       setMessages((current) => [
@@ -273,6 +304,7 @@ export function ConciergeWidget() {
 
   function openChat() {
     sessionStorage.setItem(GREET_KEY, "1");
+    sessionStorage.setItem(CHAT_OPEN_KEY, "1");
     setInvite(false);
     setOpen(true);
     void fetch("/api/concierge/chat", {
@@ -281,6 +313,15 @@ export function ConciergeWidget() {
       body: JSON.stringify({ event: "CHAT_STARTED" }),
     });
     window.setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
+  function closeChat() {
+    setOpen(false);
+    sessionStorage.setItem(CHAT_OPEN_KEY, "0");
+  }
+
+  function minimizeChat() {
+    closeChat();
   }
 
   const canSend = Boolean((input.trim() || pendingPhoto) && !pending && !ended && !pendingPhoto?.preparing);
@@ -319,22 +360,32 @@ export function ConciergeWidget() {
           role="dialog"
           aria-label="Asistente de servicios Homestead"
         >
-          <header className="flex items-start justify-between gap-3 bg-navy px-5 py-4 text-cream">
+          <header className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-navy px-5 py-4 text-cream">
             <div>
               <p className="font-display text-xl">Homestead Services</p>
               <p className="mt-1 text-xs tracking-[0.12em] uppercase text-cream/70">Asesor de servicios</p>
-              <p className="mt-2 max-w-xs text-xs leading-5 text-cream/75">
-                Conversemos sobre lo que necesitas resolver en tu propiedad.
-              </p>
+              {serviceContext && (
+                <p className="mt-1 text-xs text-cream/75">{serviceContext}</p>
+              )}
             </div>
-            <button
-              type="button"
-              className="min-h-11 min-w-11 rounded-lg text-cream/80 hover:text-cream"
-              aria-label="Cerrar"
-              onClick={() => setOpen(false)}
-            >
-              ✕
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="min-h-11 min-w-11 rounded-lg text-cream/80 hover:text-cream"
+                aria-label="Minimizar chat"
+                onClick={minimizeChat}
+              >
+                —
+              </button>
+              <button
+                type="button"
+                className="min-h-11 min-w-11 rounded-lg text-cream/80 hover:text-cream"
+                aria-label="Cerrar chat"
+                onClick={closeChat}
+              >
+                ✕
+              </button>
+            </div>
           </header>
           <div
             ref={scroller}
@@ -416,7 +467,39 @@ export function ConciergeWidget() {
               </div>
             </div>
           )}
-          {chips.length > 0 && !ended && (
+          {showResumeBooking && !bookingExpanded && !ended && (
+            <div className="border-t border-line bg-white px-4 py-2">
+              <button
+                type="button"
+                className="min-h-11 w-full rounded-lg border border-navy/15 px-3 text-left text-xs text-navy"
+                onClick={() => setBookingExpanded(true)}
+              >
+                Cita pendiente · Ver horarios
+              </button>
+            </div>
+          )}
+          {bookingExpanded && slotGroups.length > 0 && !ended && (
+            <div className="space-y-2 border-t border-line bg-white px-4 py-2" aria-live="polite">
+              {slotGroups.map((group) => (
+                <div key={group.date}>
+                  <p className="text-[0.65rem] tracking-[0.12em] uppercase text-mist">{group.dateLabel}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {group.times.map((time) => (
+                      <button
+                        key={`${group.date}-${time.time}`}
+                        type="button"
+                        className="min-h-11 rounded-full border border-navy/20 px-3 text-xs text-navy"
+                        onClick={() => void sendMessage(`Me sirve ${time.label}`)}
+                      >
+                        {time.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {bookingExpanded && slotGroups.length === 0 && chips.length > 0 && !ended && (
             <div className="flex flex-wrap gap-2 px-4 pb-2" aria-live="polite">
               {chips.map((chip) => (
                 <button
@@ -429,11 +512,6 @@ export function ConciergeWidget() {
                 </button>
               ))}
             </div>
-          )}
-          {leadBanner && (
-            <p className="px-4 pb-2 text-xs text-mist" aria-live="polite">
-              Solicitud activa: {leadBanner}
-            </p>
           )}
           {whatsapp && (
             <a

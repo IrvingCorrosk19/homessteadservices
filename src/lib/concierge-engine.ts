@@ -45,12 +45,19 @@ import {
   areOfferedSlotsActive,
   buildSessionSnapshot,
   clearActiveTransactionState,
-  hasSlotSelectionSignal,
   isReturningGreeting,
   reconcileTransactionState,
   resolveSlotFromMessage,
   shouldShowLeadBanner,
 } from "@/lib/concierge-transaction";
+import {
+  bookingPauseReply,
+  interpretTurnRoute,
+  looksLikeAvailabilityLoop,
+  newNeedReply,
+  priceGuidanceReply,
+  socialAckReply,
+} from "@/lib/concierge-turn-routing";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -127,8 +134,8 @@ async function completeTurn(messages: ChatMessage[]) {
 
 function chipsFrom(state: ConversationState, booked: boolean, human: boolean) {
   if (human || booked) return [];
-  if (!areOfferedSlotsActive(state)) return [];
-  return state.offeredSlots.slice(0, 3).map((item) => item.label);
+  if (!areOfferedSlotsActive(state) || state.bookingSuspended) return [];
+  return state.offeredSlots.slice(0, 6).map((item) => item.label);
 }
 
 export function canCreateLead(state: ConversationState) {
@@ -158,10 +165,37 @@ export async function conciergeTurn(input: {
     const returningGreeting = isReturningGreeting(text);
     let leadCreatedThisTurn = false;
 
-    const matchedSlot = areOfferedSlotsActive(state) ? resolveSlotFromMessage(text, state.offeredSlots) : null;
-    if (matchedSlot && hasSlotSelectionSignal(text)) {
+    const route = interpretTurnRoute(text, state);
+    if (route.priceIntent || route.serviceQuestionIntent || route.objectionIntent) {
+      state = { ...state, bookingSuspended: true };
+    }
+    if (route.bookingPauseIntent) {
+      state = { ...state, bookingSuspended: true, awaitingSlotSelection: false };
+    }
+    if (route.resumeBookingIntent || route.slotSelectionIntent) {
+      state = { ...state, bookingSuspended: false };
+    }
+
+    const matchedSlot =
+      route.slotSelectionIntent && areOfferedSlotsActive(state)
+        ? resolveSlotFromMessage(text, state.offeredSlots)
+        : null;
+    if (matchedSlot) {
       state.preferredDate = matchedSlot.date;
       state.preferredTime = matchedSlot.time;
+    }
+
+    if (route.isInterruption) {
+      addEvent(input.conversationId, "INTENT_INTERRUPTION");
+      recordFunnelEvent(input.conversationId, "IntentDetected", {
+        intent: route.priceIntent
+          ? "price"
+          : route.newNeedIntent
+            ? "new_need"
+            : route.bookingPauseIntent
+              ? "booking_pause"
+              : "interruption",
+      });
     }
 
     const contact = assessUserContact(text, state.phone);
@@ -195,6 +229,10 @@ export async function conciergeTurn(input: {
         ended: false,
         requiresHuman: false,
         awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
       };
     }
 
@@ -241,6 +279,12 @@ export async function conciergeTurn(input: {
         const playbook = getPlaybook(state.primaryService || state.service);
         const missing = missingUsefulFacts(state, playbook);
         const history = recentMessages(input.conversationId, 10);
+        const interruptionBlock = route.isInterruption
+          ? [{
+              role: "system" as const,
+              content: `INTERRUPCIÓN (${route.priceIntent ? "PRECIO" : route.newNeedIntent ? "NUEVA NECESIDAD" : route.bookingPauseIntent ? "PAUSAR AGENDA" : route.serviceQuestionIntent ? "PREGUNTA SERVICIO" : route.socialAckIntent ? "AGRADECIMIENTO" : "INTERRUPCIÓN"}): el cliente NO está eligiendo horario ahora. Responde esa intención primero. NO repitas la lista de horarios salvo que pida retomar la cita.`,
+            }]
+          : [];
         const messages: ChatMessage[] = [
           {
             role: "system",
@@ -249,6 +293,7 @@ export async function conciergeTurn(input: {
               `${playbookPromptBlock(playbook, state, missing)}\n\n${questionEconomyBlock(state, playbook)}`,
             ),
           },
+          ...interruptionBlock,
           {
             role: "system",
             content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
@@ -353,8 +398,35 @@ export async function conciergeTurn(input: {
       }
     }
 
+    const lastAssistant = recentMessages(input.conversationId, 6)
+      .filter((item) => item.role === "assistant")
+      .pop()?.body || "";
+
     const priced = stripHallucinatedPrices(reply);
     reply = priced.text;
+
+    if (route.priceIntent && (looksLikeAvailabilityLoop(reply) || !reply.trim())) {
+      reply = priceGuidanceReply(state, true);
+      addEvent(input.conversationId, "PRICE_INTENT_HANDLED");
+    } else if (route.newNeedIntent && looksLikeAvailabilityLoop(reply)) {
+      reply = newNeedReply();
+    } else if (route.bookingPauseIntent) {
+      reply = bookingPauseReply();
+    } else if (route.socialAckIntent && looksLikeAvailabilityLoop(reply)) {
+      reply = socialAckReply(state);
+    } else if (
+      route.isInterruption &&
+      looksLikeAvailabilityLoop(reply) &&
+      looksLikeAvailabilityLoop(lastAssistant)
+    ) {
+      addEvent(input.conversationId, "RESPONSE_LOOP_DETECTED");
+      reply = route.priceIntent
+        ? priceGuidanceReply(state, true)
+        : route.newNeedIntent
+          ? newNeedReply()
+          : socialAckReply(state);
+    }
+
     if (isPassiveClose(reply) && !ctx.bookedThisTurn) {
       reply = state.contactStatus === "VALID"
         ? "Cuando quieras, revisamos un horario real para la visita. ¿Qué día te queda mejor?"
@@ -367,7 +439,9 @@ export async function conciergeTurn(input: {
         reply = `Listo. La visita quedó agendada para ${when}. Ya está en nuestro calendario.`;
       }
     } else {
-      const availability = enforceAvailabilityIntegrity(reply, ctx.lastSlots);
+      const availability = enforceAvailabilityIntegrity(reply, ctx.lastSlots, {
+        skipRewrite: route.isInterruption || route.priceIntent || route.bookingPauseIntent || route.newNeedIntent,
+      });
       reply = availability.text;
       const booked = enforceBookingIntegrity(reply, false);
       reply = booked.text;
@@ -403,11 +477,7 @@ export async function conciergeTurn(input: {
     });
     addMessage(input.conversationId, "assistant", reply);
 
-    const leadBanner = shouldShowLeadBanner(state, {
-      leadCreatedThisTurn,
-      bookedThisTurn: ctx.bookedThisTurn,
-      returningGreeting,
-    });
+    const leadBanner = shouldShowLeadBanner();
     const session = buildSessionSnapshot(state);
 
     const wa =
@@ -430,6 +500,10 @@ export async function conciergeTurn(input: {
       ended,
       requiresHuman: state.humanRequested,
       awaitingSlotSelection: session.awaitingSlotSelection,
+      bookingPending: session.bookingPending,
+      slotGroups: session.slotGroups,
+      serviceContext: session.serviceContext,
+      showResumeBooking: session.showResumeBooking,
     };
   } finally {
     endTurn(input.conversationId);
