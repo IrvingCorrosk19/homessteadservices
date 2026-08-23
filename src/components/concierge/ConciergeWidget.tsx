@@ -13,8 +13,9 @@ export function ConciergeWidget() {
   const [pending, setPending] = useState(false);
   const [ended, setEnded] = useState(false);
   const [chips, setChips] = useState<string[]>([]);
+  const [historicalChips, setHistoricalChips] = useState<string[]>([]);
   const [whatsapp, setWhatsapp] = useState<string | null>(null);
-  const [leadId, setLeadId] = useState<string | null>(null);
+  const [leadBanner, setLeadBanner] = useState<string | null>(null);
   const [keyboardPad, setKeyboardPad] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -49,6 +50,9 @@ export function ConciergeWidget() {
             })),
           );
         }
+        setChips(Array.isArray(data.chips) ? data.chips : []);
+        setHistoricalChips(Array.isArray(data.historicalChips) ? data.historicalChips : []);
+        setLeadBanner(typeof data.leadBanner === "string" ? data.leadBanner : null);
       })
       .catch(() => undefined);
   }, []);
@@ -82,6 +86,8 @@ export function ConciergeWidget() {
     setSendError(false);
     setInput("");
     setWhatsapp(null);
+    setChips([]);
+    setLeadBanner(null);
     setMessages((current) => [...current, { role: "user", body: message }]);
     try {
       const utm = Object.fromEntries(new URLSearchParams(window.location.search).entries());
@@ -104,8 +110,9 @@ export function ConciergeWidget() {
       const reply = typeof data.reply === "string" ? data.reply : "Cuéntame un poco más del problema para orientarlo.";
       setMessages((current) => [...current, { role: "assistant", body: reply }]);
       setChips(Array.isArray(data.chips) ? data.chips : []);
+      setHistoricalChips(Array.isArray(data.historicalChips) ? data.historicalChips : []);
+      setLeadBanner(typeof data.leadBanner === "string" ? data.leadBanner : null);
       setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
-      setLeadId(typeof data.leadId === "string" ? data.leadId : null);
       setEnded(Boolean(data.ended));
     } catch {
       setMessages((current) => current.filter((item, index, list) => !(index === list.length - 1 && item.role === "user" && item.body === message)));
@@ -209,12 +216,25 @@ export function ConciergeWidget() {
                 No se pudo enviar. El texto se conservó; puedes reintentar.
               </p>
             )}
-            {leadId && (
-              <p className="text-xs text-mist">Solicitud {leadId} registrada.</p>
-            )}
           </div>
+          {historicalChips.length > 0 && (
+            <div className="px-4 pb-2">
+              <p className="text-[0.65rem] tracking-[0.12em] uppercase text-mist">Horarios anteriores</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {historicalChips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="min-h-11 rounded-full border border-mist/30 bg-cream-deep px-3 py-2.5 text-xs text-mist line-through opacity-70"
+                    aria-disabled="true"
+                  >
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {chips.length > 0 && !ended && (
-            <div className="flex flex-wrap gap-2 px-4 pb-2">
+            <div className="flex flex-wrap gap-2 px-4 pb-2" aria-live="polite">
               {chips.map((chip) => (
                 <button
                   key={chip}
@@ -226,6 +246,11 @@ export function ConciergeWidget() {
                 </button>
               ))}
             </div>
+          )}
+          {leadBanner && (
+            <p className="px-4 pb-2 text-xs text-mist" aria-live="polite">
+              Solicitud activa: {leadBanner}
+            </p>
           )}
           {whatsapp && (
             <a

@@ -40,6 +40,16 @@ import {
   questionEconomyBlock,
   shouldFlagOverquestioning,
 } from "@/lib/concierge/turn-intelligence";
+import {
+  areOfferedSlotsActive,
+  buildSessionSnapshot,
+  clearActiveTransactionState,
+  hasSlotSelectionSignal,
+  isReturningGreeting,
+  reconcileTransactionState,
+  resolveSlotFromMessage,
+  shouldShowLeadBanner,
+} from "@/lib/concierge-transaction";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -116,8 +126,8 @@ async function completeTurn(messages: ChatMessage[]) {
 
 function chipsFrom(state: ConversationState, booked: boolean, human: boolean) {
   if (human || booked) return [];
-  if (state.offeredSlots.length) return state.offeredSlots.slice(0, 3).map((item) => item.label);
-  return [];
+  if (!areOfferedSlotsActive(state)) return [];
+  return state.offeredSlots.slice(0, 3).map((item) => item.label);
 }
 
 export function canCreateLead(state: ConversationState) {
@@ -138,7 +148,18 @@ export async function conciergeTurn(input: {
     const text = input.message.trim().slice(0, 2000);
     addMessage(input.conversationId, "user", text);
     addEvent(input.conversationId, "CHAT_MESSAGE");
-    let state = extractCasualFacts(conversation.state, text);
+    let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
+    touchConversation(input.conversationId, { state });
+    state = extractCasualFacts(state, text);
+    const returningGreeting = isReturningGreeting(text);
+    let leadCreatedThisTurn = false;
+
+    const matchedSlot = areOfferedSlotsActive(state) ? resolveSlotFromMessage(text, state.offeredSlots) : null;
+    if (matchedSlot && hasSlotSelectionSignal(text)) {
+      state.preferredDate = matchedSlot.date;
+      state.preferredTime = matchedSlot.time;
+    }
+
     const contact = assessUserContact(text, state.phone);
     if (looksLikePhoneAttempt(text) || contact.status !== "UNKNOWN") addEvent(input.conversationId, "CONTACT_VALIDATION_ATTEMPT");
     if (contact.status === "VALID") {
@@ -155,17 +176,21 @@ export async function conciergeTurn(input: {
     if (INJECTION_RE.test(text)) {
       addMessage(input.conversationId, "assistant", injectionDeniedReply());
       touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
       return {
         ok: true as const,
         reply: injectionDeniedReply(),
-        chips: chipsFrom(state, false, false),
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
         nextAction: "ASK_SERVICE_QUESTION",
-        leadId: conversation.leadPublicId || null,
+        leadId: null,
         dryLead: false,
         whatsappUrl: null,
         contactUrl: "/contact",
         ended: false,
         requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
       };
     }
 
@@ -175,18 +200,23 @@ export async function conciergeTurn(input: {
       addEvent(input.conversationId, "STOP_SIGNAL");
       addMessage(input.conversationId, "assistant", reply);
       setConversationOutcome(input.conversationId, "ABANDONED");
-      touchConversation(input.conversationId, { state: { ...state, funnelStage: "ABANDONED" } });
+      const cleared = clearActiveTransactionState({ ...state, funnelStage: "ABANDONED" }, state.offeredSlots.length > 0);
+      touchConversation(input.conversationId, { state: cleared });
+      const session = buildSessionSnapshot(cleared);
       return {
         ok: true as const,
         reply,
         chips: [],
+        historicalChips: session.historicalChips,
+        leadBanner: null,
         nextAction: "CLOSE",
-        leadId: conversation.leadPublicId || null,
+        leadId: null,
         dryLead: false,
         whatsappUrl: null,
         contactUrl: "/contact",
         ended: true,
         requiresHuman: false,
+        awaitingSlotSelection: false,
       };
     }
 
@@ -195,11 +225,11 @@ export async function conciergeTurn(input: {
     const ctx: ToolContext = {
       conversationId: input.conversationId,
       state,
-      leadId: conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : "",
+      leadId: state.activeLeadId || (conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : ""),
       summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
       utm: conversation.utm,
       bookedThisTurn: false,
-      lastSlots: [...(state.offeredSlots || [])] as AvailabilitySlot[],
+      lastSlots: areOfferedSlotsActive(state) ? [...(state.offeredSlots || [])] as AvailabilitySlot[] : [],
     };
 
     if (conciergeApiKey()) {
@@ -303,16 +333,20 @@ export async function conciergeTurn(input: {
       recordFunnelEvent(input.conversationId, "IntentDetected", { intent: "repeated_question", service: repeated.join(",") });
     }
 
-    if (!ctx.leadId && canCreateLead(state)) {
+    if (!ctx.leadId && canCreateLead(state) && !returningGreeting) {
       const created = await createLeadFromConcierge({
         conversationId: input.conversationId,
         state,
         summary: ctx.summary || state.problem,
-        existingLeadId: "",
+        existingLeadId: state.activeLeadId || "",
         utm: conversation.utm,
         escalate: HUMAN_RE.test(text) || state.humanRequested,
       });
-      ctx.leadId = created || ctx.leadId;
+      if (created) {
+        ctx.leadId = created;
+        state.activeLeadId = created;
+        leadCreatedThisTurn = true;
+      }
     }
 
     const priced = stripHallucinatedPrices(reply);
@@ -361,12 +395,19 @@ export async function conciergeTurn(input: {
     touchConversation(input.conversationId, {
       state,
       summary: ctx.summary || conversation.summary,
-      leadPublicId: ctx.leadId,
+      leadPublicId: ctx.leadId || conversation.leadPublicId,
     });
     addMessage(input.conversationId, "assistant", reply);
 
+    const leadBanner = shouldShowLeadBanner(state, {
+      leadCreatedThisTurn,
+      bookedThisTurn: ctx.bookedThisTurn,
+      returningGreeting,
+    });
+    const session = buildSessionSnapshot(state);
+
     const wa =
-      knowledge.whatsappConfigured && ctx.leadId
+      knowledge.whatsappConfigured && ctx.leadId && leadBanner
         ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${ctx.leadId}.`)
         : null;
 
@@ -374,14 +415,17 @@ export async function conciergeTurn(input: {
       ok: true as const,
       reply,
       chips: chipsFrom(state, ctx.bookedThisTurn, state.humanRequested),
+      historicalChips: session.historicalChips,
+      leadBanner,
       nextAction: ctx.bookedThisTurn ? "CLOSE" : state.humanRequested ? "ESCALATE_HUMAN" : "CONTINUE",
-      leadId: ctx.leadId || null,
+      leadId: leadBanner,
       appointmentId: state.appointmentId || null,
       dryLead: false,
       whatsappUrl: wa,
       contactUrl: "/contact",
       ended,
       requiresHuman: state.humanRequested,
+      awaitingSlotSelection: session.awaitingSlotSelection,
     };
   } finally {
     endTurn(input.conversationId);

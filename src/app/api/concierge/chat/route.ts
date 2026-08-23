@@ -11,7 +11,9 @@ import {
   getConversation,
   hashIp,
   recentMessages,
+  touchConversation,
 } from "@/lib/concierge-store";
+import { areOfferedSlotsActive, buildSessionSnapshot, clearActiveTransactionState } from "@/lib/concierge-transaction";
 import { logError } from "@/lib/log";
 import { CONCIERGE_BUILD_MARKER, CONCIERGE_PROMPT_VERSION } from "@/lib/concierge-knowledge";
 
@@ -56,7 +58,23 @@ export async function GET(request: Request) {
     role: item.role,
     body: item.body.startsWith("[Foto") ? "Envié una foto." : item.body,
   }));
-  return NextResponse.json({ ok: true, messages });
+  const conversation = getConversation(conversationId);
+  let state = conversation?.state;
+  if (conversation && state) {
+    if (!areOfferedSlotsActive(state) && (state.offeredSlots.length || state.awaitingSlotSelection)) {
+      state = clearActiveTransactionState(state, state.offeredSlots.length > 0);
+      touchConversation(conversationId, { state });
+    }
+  }
+  const session = state ? buildSessionSnapshot(state) : { chips: [], historicalChips: [], leadBanner: null, awaitingSlotSelection: false };
+  return NextResponse.json({
+    ok: true,
+    messages,
+    chips: session.chips,
+    historicalChips: session.historicalChips,
+    leadBanner: session.leadBanner,
+    awaitingSlotSelection: session.awaitingSlotSelection,
+  });
 }
 
 export async function POST(request: Request) {

@@ -25,6 +25,10 @@ export type ConversationState = {
   offeredSlots: OfferedSlot[];
   pendingSlot: OfferedSlot | null;
   appointmentId: string;
+  awaitingSlotSelection: boolean;
+  slotOfferToken: string;
+  activeLeadId: string;
+  historicalSlotLabels: string[];
   humanRequested: boolean;
   lastAvailabilityAt: string;
   detectedServices: string[];
@@ -59,6 +63,10 @@ const emptyState = (): ConversationState => ({
   offeredSlots: [],
   pendingSlot: null,
   appointmentId: "",
+  awaitingSlotSelection: false,
+  slotOfferToken: "",
+  activeLeadId: "",
+  historicalSlotLabels: [],
   humanRequested: false,
   lastAvailabilityAt: "",
   detectedServices: [],

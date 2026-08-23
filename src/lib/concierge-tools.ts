@@ -1,5 +1,5 @@
 import { conciergeKnowledge } from "@/lib/concierge-knowledge";
-import { checkAvailability, isOfferedSlot, type AvailabilitySlot } from "@/lib/concierge-availability";
+import { checkAvailability, type AvailabilitySlot } from "@/lib/concierge-availability";
 import { parseNaturalDateTime } from "@/lib/concierge-datetime";
 import { canHandoffLead, createLeadFromConcierge } from "@/lib/concierge-handoff";
 import { recordFunnelEvent } from "@/lib/concierge-intelligence";
@@ -23,6 +23,13 @@ import {
   shouldOfferAvailability,
 } from "@/lib/concierge/playbook-engine";
 import { applyTurnIntelligence, parseTurnIntelligence } from "@/lib/concierge/turn-intelligence";
+import {
+  activateOfferedSlots,
+  clearActiveTransactionState,
+  consumeOfferedSlots,
+  detectNewTransactionSignal,
+  validateActiveSlotBooking,
+} from "@/lib/concierge-transaction";
 
 export const CONCIERGE_TOOLS = [
   {
@@ -218,11 +225,18 @@ export async function executeConciergeTool(
         ? args.detectedServices.map((item) => String(item))
         : [];
     const fromText = detectServices([state.problem, parsed.primaryService, incoming.join(" ")].join(" "));
+    const previousPrimary = state.primaryService || state.service;
     state.detectedServices = mergeDetectedServices(state.detectedServices || [], [...incoming, ...fromText]);
     state.primaryService = choosePrimary(
       state.detectedServices,
       parsed.primaryService || asString(args.primaryService) || state.primaryService || state.service,
     );
+    if (previousPrimary && state.primaryService && previousPrimary !== state.primaryService) {
+      state = clearActiveTransactionState(state, true);
+      state.activeLeadId = "";
+      state.appointmentId = "";
+      leadId = "";
+    }
     if (state.primaryService) state.service = state.primaryService;
     state.secondaryServices = state.detectedServices.filter((id) => id !== state.primaryService);
     state = applyTurnIntelligence(state, parsed);
@@ -301,14 +315,16 @@ export async function executeConciergeTool(
   }
 
   if (name === "create_or_update_lead") {
+    const targetLead = state.activeLeadId || leadId;
     const created = await createLeadFromConcierge({
       conversationId: ctx.conversationId,
       state,
       summary: ctx.summary,
-      existingLeadId: leadId,
+      existingLeadId: targetLead,
       utm: ctx.utm,
     });
-    leadId = created || leadId;
+    leadId = created || targetLead;
+    if (leadId) state.activeLeadId = leadId;
     return {
       result: created
         ? { ok: true, publicId: created }
@@ -335,8 +351,7 @@ export async function executeConciergeTool(
       dateText: asString(args.dateText) || state.preferredDate,
       timeText: asString(args.timeText) || state.preferredTime,
     });
-    state.offeredSlots = availability.slots as OfferedSlot[];
-    state.lastAvailabilityAt = new Date().toISOString();
+    state = activateOfferedSlots(state, availability.slots as OfferedSlot[]);
     state.preferredDate = availability.requested.date || state.preferredDate;
     if (availability.requested.time) state.preferredTime = availability.requested.time;
     ctx.lastSlots.splice(0, ctx.lastSlots.length, ...availability.slots);
@@ -366,11 +381,16 @@ export async function executeConciergeTool(
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
       return { result: { ok: false, reason: "invalid_datetime" }, state, leadId };
     }
-    const offered = state.offeredSlots.length ? state.offeredSlots : ctx.lastSlots;
-    if (offered.length && !isOfferedSlot(offered, date, time)) {
-      return { result: { ok: false, reason: "slot_not_offered", slots: offered }, state, leadId };
+    const slotCheck = validateActiveSlotBooking(state, date, time);
+    if (!slotCheck.ok) {
+      return {
+        result: { ok: false, reason: slotCheck.reason, message: slotCheck.message, slots: state.offeredSlots },
+        state: clearActiveTransactionState(state),
+        leadId,
+      };
     }
-    if (!leadId) {
+    const bookingLeadId = state.activeLeadId || leadId;
+    if (!bookingLeadId) {
       const created = await createLeadFromConcierge({
         conversationId: ctx.conversationId,
         state,
@@ -379,6 +399,9 @@ export async function executeConciergeTool(
         utm: ctx.utm,
       });
       leadId = created;
+      if (created) state.activeLeadId = created;
+    } else {
+      leadId = bookingLeadId;
     }
     if (!leadId) {
       recordFunnelEvent(ctx.conversationId, "AppointmentFailed", { reason: "no_lead" });
@@ -388,8 +411,8 @@ export async function executeConciergeTool(
     if (existing && ["REQUESTED", "PROPOSED", "CONFIRMED", "RESCHEDULED"].includes(existing.status)) {
       const moved = rescheduleAppointment(existing.appointment_id, date, time);
       if (!moved.ok) return { result: { ok: false, reason: moved.reason || "reschedule_failed" }, state, leadId };
+      state = consumeOfferedSlots(state, { date, time, label: `${date} ${time}` });
       state.appointmentId = existing.appointment_id;
-      state.pendingSlot = { date, time, label: `${date} ${time}` };
       saveLeadPreference(leadId, date, time);
       if (!isConciergeDryRun() && (existing.status === "CONFIRMED" || existing.status === "RESCHEDULED")) {
         await notifyAppointmentEvent(existing.appointment_id, "RESCHEDULED", {
@@ -409,8 +432,8 @@ export async function executeConciergeTool(
       return { result: { ok: false, reason: "create_failed" }, state, leadId };
     }
     setAppointmentStatus(id, "CONFIRMED");
+    state = consumeOfferedSlots(state, { date, time, label: `${date} ${time}` });
     state.appointmentId = id;
-    state.pendingSlot = { date, time, label: `${date} ${time}` };
     saveLeadPreference(leadId, date, time);
     if (!isConciergeDryRun()) {
       recordFunnelEvent(ctx.conversationId, "TelegramNotificationRequested", { stage: "appointment" });
