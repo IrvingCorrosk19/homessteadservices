@@ -501,14 +501,14 @@ export async function consumeOperatorDate(chatId: string, text: string): Promise
 async function proposeVisitSlot(leadId: string, date: string, time: string) {
   const latest = latestAppointment(leadId);
   if (latest && ["REQUESTED", "PROPOSED", "CONFIRMED", "RESCHEDULED"].includes(latest.status)) {
-    const moved = rescheduleAppointment(latest.appointment_id, date, time);
-    if (moved && (latest.status === "CONFIRMED" || latest.status === "RESCHEDULED")) {
+    const moved = rescheduleAppointment(latest.appointment_id, date, time, { actor: "telegram" });
+    if (moved.ok && (latest.status === "CONFIRMED" || latest.status === "RESCHEDULED")) {
       await notifyAppointmentEvent(latest.appointment_id, "RESCHEDULED", {
-        previousDate: latest.date,
-        previousTime: latest.start_time,
+        previousDate: moved.previousDate,
+        previousTime: moved.previousTime,
       });
     }
-    return { id: latest.appointment_id, status: moved?.status || latest.status };
+    return { id: latest.appointment_id, status: moved.ok ? moved.status : latest.status };
   }
   const created = createAppointment(leadId, date, time, "PROPOSED", { source: "TELEGRAM" });
   return { id: created, status: "PROPOSED" };

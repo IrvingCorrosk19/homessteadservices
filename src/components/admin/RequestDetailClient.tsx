@@ -6,9 +6,10 @@ import { AdminPhotos } from "@/components/admin/AdminPhotos";
 import { ReplyComposer } from "@/components/admin/ReplyComposer";
 import { StatusPill } from "@/components/admin/StatusPill";
 import { StatusSelect } from "@/components/admin/StatusSelect";
-import { formatPanamaDateTime } from "@/lib/admin-format";
+import { formatPanamaDateTime, type RequestStatus } from "@/lib/admin-format";
+import { safeReturnTo } from "@/lib/ops-navigation-state";
 import type { RequestMessage, SavedServiceRequest } from "@/lib/service-requests";
-
+import { useToast } from "@/components/ui/Toast";
 function eventTitle(message: RequestMessage) {
   if (message.channel === "FORM") return "Solicitud recibida";
   if (message.channel === "TELEGRAM" && message.status === "SENT") {
@@ -29,34 +30,74 @@ export function RequestDetailClient({
   serviceLabel,
   whatsappUrl,
   factRows = [],
+  slaFirstAlertedAt = null,
+  slaEscalatedAt = null,
+  returnTo,
 }: {
   request: SavedServiceRequest;
   messages: RequestMessage[];
   serviceLabel: string;
   whatsappUrl: string | null;
   factRows?: Array<{ label: string; value: string }>;
-}) {
-  const [status, setStatus] = useState(request.status);
+  slaFirstAlertedAt?: string | null;
+  slaEscalatedAt?: string | null;
+  returnTo?: string;
+}) {  const toast = useToast();
+  const [status, setStatus] = useState<RequestStatus>(request.status);
   const [history, setHistory] = useState(messages);
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(false);
+
+  async function markAttended() {
+    if (busy) return;
+    const snapshot = status;
+    setBusy(true);
+    setStatus("CONTACTED");
+    const response = await fetch(`/api/admin/service-requests/${request.publicId}/contacted`, {
+      method: "POST",
+    });
+    const data = await response.json().catch(() => ({}));
+    setBusy(false);
+    if (!response.ok) {
+      setStatus(snapshot);
+      toast.push({
+        kind: "error",
+        title: "No pudimos marcar la solicitud",
+        body: "Intenta de nuevo en un momento.",
+      });
+      return;
+    }
+    if (data.request?.status) setStatus(data.request.status);
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 1800);
+    toast.push({
+      kind: "success",
+      title: "✓ Solicitud atendida",
+      body: data.already ? "Ya estaba registrada como atendida." : "Contacto humano registrado.",
+    });
+  }
+
+  const canMark = status === "NEW" || status === "IN_PROGRESS";
+  const backHref = safeReturnTo(returnTo);
 
   return (
-    <main className="mx-auto w-[min(840px,calc(100%-1.5rem))] py-8 md:py-12">
+    <>
+    <main className="mx-auto w-[min(840px,calc(100%-1.5rem))] pb-28 py-8 md:pb-12 md:py-12">
       <Link
-        href="/admin/solicitudes"
+        href={backHref}
         className="text-[0.72rem] tracking-[0.14em] uppercase text-mist hover:text-navy"
       >
-        ← Solicitudes
-      </Link>
-      <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+        ← Volver a solicitudes
+      </Link>      <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <p className="text-[0.72rem] tracking-[0.16em] uppercase text-accent">
             {request.publicId}
           </p>
           <h1 className="mt-2 font-display text-4xl text-navy">{request.name}</h1>
           <p className="mt-2 text-mist">{serviceLabel}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <StatusPill status={status} />
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusPill status={status} slaFirstAlertedAt={slaFirstAlertedAt} slaEscalatedAt={slaEscalatedAt} />
           <StatusSelect
             requestId={request.publicId}
             status={status}
@@ -64,6 +105,33 @@ export function RequestDetailClient({
           />
         </div>
       </div>
+
+      {canMark ? (
+        <div className="mt-4 hidden flex-wrap gap-2 md:flex">
+          {whatsappUrl ? (
+            <a
+              href={whatsappUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="min-h-11 rounded-xl bg-navy px-4 py-3 text-[0.72rem] tracking-[0.14em] uppercase text-cream"
+            >
+              Contactar
+            </a>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            className="min-h-11 rounded-xl border border-navy/15 px-4 py-3 text-[0.72rem] tracking-[0.14em] uppercase text-navy disabled:opacity-50"
+            onClick={() => void markAttended()}
+          >
+            {busy ? "Guardando…" : "Marcar como atendida"}
+          </button>
+        </div>
+      ) : null}      {flash ? (
+        <p className="mt-3 text-sm text-navy-soft" role="status" aria-live="polite">
+          ✓ Solicitud atendida
+        </p>
+      ) : null}
 
       <section className="mt-8 rounded-[24px] border border-navy/8 bg-white p-6 md:p-8">
         <p className="text-sm text-navy">📞 {request.phone}</p>
@@ -76,7 +144,7 @@ export function RequestDetailClient({
             href={whatsappUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-5 inline-flex rounded-xl border border-navy/10 px-4 py-3 text-[0.72rem] tracking-[0.14em] uppercase text-navy"
+            className="mt-5 inline-flex min-h-11 items-center rounded-xl border border-navy/10 px-4 py-3 text-[0.72rem] tracking-[0.14em] uppercase text-navy"
           >
             WhatsApp
           </a>
@@ -155,5 +223,31 @@ export function RequestDetailClient({
         </ol>
       </section>
     </main>
+
+    {canMark ? (
+      <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 border-t border-navy/10 bg-cream/95 px-4 py-3 backdrop-blur md:hidden">
+        <div className="mx-auto flex max-w-lg gap-2">
+          {whatsappUrl ? (
+            <a
+              href={whatsappUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="min-h-11 flex-1 rounded-xl bg-navy px-4 py-3 text-center text-[0.72rem] tracking-[0.14em] uppercase text-cream"
+            >
+              Contactar
+            </a>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            className="min-h-11 flex-1 rounded-xl border border-navy/15 px-4 py-3 text-[0.72rem] tracking-[0.14em] uppercase text-navy disabled:opacity-50"
+            onClick={() => void markAttended()}
+          >
+            {busy ? "Guardando…" : "Atendida"}
+          </button>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

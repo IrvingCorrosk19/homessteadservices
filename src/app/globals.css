@@ -39,6 +39,17 @@ html {
   scroll-behavior: smooth;
 }
 
+@keyframes hsSheetUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 html,
 body {
   background: var(--cream);

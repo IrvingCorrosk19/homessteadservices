@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AdminTopBar } from "@/components/admin/AdminTopBar";
+import { NeedsAttentionBlock } from "@/components/admin/NeedsAttentionBlock";
 import { formatBrief } from "@/lib/copilot/deterministic";
 import { getAttentionItems, getBusinessBriefCounts } from "@/lib/analytics-service";
 import { COPILOT_PROMPT_VERSION } from "@/lib/copilot/schema";
@@ -15,12 +16,24 @@ export default function AdminCopilotPage() {
     <>
       <AdminTopBar />
       <main className="mx-auto w-[min(860px,calc(100%-1.5rem))] py-8 md:w-[min(860px,calc(100%-4rem))] md:py-12">
-        <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">AI Business Copilot</p>
+        <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">Copiloto de negocio</p>
         <h1 className="mt-2 font-display text-4xl text-navy">Copiloto</h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-charcoal/75">
-          Misma capa de verdad que Telegram ({COPILOT_PROMPT_VERSION}). Los números son deterministas
-          (Wave F). El lenguaje natural vive en Telegram; aquí el brief ejecutivo sin depender de OpenAI.
+          Misma capa de verdad que Telegram ({COPILOT_PROMPT_VERSION}). Los números son deterministas.
+          Usa los accesos directos para ir al lugar correcto.
         </p>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Link href="/admin/solicitudes?ops=NEEDS_ATTENTION" className="min-h-11 rounded-full bg-navy px-4 py-2.5 text-[0.68rem] tracking-[0.12em] uppercase text-cream">
+            Ver pendientes ({counts.pendingRequests})
+          </Link>
+          <Link href="/admin/citas" className="min-h-11 rounded-full border border-navy/15 px-4 py-2.5 text-[0.68rem] tracking-[0.12em] uppercase text-navy">
+            Ver citas hoy ({counts.appointmentsToday})
+          </Link>
+          <Link href="/admin/clientes" className="min-h-11 rounded-full border border-navy/15 px-4 py-2.5 text-[0.68rem] tracking-[0.12em] uppercase text-navy">
+            Buscar cliente
+          </Link>
+        </div>
 
         <section className="mt-8 whitespace-pre-wrap rounded-2xl border border-navy/10 bg-white p-5 text-sm leading-relaxed text-charcoal/85">
           {brief}
@@ -41,25 +54,11 @@ export default function AdminCopilotPage() {
         </section>
 
         <section className="mt-10">
-          <h2 className="font-display text-2xl text-navy">Atención</h2>
-          <ul className="mt-4 space-y-2 text-sm text-charcoal/80">
-            {attention.length === 0 ? (
-              <li>Sin ítems prioritarios.</li>
-            ) : (
-              attention.map((item) => (
-                <li key={item.id}>
-                  <Link href={item.href} className="text-navy underline-offset-2 hover:underline">
-                    [{item.kind}] {item.title}
-                  </Link>
-                  {item.detail ? ` — ${item.detail}` : ""}
-                </li>
-              ))
-            )}
-          </ul>
+          <NeedsAttentionBlock items={attention} compact />
         </section>
 
         <p className="mt-10 text-sm text-mist">
-          Conversación natural: Telegram → /homestead → 🤖 Copiloto.
+          Conversación natural: Telegram → /homestead → Copiloto.
         </p>
       </main>
     </>

@@ -387,7 +387,7 @@ export async function executeConciergeTool(
     const existing = latestAppointment(leadId);
     if (existing && ["REQUESTED", "PROPOSED", "CONFIRMED", "RESCHEDULED"].includes(existing.status)) {
       const moved = rescheduleAppointment(existing.appointment_id, date, time);
-      if (!moved) return { result: { ok: false, reason: "reschedule_failed" }, state, leadId };
+      if (!moved.ok) return { result: { ok: false, reason: moved.reason || "reschedule_failed" }, state, leadId };
       state.appointmentId = existing.appointment_id;
       state.pendingSlot = { date, time, label: `${date} ${time}` };
       saveLeadPreference(leadId, date, time);
@@ -430,10 +430,10 @@ export async function executeConciergeTool(
     const current = latestAppointment(leadId);
     const id = state.appointmentId || current?.appointment_id;
     if (!id) return { result: { ok: false, reason: "no_appointment" }, state, leadId };
-    const moved = rescheduleAppointment(id, date, time);
-    if (!moved) return { result: { ok: false, reason: "reschedule_failed" }, state, leadId };
+    const moved = rescheduleAppointment(id, date, time, { actor: "concierge" });
+    if (!moved.ok) return { result: { ok: false, reason: moved.reason || "reschedule_failed" }, state, leadId };
     if (!isConciergeDryRun()) {
-      await notifyAppointmentEvent(id, "RESCHEDULED", { previousDate: current?.date, previousTime: current?.start_time });
+      await notifyAppointmentEvent(id, "RESCHEDULED", { previousDate: moved.previousDate, previousTime: moved.previousTime });
     }
     ctx.bookedThisTurn = true;
     return { result: { ok: true, appointmentId: id, date, time, status: moved.status }, state, leadId };

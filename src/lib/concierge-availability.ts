@@ -1,8 +1,8 @@
 import { listAppointments } from "@/lib/revenue-store";
-import { businessHoursRange, businessYmd } from "@/lib/appointment-time";
+import { businessHoursRange, businessYmd, DEFAULT_APPOINTMENT_SLOT_TIMES } from "@/lib/appointment-time";
 import { isBusinessClock, parseNaturalDateTime, todayInPanama } from "@/lib/concierge-datetime";
 
-export const DEFAULT_SLOT_TIMES = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00"] as const;
+export const DEFAULT_SLOT_TIMES = DEFAULT_APPOINTMENT_SLOT_TIMES;
 
 export type AvailabilitySlot = {
   date: string;

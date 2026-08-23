@@ -353,7 +353,7 @@ export function getAttentionItems(includeTest = false, limit = 40): AttentionIte
       kind: "HOT_LEAD",
       priority: 3,
       title: `${snap.rescue} oportunidades sin contacto`,
-      href: "/admin/solicitudes?status=NEW",
+      href: "/admin/solicitudes?ops=NEEDS_ATTENTION",
       detail: "Lead Rescue",
     });
   }

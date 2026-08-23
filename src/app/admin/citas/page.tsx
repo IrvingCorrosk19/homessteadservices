@@ -2,6 +2,7 @@ import { AdminTopBar } from "@/components/admin/AdminTopBar";
 import { AppointmentCalendar } from "@/components/admin/AppointmentCalendar";
 import { listAppointments } from "@/lib/revenue-store";
 import { businessYmd } from "@/lib/appointment-time";
+import { Suspense } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -33,13 +34,16 @@ export default async function CitasPage({
     email: item.email,
     notes: item.notes,
     originLabel: item.originLabel,
+    version: item.version,
   }));
 
   return (
     <>
       <AdminTopBar />
       <main className="mx-auto w-[min(1200px,calc(100%-1.5rem))] py-8 md:w-[min(1200px,calc(100%-4rem))] md:py-12">
-        <AppointmentCalendar appointments={appointments} selectedId={params.id} />
+        <Suspense fallback={<p className="text-sm text-mist">Cargando calendario…</p>}>
+          <AppointmentCalendar appointments={appointments} selectedId={params.id} />
+        </Suspense>
       </main>
     </>
   );

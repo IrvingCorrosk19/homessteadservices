@@ -26,6 +26,8 @@ export function isAppointmentStatus(value: string): value is AppointmentStatus {
   return APPOINTMENT_STATUSES.includes(value as AppointmentStatus);
 }
 
+export const DEFAULT_APPOINTMENT_SLOT_TIMES = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00"] as const;
+
 export function businessTimezone() {
   return (
     process.env.HOMESTEAD_TIMEZONE?.trim() ||

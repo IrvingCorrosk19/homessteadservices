@@ -16,6 +16,8 @@ import {
   isAppointmentStatus,
   reminderEligibleStatus,
 } from "@/lib/appointment-time";
+import { isOpenAppointmentSlot, validateRescheduleSlot } from "@/lib/appointment-slot";
+import { logInfo } from "@/lib/log";
 import { completeServiceJob, createServiceJob } from "@/lib/job-store";
 
 function nowIso() {
@@ -714,20 +716,121 @@ export function setAppointmentStatus(appointmentId: string, status: string) {
   return current.leadId;
 }
 
-export function rescheduleAppointment(appointmentId: string, date: string, startTime: string) {
+export type RescheduleFailureReason =
+  | "not_found"
+  | "invalid_status"
+  | "invalid_time"
+  | "past_slot"
+  | "slot_taken"
+  | "stale_version"
+  | "same_slot"
+  | "conflict";
+
+export type RescheduleResult =
+  | {
+      ok: true;
+      appointmentId: string;
+      leadId: string;
+      date: string;
+      startTime: string;
+      status: string;
+      version: number;
+      previousDate: string;
+      previousTime: string;
+    }
+  | { ok: false; reason: RescheduleFailureReason };
+
+export function rescheduleAppointment(
+  appointmentId: string,
+  date: string,
+  startTime: string,
+  options: { expectedVersion?: number; actor?: string } = {},
+): RescheduleResult {
   const current = getAppointment(appointmentId);
-  if (!current) return null;
-  if (current.status === "CANCELLED" || current.status === "COMPLETED") return null;
-  const nextStatus = current.status === "CONFIRMED" || current.status === "RESCHEDULED" ? "RESCHEDULED" : current.status;
-  getHomesteadDb()
-    .prepare(
-      `UPDATE revenue_appointments
-       SET date = ?, start_time = ?, status = ?, version = version + 1
-       WHERE appointment_id = ?`,
-    )
-    .run(date, startTime, nextStatus, appointmentId);
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.status === "CANCELLED" || current.status === "COMPLETED") {
+    return { ok: false, reason: "invalid_status" };
+  }
+  if (current.date === date && current.startTime === startTime) {
+    return { ok: false, reason: "same_slot" };
+  }
+  const slot = validateRescheduleSlot(date, startTime, appointmentId);
+  if (!slot.ok) return { ok: false, reason: slot.reason };
+
+  const nextStatus =
+    current.status === "CONFIRMED" || current.status === "RESCHEDULED" ? "RESCHEDULED" : current.status;
+  const database = getHomesteadDb();
+  const tx = database.transaction(() => {
+    if (options.expectedVersion !== undefined && current.version !== options.expectedVersion) {
+      return { ok: false as const, reason: "stale_version" as const };
+    }
+    const fresh = getAppointment(appointmentId);
+    if (!fresh || fresh.status === "CANCELLED" || fresh.status === "COMPLETED") {
+      return { ok: false as const, reason: "invalid_status" as const };
+    }
+    if (options.expectedVersion !== undefined && fresh.version !== options.expectedVersion) {
+      return { ok: false as const, reason: "stale_version" as const };
+    }
+    const stillFree = validateRescheduleSlot(date, startTime, appointmentId);
+    if (!stillFree.ok) return { ok: false as const, reason: stillFree.reason };
+
+    const whereVersion =
+      options.expectedVersion !== undefined ? " AND version = ?" : "";
+    const params =
+      options.expectedVersion !== undefined
+        ? [date, startTime, nextStatus, appointmentId, options.expectedVersion]
+        : [date, startTime, nextStatus, appointmentId];
+
+    const result = database
+      .prepare(
+        `UPDATE revenue_appointments
+         SET date = ?, start_time = ?, status = ?, version = version + 1
+         WHERE appointment_id = ?${whereVersion}
+           AND status NOT IN ('CANCELLED', 'COMPLETED')`,
+      )
+      .run(...params);
+
+    if (result.changes !== 1) {
+      const latest = getAppointment(appointmentId);
+      if (!latest || latest.status === "CANCELLED" || latest.status === "COMPLETED") {
+        return { ok: false as const, reason: "invalid_status" as const };
+      }
+      if (options.expectedVersion !== undefined && latest.version !== options.expectedVersion) {
+        return { ok: false as const, reason: "stale_version" as const };
+      }
+      if (!isOpenAppointmentSlot(date, startTime, appointmentId)) {
+        return { ok: false as const, reason: "slot_taken" as const };
+      }
+      return { ok: false as const, reason: "conflict" as const };
+    }
+    return { ok: true as const };
+  });
+
+  const txResult = tx();
+  if (!txResult.ok) return txResult;
+
   addRevenueEvent(current.leadId, "APPOINTMENT_RESCHEDULED");
-  return { ...current, date, startTime, status: nextStatus, version: current.version + 1, previousDate: current.date, previousTime: current.startTime };
+  logInfo("APPOINTMENT_RESCHEDULED", {
+    contentJobId: appointmentId,
+    stage: "reschedule",
+    actor: options.actor || "system",
+    oldDate: current.date,
+    oldTime: current.startTime,
+    newDate: date,
+    newTime: startTime,
+  });
+
+  return {
+    ok: true,
+    appointmentId,
+    leadId: current.leadId,
+    date,
+    startTime,
+    status: nextStatus,
+    version: current.version + 1,
+    previousDate: current.date,
+    previousTime: current.startTime,
+  };
 }
 
 export function releaseAppointmentNotice(noticeKey: string) {

@@ -8,6 +8,17 @@ type Params = { params: Promise<{ appointmentId: string }> };
 
 export const runtime = "nodejs";
 
+const RESCHEDULE_STATUS: Record<string, number> = {
+  not_found: 404,
+  invalid_status: 409,
+  invalid_time: 400,
+  past_slot: 400,
+  slot_taken: 409,
+  stale_version: 409,
+  same_slot: 400,
+  conflict: 409,
+};
+
 export async function GET(_request: Request, { params }: Params) {
   const { appointmentId } = await params;
   if (!APPOINTMENT_ID_PATTERN.test(appointmentId)) {
@@ -27,10 +38,11 @@ export async function PATCH(request: Request, { params }: Params) {
     action?: string;
     date?: string;
     time?: string;
+    version?: number;
   } | null;
   const action = String(body?.action || "");
   const current = getAppointment(appointmentId);
-  if (!current) return NextResponse.json({ ok: false }, { status: 404 });
+  if (!current) return NextResponse.json({ ok: false, reason: "not_found" }, { status: 404 });
 
   if (action === "confirm") {
     setAppointmentStatus(appointmentId, "CONFIRMED");
@@ -43,15 +55,23 @@ export async function PATCH(request: Request, { params }: Params) {
   } else if (action === "reschedule") {
     const date = String(body?.date || "");
     const time = String(body?.time || "");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
-      return NextResponse.json({ ok: false }, { status: 400 });
+    const expectedVersion =
+      body?.version !== undefined && Number.isFinite(Number(body.version)) ? Number(body.version) : undefined;
+    const moved = rescheduleAppointment(appointmentId, date, time, {
+      expectedVersion,
+      actor: "admin",
+    });
+    if (!moved.ok) {
+      const latest = getAppointment(appointmentId);
+      return NextResponse.json(
+        { ok: false, reason: moved.reason, appointment: latest || undefined },
+        { status: RESCHEDULE_STATUS[moved.reason] || 409 },
+      );
     }
-    const moved = rescheduleAppointment(appointmentId, date, time);
-    if (!moved) return NextResponse.json({ ok: false }, { status: 409 });
     if (moved.status === "RESCHEDULED" || current.status === "CONFIRMED") {
       await notifyAppointmentEvent(appointmentId, "RESCHEDULED", {
-        previousDate: current.date,
-        previousTime: current.startTime,
+        previousDate: moved.previousDate,
+        previousTime: moved.previousTime,
       });
     }
   } else {

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminTopBar } from "@/components/admin/AdminTopBar";
-import { getCustomer360 } from "@/lib/customer-360";
+import { Customer360OpsSummary } from "@/components/admin/Customer360OpsSummary";
+import { TimelineRequestStatus } from "@/components/admin/TimelineRequestStatus";
 import { formatPanamaDate, formatPanamaDateTime } from "@/lib/admin-format";
+import { getCustomer360 } from "@/lib/customer-360";
 import { customerWhatsAppUrl } from "@/lib/service-requests";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +33,8 @@ export default async function ClientePage({
           {customer.segment}
           {customer.isRepeat ? " · REPEAT" : ""} · desde {formatPanamaDate(customer.createdAt)}
         </p>
+
+        <Customer360OpsSummary customer={customer} whatsappUrl={wa} />
 
         <section className="mt-8 rounded-3xl bg-white p-6">
           <p className="text-navy">{customer.phone || "Sin teléfono"}</p>
@@ -118,10 +122,12 @@ export default async function ClientePage({
                   {item.status ? ` · ${item.status}` : ""}
                 </Link>
               ) : item.entityType === "HS" ? (
-                <Link href={`/admin/solicitudes/${item.entityId}`} className="mt-1 block text-navy">
-                  {item.entityId} · {item.label}
-                  {item.status ? ` · ${item.status}` : ""}
-                </Link>
+                <TimelineRequestStatus
+                  status={item.status}
+                  entityId={item.entityId}
+                  label={item.label}
+                  href={`/admin/solicitudes/${item.entityId}`}
+                />
               ) : (
                 <p className="mt-1 text-navy">
                   {item.entityId} · {item.label}

@@ -18,7 +18,7 @@ export default async function TrabajosPage() {
         </p>
         <ul className="mt-10 space-y-4">
           {jobs.length === 0 ? (
-            <li className="rounded-3xl bg-white p-6 text-mist">No hay trabajos registrados.</li>
+            <li className="rounded-3xl bg-white p-6 text-mist">No hay trabajos registrados todavía.</li>
           ) : (
             jobs.map((job) => (
               <li key={job.jobId}>

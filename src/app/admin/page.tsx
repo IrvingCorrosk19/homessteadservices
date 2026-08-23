@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AdminTopBar } from "@/components/admin/AdminTopBar";
+import { NeedsAttentionBlock } from "@/components/admin/NeedsAttentionBlock";
 import {
   getExecutiveSummary,
   resolveAnalyticsRange,
@@ -19,18 +20,37 @@ export default async function AdminDashboardPage({
     : "30d") as AnalyticsRangeKey;
   const range = resolveAnalyticsRange(key, params.from, params.to);
   const summary = getExecutiveSummary(range, false);
+  const attentionTop = summary.attention.slice(0, 6);
 
   return (
     <>
       <AdminTopBar />
       <main className="mx-auto w-[min(1120px,calc(100%-1.5rem))] py-8 md:w-[min(1120px,calc(100%-4rem))] md:py-12">
-        <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">Business Intelligence</p>
-        <h1 className="mt-2 font-display text-4xl text-navy">Homestead</h1>
+        <p className="text-[0.68rem] tracking-[0.14em] uppercase text-accent">Centro de operaciones</p>
+        <h1 className="mt-2 font-display text-4xl text-navy">Inicio operativo</h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-charcoal/75">
-          La verdad del negocio — no números inventados. Zona horaria {summary.timezone}. {range.label}.
+          Qué necesita tu atención ahora. Zona horaria {summary.timezone}. {range.label}.
         </p>
 
-        <form className="mt-6 flex flex-wrap gap-2" action="/admin">
+        <section className="mt-8">
+          <NeedsAttentionBlock items={attentionTop} />
+        </section>
+
+        <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[
+            { label: "Pendientes", value: summary.operational.pendingRequests, href: "/admin/solicitudes?ops=NEEDS_ATTENTION" },
+            { label: "Citas hoy", value: summary.operational.appointmentsToday, href: "/admin/citas" },
+            { label: "Recovery", value: summary.operational.serviceRecovery, href: "/admin/retencion" },
+            { label: "Rescue", value: summary.operational.rescue, href: "/admin/solicitudes?ops=NEEDS_ATTENTION" },
+          ].map((item) => (
+            <Link key={item.label} href={item.href} className="rounded-2xl border border-navy/8 bg-white px-4 py-4">
+              <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">{item.label}</p>
+              <p className="mt-2 font-display text-3xl text-navy">{item.value}</p>
+            </Link>
+          ))}
+        </section>
+
+        <form className="mt-8 flex flex-wrap gap-2" action="/admin">
           {[
             ["today", "Hoy"],
             ["7d", "7 días"],
@@ -41,7 +61,7 @@ export default async function AdminDashboardPage({
               key={value}
               name="range"
               value={value}
-              className={`rounded-full px-4 py-2 text-[0.68rem] tracking-[0.12em] uppercase ${
+              className={`min-h-11 rounded-full px-4 py-2 text-[0.68rem] tracking-[0.12em] uppercase ${
                 key === value ? "bg-navy text-cream" : "border border-navy/15 bg-white text-navy"
               }`}
             >
@@ -57,8 +77,6 @@ export default async function AdminDashboardPage({
             { label: "Citas HA", value: summary.funnel.ha, href: "/admin/citas" },
             { label: "Trabajos", value: summary.funnel.jobs, href: "/admin/trabajos" },
             { label: "Completados", value: summary.funnel.completed, href: "/admin/trabajos" },
-            { label: "Recovery abiertos", value: summary.operational.serviceRecovery, href: "/admin/retencion" },
-            { label: "Rescue", value: summary.operational.rescue, href: "/admin/solicitudes?status=NEW" },
             { label: "Repeat customers", value: summary.retention.repeatCustomers, href: "/admin/clientes?segment=REPEAT" },
           ].map((item) => (
             <Link key={item.label} href={item.href} className="rounded-2xl border border-navy/8 bg-white px-4 py-4">
@@ -81,23 +99,20 @@ export default async function AdminDashboardPage({
             <p className="mt-4 text-xs text-mist">Revenue monetario: NO DISPONIBLE (sin pagos confiables).</p>
           </div>
           <div>
-            <h2 className="font-display text-2xl text-navy">Needs attention</h2>
+            <h2 className="font-display text-2xl text-navy">Más atención</h2>
             <div className="mt-4 space-y-3">
-              {summary.attention.map((item) => (
+              {summary.attention.slice(6).map((item) => (
                 <Link
                   key={item.id}
                   href={item.href}
                   className="block rounded-2xl border border-navy/8 bg-white px-4 py-3"
                 >
-                  <p className="text-[0.65rem] tracking-[0.14em] uppercase text-mist">
-                    {item.kind} · P{item.priority}
-                  </p>
+                  <p className="text-[0.65rem] tracking-[0.14em] uppercase text-mist">{item.kind}</p>
                   <p className="mt-1 text-navy">{item.title}</p>
-                  {item.detail ? <p className="mt-1 text-sm text-mist">{item.detail}</p> : null}
                 </Link>
               ))}
-              {!summary.attention.length ? (
-                <p className="text-sm text-mist">Nada urgente en este momento.</p>
+              {summary.attention.length <= 6 ? (
+                <p className="text-sm text-mist">Todo lo prioritario está arriba.</p>
               ) : null}
             </div>
           </div>
@@ -136,27 +151,6 @@ export default async function AdminDashboardPage({
               </tbody>
             </table>
           </div>
-        </section>
-
-        <section className="mt-10">
-          <h2 className="font-display text-2xl text-navy">Fuentes (first touch)</h2>
-          <p className="mt-1 text-sm text-mist">
-            Wave D publishing: {summary.waveD}. Solo sources registrados en SQLite.
-          </p>
-          <ul className="mt-4 grid gap-2 md:grid-cols-2">
-            {summary.sources.firstTouch.map((row) => (
-              <li key={row.source} className="rounded-xl bg-white px-4 py-3 text-sm">
-                <span className="text-navy">{row.source}</span>
-                <span className="float-right text-mist">{row.n}</span>
-              </li>
-            ))}
-            {!summary.sources.firstTouch.length ? (
-              <li className="text-sm text-mist">Sin leads en el período.</li>
-            ) : null}
-          </ul>
-          <p className="mt-3 text-xs text-mist">
-            Retention-attributed leads (range): {summary.sources.retentionAttributedLeads}
-          </p>
         </section>
       </main>
     </>

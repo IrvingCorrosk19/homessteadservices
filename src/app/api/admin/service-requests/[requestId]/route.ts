@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { isRequestStatus, PUBLIC_ID_PATTERN } from "@/lib/admin-format";
 import { logInfo } from "@/lib/log";
-import { updateRequestStatus } from "@/lib/service-requests";
+import { markEntityContacted } from "@/lib/ops-store";
+import { getRequestByPublicId, updateRequestStatus } from "@/lib/service-requests";
 
 type Params = { params: Promise<{ requestId: string }> };
 
@@ -15,6 +16,16 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!isRequestStatus(status)) {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
+
+  if (status === "CONTACTED") {
+    const result = markEntityContacted(requestId, "admin");
+    if (!result.ok) return NextResponse.json({ ok: false }, { status: 404 });
+    const updated = getRequestByPublicId(requestId);
+    if (!updated) return NextResponse.json({ ok: false }, { status: 404 });
+    logInfo("ServiceRequestStatusChanged", { requestId, status, via: "markEntityContacted" });
+    return NextResponse.json({ ok: true, status: updated.status, updatedAt: updated.updatedAt });
+  }
+
   const updated = updateRequestStatus(requestId, status);
   if (!updated) return NextResponse.json({ ok: false }, { status: 404 });
   logInfo("ServiceRequestStatusChanged", { requestId, status });

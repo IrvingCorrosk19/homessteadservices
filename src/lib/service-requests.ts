@@ -1008,6 +1008,8 @@ type DbRequestRow = {
   message: string;
   photos_json: string;
   facts_json?: string;
+  sla_first_alerted_at?: string | null;
+  sla_escalated_at?: string | null;
 };
 
 function mapRequest(row: DbRequestRow): SavedServiceRequest {
@@ -1062,6 +1064,7 @@ function insertMessage(
 }
 
 const REQUEST_SELECT = `id, public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, COALESCE(facts_json,'') as facts_json`;
+const REQUEST_OPS_SELECT = `${REQUEST_SELECT}, sla_first_alerted_at, sla_escalated_at`;
 
 export function getRequestByPublicId(publicId: string) {
   if (!PUBLIC_ID_PATTERN.test(publicId)) return null;
@@ -1142,6 +1145,51 @@ export function listServiceRequests(filters: {
   return rows.map(mapRequest);
 }
 
+export function listServiceRequestsForOps(filters: {
+  q?: string;
+  status?: RequestStatus | "ALL";
+  service?: string;
+  from?: string;
+  to?: string;
+}) {
+  const clauses: string[] = [];
+  const params: Array<string> = [];
+  if (filters.status && filters.status !== "ALL") {
+    clauses.push("status = ?");
+    params.push(filters.status);
+  }
+  if (filters.service) {
+    clauses.push("service = ?");
+    params.push(filters.service);
+  }
+  if (filters.from) {
+    clauses.push("created_at >= ?");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    clauses.push("created_at <= ?");
+    params.push(filters.to);
+  }
+  if (filters.q?.trim()) {
+    const query = `%${filters.q.trim().toLowerCase()}%`;
+    clauses.push(
+      "(lower(public_id) LIKE ? OR lower(name) LIKE ? OR lower(email) LIKE ? OR phone LIKE ?)",
+    );
+    params.push(query, query, query, `%${filters.q.trim()}%`);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare(
+      `SELECT ${REQUEST_OPS_SELECT} FROM service_requests ${where} ORDER BY created_at DESC, id DESC`,
+    )
+    .all(...params) as DbRequestRow[];
+  return rows.map((row) => ({
+    ...mapRequest(row),
+    slaFirstAlertedAt: row.sla_first_alerted_at || null,
+    slaEscalatedAt: row.sla_escalated_at || null,
+  }));
+}
+
 export function countRequestsByStatus() {
   const rows = getDb()
     .prepare("SELECT status, COUNT(*) as total FROM service_requests GROUP BY status")
@@ -1157,6 +1205,16 @@ export function countRequestsByStatus() {
     if (isRequestStatus(row.status)) counts[row.status] = row.total;
   }
   return counts;
+}
+
+export function getRequestSlaMeta(publicId: string) {
+  const row = getDb()
+    .prepare("SELECT sla_first_alerted_at, sla_escalated_at FROM service_requests WHERE public_id = ?")
+    .get(publicId) as { sla_first_alerted_at: string | null; sla_escalated_at: string | null } | undefined;
+  return {
+    slaFirstAlertedAt: row?.sla_first_alerted_at || null,
+    slaEscalatedAt: row?.sla_escalated_at || null,
+  };
 }
 
 export function updateRequestStatus(publicId: string, status: RequestStatus) {
