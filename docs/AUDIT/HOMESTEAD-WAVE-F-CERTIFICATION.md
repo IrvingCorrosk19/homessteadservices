@@ -134,8 +134,8 @@ P3: Multi-Operator dual live still pending; Wave D N/A; manual merge deferred; o
 
 GIT
 
-FINAL_SHA: (stamp after push)
-COMMITS: Wave F Customer 360 + BI
+FINAL_SHA: ad0065ab6f61e3600216ae03231b25b7f2fb606f
+COMMITS: c192af4 (Wave F) + cc5f839/ad0065a (canary)
 PUSH: YES
 LOCAL_EQUALS_ORIGIN: YES
 
