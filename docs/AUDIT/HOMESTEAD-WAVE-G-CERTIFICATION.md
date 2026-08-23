@@ -242,10 +242,10 @@ P3: 0
 
 GIT
 
-FINAL_SHA: (stamp after push)
-COMMITS: feat(copilot) Wave G + cert
+FINAL_SHA: ddbc3aaed6e9009d5af962572fc994286206bd28
+COMMITS: 9c24157 feat(copilot); ddbc3aa docs(audit) cert
 PUSH: origin main
-LOCAL_EQUALS_ORIGIN: YES (after push)
+LOCAL_EQUALS_ORIGIN: YES
 
 FINAL VERDICT:
 
@@ -257,3 +257,4 @@ WAVE G AI BUSINESS COPILOT CERTIFIED
 - After Wave G: **STOP DEVELOPMENT**. No Wave H.
 - Next exclusive step: Homestead V1.0 Master Certification.
 - Natural-language booking/publish intentionally out of V1 Copilot write surface.
+- Deployed VPS verify: homestead.lat 200, n8n healthz 200, SQLite integrity ok, canary WAVE_G_CANARY_OK.
