@@ -242,8 +242,8 @@ P3: 0
 
 GIT
 
-FINAL_SHA: ddbc3aaed6e9009d5af962572fc994286206bd28
-COMMITS: 9c24157 feat(copilot); ddbc3aa docs(audit) cert
+FINAL_SHA: 7a4373a (cert stamp; feature 9c24157; cert body ddbc3aa)
+COMMITS: 9c24157 feat(copilot); ddbc3aa + 7a4373a docs(audit) cert
 PUSH: origin main
 LOCAL_EQUALS_ORIGIN: YES
 
