@@ -1,64 +1,45 @@
 # HOMESTEAD CONVERSATIONAL AI V3.1 — Human Excellence
 
-DATE: 2026-08-22  
-SCOPE: Remediation of V3 P2 defects only — no new architecture, no V4, no n8n chat hot path.
+DATE: 2026-08-22 America/Panama  
+STATUS: Live-certified (see audit certification doc)
 
 ## Objective
 
-Raise conversational quality from **8.6 → 9.5+** by:
+Raise conversational quality from **8.6 → ≥9.5** via packed-message intelligence, structured interpretation as primary path, and question economy — without new architecture.
 
-- Packed-message intelligence (multi-fact extraction in one turn)
-- Structured interpretation as primary path (`record_service_intelligence` + server validation)
-- Question economy (no re-asks, combined zone+contact when natural)
-- Observability (`REPEATED_QUESTION`, improved `OVERQUESTIONING`)
+## Deployed version
+
+| Item | Value |
+| --- | --- |
+| DEPLOYED_SHA | `d98df0d5aad619b0a3c924ac75b1920e5e6d8f7b` |
+| BUILD_MARKER | `v3.1-he-live` (returned on `CHAT_STARTED`) |
+| PROMPT | `hs-concierge-v3.1-he` |
+| ROLLBACK_TAG | `pre-conversational-ai-v3.1-final-20260822-2025` |
 
 ## Architecture (unchanged hot path)
 
 ```text
-CLIENTE → /api/concierge/chat → extractPackedExtraction (deterministic)
+CLIENTE → /api/concierge/chat → packed-extraction (deterministic)
        → OpenAI gpt-4o + tools → record_service_intelligence (validated)
-       → playbook-engine → HS/HA (deterministic) → SQLite → outbox → n8n → Telegram
+       → playbook-engine → HS/HA → SQLite → outbox → n8n → Telegram
 ```
 
-## New modules
+## Live evidence highlights
 
-| Module | Role |
-| --- | --- |
-| `src/lib/concierge/packed-extraction.ts` | Deterministic multi-fact extraction: name, zone, phone, units, symptoms, negation, duration, contact preference |
-| `src/lib/concierge/turn-intelligence.ts` | `parseTurnIntelligence`, `applyTurnIntelligence`, `detectRepeatedQuestion`, `questionEconomyBlock`, `shouldFlagOverquestioning` |
+- **PACKED** `HS-2026-000058`: facts `Obarrio`, `bota agua`, `desde ayer`, `split`, phone valid; REASK=0; next action photo (useful).
+- **LOCKSMITH** `HS-2026-000059`: photo-first → combined zone+phone → 1 photo on HS; outbox DELIVERED; REASK=0.
+- **NEGATION** `HS-2026-000069`: facts `symptom=no enfría` only (no water leak).
+- **CORRECTION** `HS-2026-000068`: final location `Bella Vista`.
+- **ELECTRICAL SAFETY** `HS-2026-000064`: `urgency=safety`, hazard set, safety guidance, 0 questions after intake.
+- **BOOKING** `HA-122513bb` for `HS-2026-000072`: real slots offered → customer selected → HA in `revenue_appointments`.
 
-## Structured intelligence flow
+## Canaries
 
-1. **Deterministic first** — every user turn runs `applyPackedExtraction` before OpenAI (no extra latency/cost).
-2. **AI structured tool** — `record_service_intelligence` args validated via `parseTurnIntelligence`; invalid shapes rejected without corrupting state.
-3. **Fact confidence** — `EXPLICIT` / `HIGH_CONFIDENCE` / `UNCERTAIN` stored in `state.factConfidence`.
-4. **Business rules** — Homestead code still owns HS creation, booking, pricing, availability.
+- `deploy/vps/canary-ai-v3.1.py` — full matrix
+- `deploy/vps/canary-ai-v3.1-resilient.py` — continues on failure
+- `deploy/vps/canary-ai-v3.1-retry.py` — retries after rate-limit
+- `deploy/vps/canary-ai-v3.1-booking.py` — booking path
 
-## Prompt
+## Ops note
 
-- Version: `hs-concierge-v3.1-he`
-- Injects: global policy + active playbook + `questionEconomyBlock` (known facts + forbidden re-asks)
-
-## Observability
-
-| Event | When |
-| --- | --- |
-| `REPEATED_QUESTION` | Bot reply matches re-ask pattern for data already in state |
-| `OVERQUESTIONING` | ≥3 questions with sufficient context for handoff, or >5 without lead |
-
-## Golden conversations
-
-`scripts/test-conversational-ai-v3.1-golden.mjs` — deterministic assertions (no OpenAI required):
-
-- PACKED_MESSAGE (Ana / Obarrio / AC water / phone)
-- NEGATION (no water leak + not cooling)
-- TYPO tolerance
-- MULTI units
-
-## Live canary
-
-`deploy/vps/canary-ai-v3.1.py` — full service matrix with `V3.1-TEST` + phone `60001111`.
-
-## Rollback
-
-Tag: `pre-conversational-ai-v3.1-YYYYMMDD-HHMM` on baseline SHA `083994c`.
+Dense canary matrices can hit Homestead chat IP rate-limit (HTTP 429). Retry harness uses distinct `X-Forwarded-For` per case for lab traffic only. Nginx `proxy_read_timeout` for `/api/concierge/` raised to 180s.

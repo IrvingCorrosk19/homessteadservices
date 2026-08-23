@@ -78,7 +78,7 @@ class Chat:
         if self.cookie:
             req.add_header("Cookie", self.cookie)
         t0 = time.time()
-        with urllib.request.urlopen(req, timeout=90) as res:
+        with urllib.request.urlopen(req, timeout=180) as res:
             set_cookie = res.headers.get("Set-Cookie", "")
             if "hs_cid=" in set_cookie:
                 self.cookie = set_cookie.split(";")[0]
@@ -135,7 +135,7 @@ def hs_row(lead: str | None):
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     row = con.execute(
-        "SELECT public_id, service, message, photos_json, facts_json, is_test, phone FROM service_requests WHERE public_id=?",
+        "SELECT public_id, service, message, photos_json, facts_json, phone FROM service_requests WHERE public_id=?",
         (lead,),
     ).fetchone()
     outbox = []
@@ -158,7 +158,6 @@ def hs_row(lead: str | None):
     return {
         "public_id": row["public_id"],
         "service": row["service"],
-        "is_test": row["is_test"] if "is_test" in row.keys() else None,
         "photo_count": len(photos) if isinstance(photos, list) else 0,
         "facts_json": (row["facts_json"] or "")[:400],
         "outbox": outbox,
