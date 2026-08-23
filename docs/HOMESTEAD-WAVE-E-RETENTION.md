@@ -31,4 +31,6 @@ Suppression / DNC respected
 No fake reviews  
 No invented Meta / Wave D publish  
 
-See `docs/AUDIT/WAVE_E_GAP_ANALYSIS.md` and certification doc.
+See `docs/AUDIT/WAVE_E_GAP_ANALYSIS.md` and `docs/AUDIT/HOMESTEAD-WAVE-E-CERTIFICATION.md`.
+
+Live canary: `deploy/vps/canary-wave-e.py` (TEST rows only).

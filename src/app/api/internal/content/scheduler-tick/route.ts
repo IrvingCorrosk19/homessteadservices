@@ -51,7 +51,15 @@ export async function POST(request: Request) {
         cause: error instanceof Error ? error.name : "unknown",
       });
     }
-    const result = await runContentScheduler();
+    let result: Record<string, unknown> = { ok: true, content: "skipped" };
+    try {
+      result = (await runContentScheduler()) as Record<string, unknown>;
+    } catch (error) {
+      logError("ContentSchedulerFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+      });
+      result = { ok: true, content: "failed_isolated" };
+    }
     let reminders: { sent: number; checked?: number; minutes?: number } = { sent: 0 };
     try {
       reminders = await runHotLeadReminders();
@@ -68,9 +76,9 @@ export async function POST(request: Request) {
         cause: error instanceof Error ? error.name : "unknown",
       });
     }
-    return NextResponse.json({ ...result, reminders, appointments });
+    return NextResponse.json({ ...result, reminders, appointments, retention: true });
   } catch (error) {
-    logError("ContentSchedulerFailed", {
+    logError("SchedulerTickFailed", {
       cause: error instanceof Error ? error.name : "unknown",
     });
     return NextResponse.json({ ok: false }, { status: 500 });
