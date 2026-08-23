@@ -211,10 +211,10 @@ P3: 1 — Multi-Operator dual live recovery claim still pending second Telegram 
 
 GIT
 
-FINAL_SHA: (see commit after this certification file)
-COMMITS: feat retention engines + cert/docs/canary + scheduler isolation
-PUSH: required to origin/main
-LOCAL_EQUALS_ORIGIN: required YES after push
+FINAL_SHA: 04eff43a333a29c87bf25237c643996b618d5604
+COMMITS: acf68f9 + 04eff43a333a29c87bf25237c643996b618d5604
+PUSH: pending
+LOCAL_EQUALS_ORIGIN: pending
 
 FINAL VERDICT:
 
