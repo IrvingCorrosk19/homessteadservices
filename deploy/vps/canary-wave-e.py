@@ -144,7 +144,7 @@ def main():
     report("ADMIN_RETENCION", get_code("/admin/retencion") in (200, 307, 302))
     report("INTEGRITY", sqlite3.connect(DB).execute("PRAGMA integrity_check").fetchone()[0] == "ok")
 
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB, timeout=30)
     conn.row_factory = sqlite3.Row
     migrate(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(revenue_customers)")}
@@ -415,6 +415,11 @@ def main():
     report("CLASSIFY_POSITIVE", classify("Todo quedó excelente, gracias.") == "POSITIVE")
     report("CLASSIFY_NEUTRAL", classify("Más o menos, todavía quiero probarlo.") == "NEUTRAL")
 
+    # Release host DB lock before app tick (same SQLite file as container).
+    conn.commit()
+    conn.close()
+    conn = None
+
     if secret:
         hdrs = {
             "Content-Type": "application/json",
@@ -422,11 +427,17 @@ def main():
             "X-Homestead-Webhook-Secret": secret,
         }
         code, body = post("/api/internal/content/scheduler-tick", {}, hdrs)
-        report("SCHEDULER_TICK", code == 200, f"http={code}")
+        report(
+            "SCHEDULER_TICK",
+            code == 200 and (body.get("ok") is True or body.get("retention") is True or "reminders" in body),
+            f"http={code} content={body.get('content') or body.get('skipped')}",
+        )
     else:
         report("SCHEDULER_TICK", False, "missing_secret")
 
     # Cleanup TEST canary rows
+    conn = sqlite3.connect(DB, timeout=30)
+    conn.row_factory = sqlite3.Row
     for jid in created_jobs:
         conn.execute("DELETE FROM job_feedback_tokens WHERE job_id=?", (jid,))
         conn.execute("DELETE FROM automation_outbox WHERE correlation_id=?", (jid,))
