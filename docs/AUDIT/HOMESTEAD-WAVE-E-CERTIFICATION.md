@@ -211,8 +211,8 @@ P3: 1 — Multi-Operator dual live recovery claim still pending second Telegram 
 
 GIT
 
-FINAL_SHA: 6a10755f4090d5eef4216dff10b8cf320df0733b
-COMMITS: acf68f9 (engines) + 04eff43 (cert + scheduler isolation) + 6a10755 (SHA stamp)
+FINAL_SHA: a1b8073c936fce78b81f01930ca5a1b95d4855d8
+COMMITS: acf68f9 (engines) + 04eff43 (cert + scheduler isolation) + f74d58d (push stamp) + a1b8073 (canary lock)
 PUSH: YES
 LOCAL_EQUALS_ORIGIN: YES
 
