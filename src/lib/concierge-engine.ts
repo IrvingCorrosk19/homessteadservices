@@ -34,6 +34,7 @@ import {
   redactForModel,
 } from "@/lib/concierge/playbook-engine";
 import { copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
+import { formatConciergePhotoMessage } from "@/lib/concierge-photo-message";
 import { applyPackedExtraction } from "@/lib/concierge/packed-extraction";
 import {
   detectRepeatedQuestion,
@@ -138,6 +139,7 @@ export async function conciergeTurn(input: {
   conversationId: string;
   message: string;
   utm?: Record<string, string>;
+  skipUserMessage?: boolean;
 }) {
   const conversation = getConversation(input.conversationId);
   if (!conversation) return { ok: false as const, error: "session" };
@@ -146,7 +148,9 @@ export async function conciergeTurn(input: {
   }
   try {
     const text = input.message.trim().slice(0, 2000);
-    addMessage(input.conversationId, "user", text);
+    if (!input.skipUserMessage) {
+      addMessage(input.conversationId, "user", text);
+    }
     addEvent(input.conversationId, "CHAT_MESSAGE");
     let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
     touchConversation(input.conversationId, { state });
@@ -432,7 +436,12 @@ export async function conciergeTurn(input: {
   }
 }
 
-export function attachConciergePhoto(conversationId: string, bytes: Buffer, sniffed: SniffedImage) {
+export function attachConciergePhoto(
+  conversationId: string,
+  bytes: Buffer,
+  sniffed: SniffedImage,
+  caption = "",
+) {
   const conversation = getConversation(conversationId);
   if (!conversation) return null;
   if (photoCount(conversationId) >= 4) return { error: "limit" as const };
@@ -440,7 +449,7 @@ export function attachConciergePhoto(conversationId: string, bytes: Buffer, snif
   const state = { ...conversation.state, photoCount: conversation.state.photoCount + 1 };
   touchConversation(conversationId, { state });
   addEvent(conversationId, "PHOTO_ATTACHED");
-  addMessage(conversationId, "user", `[Foto adjunta: ${stored}]`);
+  addMessage(conversationId, "user", formatConciergePhotoMessage(stored, caption));
   if (conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-")) {
     copyConciergePhotosToRequest(conversationId, conversation.leadPublicId);
   }

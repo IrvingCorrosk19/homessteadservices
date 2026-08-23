@@ -1,11 +1,24 @@
 import { createHmac } from "crypto";
 
 export const MAX_PHOTOS = 6;
+/** Max bytes after server normalization (stored file). */
 export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+/** Max upload before normalization (camera originals). */
+export const MAX_PHOTO_INPUT_BYTES = 15 * 1024 * 1024;
+/** Anti decompression-bomb guard (longest edge). */
+export const MAX_PHOTO_DIMENSION = 8000;
 export const PHOTO_URL_TTL_SECONDS = 20 * 60;
 export const STORED_PHOTO_PATTERN = /^photo-0[1-6]\.(jpg|png|webp)$/;
+export const CONCIERGE_STORED_PHOTO_PATTERN = /^photo-\d+\.(jpg|jpeg|png|webp)$/;
 
-const ALLOWED_DECLARED = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+const ALLOWED_DECLARED = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
 
 export type SniffedImage = {
   mime: "image/jpeg" | "image/png" | "image/webp";

@@ -14,6 +14,7 @@ import {
   touchConversation,
 } from "@/lib/concierge-store";
 import { areOfferedSlotsActive, buildSessionSnapshot, clearActiveTransactionState } from "@/lib/concierge-transaction";
+import { parseConciergePhotoMessage } from "@/lib/concierge-photo-message";
 import { logError } from "@/lib/log";
 import { CONCIERGE_BUILD_MARKER, CONCIERGE_PROMPT_VERSION } from "@/lib/concierge-knowledge";
 
@@ -54,10 +55,17 @@ export async function GET(request: Request) {
   if (!conversationId || !getConversation(conversationId)) {
     return NextResponse.json({ ok: true, messages: [] });
   }
-  const messages = recentMessages(conversationId, 30).map((item) => ({
-    role: item.role,
-    body: item.body.startsWith("[Foto") ? "Envié una foto." : item.body,
-  }));
+  const messages = recentMessages(conversationId, 30).map((item) => {
+    const photo = parseConciergePhotoMessage(item.body);
+    if (photo) {
+      return {
+        role: item.role,
+        body: photo.caption,
+        photoId: photo.photoId,
+      };
+    }
+    return { role: item.role, body: item.body };
+  });
   const conversation = getConversation(conversationId);
   let state = conversation?.state;
   if (conversation && state) {
