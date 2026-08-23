@@ -11,7 +11,6 @@ import {
   markRescueAlerted,
   markSlaAlerted,
   panamaToday,
-  todayMetrics,
 } from "@/lib/ops-store";
 import { telegramServiceLines, countPhotosJson } from "@/lib/concierge/playbook-engine";
 
@@ -198,29 +197,34 @@ export function enqueueDailyBrief(force = false) {
   const key = `daily.brief:${ymd}`;
   if (getOutboxByIdempotency(key)) return 0;
   const snap = commandCenterSummary(false);
-  const metrics = todayMetrics(false);
+  const { getBusinessBriefCounts } = require("@/lib/analytics-service") as typeof import("@/lib/analytics-service");
+  const counts = getBusinessBriefCounts(false);
   enqueueOpsAlert({
     eventType: "daily.brief.ready",
     correlationId: ymd,
     idempotencyKey: key,
     priority: "INFO",
     text: [
-      "☀️ HOMESTEAD — BUENOS DÍAS",
+      "🏠 HOMESTEAD HOY",
       "",
-      "Hoy tienes:",
-      "",
-      `📅 ${snap.appointmentsToday} citas`,
-      `🔥 ${snap.rescue} oportunidades por atender`,
-      `📥 ${snap.pendingRequests} solicitudes nuevas pendientes`,
-      `🔧 ${snap.jobsActive} trabajos`,
-      snap.serviceRecovery ? `🚨 ${snap.serviceRecovery} cliente requiere seguimiento` : "",
-      `📸 ${snap.contentPending + snap.contentCandidates} contenidos pendientes`,
-      "",
-      `Solicitudes hoy: ${metrics.requests}`,
+      `Solicitudes nuevas: ${counts.requestsToday}`,
+      `Citas hoy: ${counts.appointmentsToday}`,
+      `Pendientes: ${counts.pendingRequests}`,
+      `Recovery abiertos: ${counts.recoveryOpen}`,
+      counts.recoveryOpen ? `🚨 ${counts.recoveryOpen} cliente requiere seguimiento` : "",
+      `Contenido programado: ${counts.contentPending}`,
+      snap.rescue ? `Oportunidades: ${snap.rescue}` : "",
     ]
       .filter((line) => line !== "")
       .join("\n"),
-    keyboard: [[{ text: "🏠 Abrir Command Center", callback_data: "cc:h" }]],
+    keyboard: [
+      [
+        { text: "⚠️ Ver pendientes", callback_data: "cc:r:0" },
+        { text: "📅 Agenda", callback_data: "cc:a:0" },
+      ],
+      [{ text: "👥 Clientes", callback_data: "cc:cu" }],
+      [{ text: "🏠 Abrir Command Center", callback_data: "cc:h" }],
+    ],
   });
   setEngineState("last_daily_brief_at", new Date().toISOString());
   return 1;

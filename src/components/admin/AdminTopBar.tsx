@@ -6,17 +6,19 @@ import { usePathname, useRouter } from "next/navigation";
 export function AdminTopBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const title = pathname.startsWith("/admin/citas")
-    ? "Citas"
-    : pathname.startsWith("/admin/trabajos")
-      ? "Trabajos"
-      : pathname.startsWith("/admin/clientes")
-        ? "Cliente"
-        : pathname.startsWith("/admin/retencion")
-          ? "Retención"
-          : pathname.startsWith("/admin/configuracion")
-            ? "Configuración"
-            : "Solicitudes";
+  const title = pathname === "/admin" || pathname.startsWith("/admin?")
+    ? "Dashboard"
+    : pathname.startsWith("/admin/citas")
+      ? "Citas"
+      : pathname.startsWith("/admin/trabajos")
+        ? "Trabajos"
+        : pathname.startsWith("/admin/clientes")
+          ? "Clientes"
+          : pathname.startsWith("/admin/retencion")
+            ? "Retención"
+            : pathname.startsWith("/admin/configuracion")
+              ? "Configuración"
+              : "Solicitudes";
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
@@ -33,6 +35,9 @@ export function AdminTopBar() {
           </p>
           <p className="mt-1 font-display text-2xl">{title}</p>
           <nav className="mt-3 flex flex-wrap gap-4 text-[0.72rem] tracking-[0.14em] uppercase" aria-label="Administración">
+            <Link className={pathname === "/admin" ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin">
+              Dashboard
+            </Link>
             <Link className={pathname.startsWith("/admin/solicitudes") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/solicitudes">
               Solicitudes
             </Link>
@@ -41,6 +46,9 @@ export function AdminTopBar() {
             </Link>
             <Link className={pathname.startsWith("/admin/trabajos") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/trabajos">
               Trabajos
+            </Link>
+            <Link className={pathname.startsWith("/admin/clientes") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/clientes">
+              Clientes
             </Link>
             <Link className={pathname.startsWith("/admin/retencion") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/retencion">
               Retención

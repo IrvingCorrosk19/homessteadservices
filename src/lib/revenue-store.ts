@@ -71,16 +71,24 @@ export function upsertCustomer(input: {
   if (existing) {
     database
       .prepare(
-        "UPDATE revenue_customers SET name = ?, email = ?, general_location = CASE WHEN general_location = '' THEN ? ELSE general_location END, source_last = ? WHERE id = ?",
+        "UPDATE revenue_customers SET name = ?, email = ?, general_location = CASE WHEN general_location = '' THEN ? ELSE general_location END, source_last = ?, normalized_phone = CASE WHEN COALESCE(normalized_phone,'') = '' THEN ? ELSE normalized_phone END, email_normalized = CASE WHEN COALESCE(email_normalized,'') = '' THEN ? ELSE email_normalized END WHERE id = ?",
       )
-      .run(input.name, input.email, input.location || "", input.source, existing.id);
+      .run(
+        input.name,
+        input.email,
+        input.location || "",
+        input.source,
+        digits || "",
+        (input.email || "").trim().toLowerCase(),
+        existing.id,
+      );
     return existing.id;
   }
   const info = database
     .prepare(
       `INSERT INTO revenue_customers
-        (created_at, name, phone, email, general_location, preferred_channel, source_first, source_last, do_not_contact, is_test)
-       VALUES (?, ?, ?, ?, ?, '', ?, ?, 0, ?)`,
+        (created_at, name, phone, email, general_location, preferred_channel, source_first, source_last, do_not_contact, is_test, normalized_phone, email_normalized)
+       VALUES (?, ?, ?, ?, ?, '', ?, ?, 0, ?, ?, ?)`,
     )
     .run(
       nowIso(),
@@ -91,6 +99,8 @@ export function upsertCustomer(input: {
       input.source,
       input.source,
       input.isTest ? 1 : 0,
+      digits || "",
+      (input.email || "").trim().toLowerCase(),
     );
   return Number(info.lastInsertRowid);
 }

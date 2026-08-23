@@ -517,6 +517,12 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateWaveC(database);
   migrateTelegramOperatorsTable(database);
   migrateRetentionWaveETable(database);
+  migrateCustomerIdentityWaveFTable(database);
+}
+
+function migrateCustomerIdentityWaveFTable(database: Database.Database) {
+  const { migrateCustomerIdentityWaveF } = require("@/lib/analytics-service") as typeof import("@/lib/analytics-service");
+  migrateCustomerIdentityWaveF(database);
 }
 
 function migrateRetentionWaveETable(database: Database.Database) {

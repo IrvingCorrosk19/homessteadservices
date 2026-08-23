@@ -605,8 +605,26 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return { ok: true };
   }
   if (text === "/clientes" || text.startsWith("/clientes@")) {
-    const { revenueSnapshot } = await import("@/lib/revenue-store");
-    await sendTelegramMessage({ chatId, text: `Leads en motor: ${revenueSnapshot().leads}` });
+    const { customerSearchPrompt } = await import("@/lib/ops-telegram");
+    const { hasTelegramPermission } = await import("@/lib/telegram-operators");
+    if (!hasTelegramPermission(operator, "customers.read")) {
+      await sendTelegramMessage({ chatId, text: "No autorizado para clientes." });
+      return { ok: true };
+    }
+    const view = customerSearchPrompt();
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
+    return { ok: true };
+  }
+  if (text.startsWith("/cliente ") || text.startsWith("/cliente@")) {
+    const { hasTelegramPermission } = await import("@/lib/telegram-operators");
+    if (!hasTelegramPermission(operator, "customers.read")) {
+      await sendTelegramMessage({ chatId, text: "No autorizado para clientes." });
+      return { ok: true };
+    }
+    const query = text.replace(/^\/cliente(@\S+)?\s+/i, "").trim();
+    const { customerSearchResults } = await import("@/lib/ops-telegram");
+    const view = customerSearchResults(query || "");
+    await sendTelegramMessage({ chatId, text: view.text, keyboard: view.keyboard });
     return { ok: true };
   }
   if (text === "/reseñas" || text.startsWith("/reseñas@") || text === "/resenas" || text.startsWith("/resenas@")) {

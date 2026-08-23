@@ -65,6 +65,7 @@ function homeKeyboard(includeTest: boolean, canManageOperators = false): Telegra
       { text: "📊 Resumen", callback_data: `cc:s${flag}` },
       { text: "❤️ Clientes", callback_data: "cc:ret" },
     ],
+    [{ text: "🔎 Buscar cliente", callback_data: "cc:cu" }],
     [
       {
         text: includeTest ? "Ocultar pruebas" : "Ver pruebas",
@@ -353,25 +354,85 @@ export function marketingView() {
 }
 
 export function summaryView(includeTest = false) {
-  const metrics = todayMetrics(includeTest);
-  const snap = commandCenterSummary(includeTest);
-  const conversion =
-    metrics.conversionPct === null ? "" : `\nSolicitud → cita: ${metrics.conversionPct}%`;
+  const { getBusinessBriefCounts } = require("@/lib/analytics-service") as typeof import("@/lib/analytics-service");
+  const counts = getBusinessBriefCounts(includeTest);
   return {
     text: [
-      "📊 HOMESTEAD — HOY",
+      "🏠 HOMESTEAD HOY",
       "",
-      `📥 Solicitudes: ${metrics.requests}`,
-      `🔥 Pendientes: ${metrics.pending}`,
-      `📞 Atendidas: ${metrics.contacted}`,
-      `📅 Citas creadas: ${metrics.appointmentsCreated}`,
-      `🔧 Trabajos activos: ${snap.jobsActive}`,
-      snap.serviceRecovery ? `🚨 Recuperación: ${snap.serviceRecovery}` : "",
-      conversion,
+      `Solicitudes nuevas (hoy): ${counts.requestsToday}`,
+      `Citas hoy: ${counts.appointmentsToday}`,
+      `Pendientes: ${counts.pendingRequests}`,
+      `Oportunidades: ${counts.rescue}`,
+      `Recovery abiertos: ${counts.recoveryOpen}`,
+      `Trabajos activos: ${counts.jobsActive}`,
+      `Contenido programado/pendiente: ${counts.contentPending}`,
+    ].join("\n"),
+    keyboard: [
+      [
+        { text: "⚠️ Ver pendientes", callback_data: `cc:r:0${includeTest ? ":1" : ""}` },
+        { text: "📅 Agenda", callback_data: `cc:a:0${includeTest ? ":1" : ""}` },
+      ],
+      [{ text: "👥 Clientes", callback_data: "cc:cu" }],
+      [{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }],
+    ],
+  };
+}
+
+export function customerSearchPrompt() {
+  return {
+    text: "🔎 BUSCAR CLIENTE\n\nEscribe /cliente seguido del nombre, teléfono o HS-*.\nEjemplo: /cliente 6000\n\nSolo operadores con permiso customers.read.",
+    keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
+  };
+}
+
+export function customerSearchResults(query: string) {
+  const { searchCustomersForTelegram, getCustomer360 } = require("@/lib/customer-360") as typeof import("@/lib/customer-360");
+  const rows = searchCustomersForTelegram(query, 5);
+  if (!rows.length) {
+    return {
+      text: `Sin resultados para «${query.slice(0, 40)}».`,
+      keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]],
+    };
+  }
+  const lines = ["👥 CLIENTES", ""];
+  const buttons: TelegramButton[][] = [];
+  rows.forEach((row, index) => {
+    lines.push(`${index + 1}. ${row.name || "Sin nombre"}`);
+    lines.push(`   ${row.phone || "sin teléfono"}`);
+    lines.push("");
+    buttons.push([{ text: `${index + 1}. ${row.name || row.customerId}`, callback_data: `cc:cx:${row.customerId}` }]);
+  });
+  buttons.push([{ text: "⬅ Inicio", callback_data: "cc:h" }]);
+  void getCustomer360;
+  return { text: lines.join("\n").trim(), keyboard: buttons };
+}
+
+export function customerCardView(customerId: number) {
+  const { getCustomer360 } = require("@/lib/customer-360") as typeof import("@/lib/customer-360");
+  const customer = getCustomer360(customerId);
+  if (!customer) {
+    return { text: "Cliente no encontrado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+  }
+  const wa = customerWhatsAppUrl(customer.phone);
+  const keyboard: TelegramButton[][] = [];
+  if (wa) keyboard.push([{ text: "📞 Contactar", url: wa }]);
+  keyboard.push([{ text: "⬅ Buscar", callback_data: "cc:cu" }]);
+  keyboard.push([{ text: "⬅ Inicio", callback_data: "cc:h" }]);
+  return {
+    text: [
+      "👤 CLIENTE",
+      "",
+      customer.name || "Sin nombre",
+      customer.phone ? `📞 ${customer.phone}` : "",
+      customer.lastService ? `Último: ${customer.lastService.service}` : "Sin trabajos completados",
+      `HS/citas/jobs: ${customer.requests}/${customer.appointments}/${customer.jobsCompleted}`,
+      customer.segment,
+      customer.recoveryOpen ? `⚠️ Recovery abiertos: ${customer.recoveryOpen}` : "",
     ]
       .filter((line) => line !== "")
       .join("\n"),
-    keyboard: [[{ text: "⬅ Inicio", callback_data: includeTest ? "cc:h:1" : "cc:h" }]],
+    keyboard,
   };
 }
 
@@ -517,7 +578,22 @@ export async function applyCommandCenterCallback(
     else if (action === "n") view = upcomingView(parseFlag(parts, 2));
     else if (action === "g") view = appointmentDetail(parts.slice(2).join(":"));
     else if (action === "m") view = marketingView();
-    else if (action === "s") view = summaryView(parseFlag(parts, 2));
+    else if (action === "s") {
+      const { hasTelegramPermission } = await import("@/lib/telegram-operators");
+      if (operator && !hasTelegramPermission(operator, "analytics.read") && !hasTelegramPermission(operator, "dashboard.read")) {
+        view = { text: "No autorizado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else view = summaryView(parseFlag(parts, 2));
+    } else if (action === "cu") {
+      const { hasTelegramPermission } = await import("@/lib/telegram-operators");
+      if (operator && !hasTelegramPermission(operator, "customers.read")) {
+        view = { text: "No autorizado para clientes.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else view = customerSearchPrompt();
+    } else if (action === "cx") {
+      const { hasTelegramPermission } = await import("@/lib/telegram-operators");
+      if (operator && !hasTelegramPermission(operator, "customers.read")) {
+        view = { text: "No autorizado para clientes.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else view = customerCardView(Number(parts[2] || 0));
+    }
     else if (action === "j") view = jobsView(Number(parts[2] || 0), parseFlag(parts, 3));
     else if (action === "k") view = jobDetail(parts.slice(2).join(":"));
     else if (action === "f") view = followupsView(Number(parts[2] || 0), parseFlag(parts, 3));
