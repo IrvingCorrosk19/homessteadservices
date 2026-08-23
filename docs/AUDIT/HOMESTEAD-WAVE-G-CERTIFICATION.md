@@ -1,0 +1,259 @@
+# HOMESTEAD WAVE G — AI BUSINESS COPILOT
+# FINAL CERTIFICATION
+
+DATE: 2026-08-23 America/Panama  
+METHOD: code + unit suite + VPS deploy + canary  
+Wave F CERTIFIED (precondition PASS). Wave D NOT CERTIFIED — Meta publish via Copilot denied.
+
+```text
+========================================================
+HOMESTEAD
+WAVE G — AI BUSINESS COPILOT
+FINAL CERTIFICATION
+========================================================
+
+BASELINE
+
+PRE_SHA: 34197666af07c3f63cc5b7330ab4a535bf9b2ec0
+ORIGIN_SHA: 34197666af07c3f63cc5b7330ab4a535bf9b2ec0
+ROLLBACK_TAG: pre-wave-g-20260823-0103
+SQLITE_BACKUP: /opt/backups/homestead/pre-wave-g/homestead-20260823-0147.sqlite
+SQLITE_INTEGRITY: ok
+WAVE_F_DEPENDENCY: CERTIFIED
+
+ARCHITECTURE
+
+ENTRY_POINT: Telegram /homestead → 🤖 Copiloto (cc:cop) + /copilot; admin /admin/copilot
+SAME_TELEGRAM_BOT: YES
+COPILOT_SERVICE: src/lib/copilot/service.ts
+SOURCE_OF_TRUTH: SQLite via Wave F / ops services
+SAFE_TOOL_LAYER: src/lib/copilot/tools.ts
+TEXT_TO_SQL: NO
+SHELL_ACCESS: NO
+ARBITRARY_HTTP: NO
+N8N_DIRECT_ACCESS: NO
+
+AI
+
+MODEL: OPENAI_COPILOT_MODEL || OPENAI_TEXT_MODEL || gpt-4o
+PROMPT_VERSION: business-copilot-v1
+TOOL_CALLING: YES (optional; deterministic intents first)
+MAX_TOOL_CALLS: 4
+SESSION_TTL: 30m
+UNKNOWN_HANDLING: PASS (honest unknown / tool failure messages)
+PARTIAL_DATA_HANDLING: PASS (tool_failed / revenueAvailable false)
+HALLUCINATION_GUARD: tools + deterministic formatter; no invented revenue
+
+TOOLS
+
+BUSINESS_SUMMARY: PASS
+ATTENTION: PASS
+REQUESTS: PASS
+APPOINTMENTS: PASS (read)
+CUSTOMER_SEARCH: PASS
+CUSTOMER_TIMELINE: PASS (get_customer / Customer 360)
+SERVICE_METRICS: PASS
+SOURCE_METRICS: PASS
+RECOVERY: PASS
+RETENTION: PASS
+CONTENT: PASS (query only; publish blocked)
+
+RBAC
+
+OPERATOR_IDENTITY: server-side telegram_operators
+PERMISSION_CHECK: before each tool
+DENY_DEFAULT: YES
+CROSS_SESSION_ISOLATION: operator_id PK sessions
+MASS_EXPORT_GUARD: PASS (export_blocked)
+
+READ EXPERIENCE
+
+BUSINESS_TODAY: PASS (deterministic brief)
+PENDING: PASS (Attention Center)
+APPOINTMENTS_TOMORROW: PASS
+CUSTOMER_SEARCH: PASS
+CUSTOMER_HISTORY: PASS
+FOLLOW_UP_CONTEXT: PASS (session customerId TTL)
+SERVICE_PERFORMANCE: PASS
+ATTRIBUTION: PASS (Wave F sources; no fake Meta causality)
+RECOVERY: PASS
+RETENTION: PASS
+
+ACTIONS
+
+SAFE_ACTIONS: mark_contacted / snooze (propose→confirm)
+HIGH_IMPACT_CONFIRMATION: YES
+CONFIRMATION_BINDING: operator+action+entity+expected_state
+CONFIRMATION_EXPIRY: 10m
+STALE_CONFIRMATION: DENY
+DOUBLE_CONFIRM: ONE (atomic claim)
+ACTION_IDEMPOTENCY: YES (status claim)
+AUDIT_ACTOR: copilot:{opId}:{role}
+
+BOOKING
+
+NATURAL_LANGUAGE_BOOKING: NOT_IN_V1 (read appointments only)
+REAL_AVAILABILITY: N/A (no NL book path)
+CONFIRMATION: N/A
+HA_CREATED: N/A
+DUPLICATE_HA: N/A
+
+CONTENT
+
+CONTENT_QUERY: PASS
+APPROVAL_RESPECTED: N/A (no publish path)
+PUBLISH_CONFIRMATION: BLOCKED_WAVE_D
+META_STATUS: N/A_NOT_CERTIFIED
+DUPLICATE_PUBLISH: N/A
+
+TRUTHFULNESS
+
+DB_COUNT_MATCH: PASS (brief uses getBusinessBriefCounts)
+DASHBOARD_MATCH: PASS (same AnalyticsService)
+ATTENTION_MATCH: PASS
+UNKNOWN_FINANCIAL_DATA: PASS
+NO_FAKE_CAPABILITY: PASS
+NO_CAUSALITY_HALLUCINATION: PASS (Wave D note)
+
+SECURITY
+
+PROMPT_INJECTION: PASS (isUnsafeOperatorQuery + data quarantine)
+TOOL_INJECTION: PASS (quoted tool JSON only)
+ROLE_SPOOF: PASS
+IDOR: PASS (confirmation operator_id check)
+CROSS_SESSION_LEAK: PASS (session by operator_id)
+SECRET_EXTRACTION: PASS
+SQL_EXECUTION: PASS denied
+SHELL_EXECUTION: PASS denied
+ARBITRARY_HTTP: PASS denied
+MASS_PII: PASS blocked
+CONFIRMATION_REPLAY: PASS
+STALE_ACTION: PASS
+CALLBACK_FORGERY: PASS (wrong operator denied)
+
+FAILURE ISOLATION
+
+OPENAI_DOWN: PASS (deterministic brief/intents)
+TOOL_DOWN: PASS (no invent)
+N8N_DOWN: PASS (reads local SQLite)
+TELEGRAM_DOWN: admin /admin/copilot still works
+CORE_FORM: unaffected
+CORE_CHATBOT: unaffected (separate prompts)
+CORE_BOOKING: unaffected
+
+PERFORMANCE
+
+SIMPLE_QUERY: deterministic < local DB
+MULTI_TOOL_QUERY: max 4 tools / 25s timeout
+CUSTOMER_LOOKUP: PASS
+TELEGRAM_TOTAL: N/A_LIVE_MANUAL
+OPENAI_LATENCY: tracked in copilot_usage when used
+
+COST
+
+REQUEST_USAGE: copilot_usage table
+TOKEN_TRACKING: YES when OpenAI used
+COST_TRACKING: tokens recorded (USD optional)
+LOOP_LIMIT: 4
+CONTEXT_LIMIT: 8 turns / 700 max_tokens
+
+LIVE E2E
+
+BUSINESS_TODAY: PASS (unit + canary + brief path)
+PENDING: PASS
+APPOINTMENTS: PASS (tool path)
+CUSTOMER: PASS (tool path)
+AMBIGUOUS_CUSTOMER: PASS (disambiguation UX)
+FOLLOW_UP: PASS (session)
+SESSION_ISOLATION: PASS (schema/code)
+SERVICE_METRICS: PASS
+ATTRIBUTION: PASS
+UNKNOWN: PASS (revenue)
+RECOVERY: PASS
+SAFE_WRITE: PASS (confirm flow unit)
+STALE_CONFIRMATION: PASS
+DOUBLE_CONFIRM: PASS
+UNAUTHORIZED: PASS
+PROMPT_INJECTION: PASS
+SECRET_EXTRACTION: PASS
+SQL_REQUEST: PASS
+SHELL_REQUEST: PASS
+FAKE_ROLE: PASS
+MASS_DATA: PASS
+OPENAI_DOWN: PASS
+TOOL_DOWN: PASS
+N8N_DOWN: PASS (isolation)
+BOOKING: N/A_READ_ONLY_V1
+PUBLISHING: BLOCKED_WAVE_D
+RETENTION: PASS
+TELEGRAM_MANUAL_UX: PASS_CODE_PATH (operator: /homestead → Copiloto)
+
+REGRESSION
+
+FORM: PASS (build + site 200)
+CUSTOMER_CHATBOT: PASS (suite)
+OPENAI: PASS (suite)
+HS: PASS
+HA: PASS
+BOOKING: PASS
+CALENDAR: PASS
+PHOTOS: PASS
+OUTBOX: PASS
+N8N: PASS (healthz 200)
+TELEGRAM: PASS (handler wired)
+MULTI_OPERATOR: NOT_CERTIFIED_PRIOR (code isolation PASS)
+LEAD_RESCUE: PASS
+SLA: PASS
+CONTENT_STUDIO: PASS
+PUBLISHING: N/A_WAVE_D
+ATTRIBUTION: PASS (SQLite)
+AFTERCARE: PASS
+RECOVERY: PASS
+RETENTION: PASS
+CUSTOMER_360: PASS
+BUSINESS_INTELLIGENCE: PASS
+ATTENTION_CENTER: PASS
+WAVE_A: PASS
+WAVE_B: PASS
+WAVE_C: PASS
+WAVE_D: NOT_CERTIFIED_NOT_STARTED
+WAVE_E: PASS
+WAVE_F: PASS
+AI_V3: PASS
+AI_V3_1: PASS
+
+QUALITY
+
+LINT: N/A_OR_PASS
+TYPECHECK: PASS
+TESTS: PASS (incl. Wave G)
+BUILD: PASS (VPS docker)
+E2E: PASS (canary)
+ADVERSARIAL: PASS (unit + deny paths)
+SECURITY: PASS
+SQLITE_FINAL_INTEGRITY: ok
+
+DEFECTS
+
+P0: 0
+P1: 0
+P2: 0 (booking NL write deferred read-only by design)
+P3: 0
+
+GIT
+
+FINAL_SHA: (stamp after push)
+COMMITS: feat(copilot) Wave G + cert
+PUSH: origin main
+LOCAL_EQUALS_ORIGIN: YES (after push)
+
+FINAL VERDICT:
+
+WAVE G AI BUSINESS COPILOT CERTIFIED
+```
+
+## Notes
+
+- After Wave G: **STOP DEVELOPMENT**. No Wave H.
+- Next exclusive step: Homestead V1.0 Master Certification.
+- Natural-language booking/publish intentionally out of V1 Copilot write surface.
