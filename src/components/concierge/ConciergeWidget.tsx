@@ -1,18 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { prepareConciergePhoto, revokePreparedPhoto } from "@/lib/concierge-client-photo";
+import { assistantRequestsPhoto } from "@/lib/concierge-photo-cta";
+import { CameraIcon, ImageIcon, TrashIcon } from "@/components/concierge/ConciergePhotoIcons";
 
 type ChatMessage = {
   role: "user" | "assistant";
   body: string;
   photoId?: string;
+  photoIds?: string[];
   photoPreviewUrl?: string;
+  photoPreviewUrls?: string[];
   photoStatus?: "uploading" | "sent" | "failed";
   localKey?: string;
 };
 
 type PendingPhoto = {
+  id: string;
   file: File;
   previewUrl: string;
   name: string;
@@ -27,11 +32,29 @@ type SlotGroup = {
 
 const GREET_KEY = "hs_concierge_invite_v1";
 const CHAT_OPEN_KEY = "hs_concierge_open_v1";
+const PHOTO_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
 
 function photoSrc(photoId?: string, previewUrl?: string) {
   if (previewUrl) return previewUrl;
   if (photoId) return `/api/concierge/photos/${encodeURIComponent(photoId)}`;
   return "";
+}
+
+function newPendingId() {
+  return `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      setMobile(window.innerWidth < 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return mobile;
 }
 
 export function ConciergeWidget() {
@@ -49,7 +72,11 @@ export function ConciergeWidget() {
   const [showResumeBooking, setShowResumeBooking] = useState(false);
   const [bookingExpanded, setBookingExpanded] = useState(true);
   const [keyboardPad, setKeyboardPad] = useState(0);
-  const [pendingPhoto, setPendingPhoto] = useState<PendingPhoto | null>(null);
+  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [replacePhotoId, setReplacePhotoId] = useState<string | null>(null);
+  const [showPhotoCta, setShowPhotoCta] = useState(false);
+  const [photosRemaining, setPhotosRemaining] = useState(4);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -60,19 +87,23 @@ export function ConciergeWidget() {
   ]);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const photoMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingRef = useRef(false);
-  const pendingPhotoRef = useRef<PendingPhoto | null>(null);
+  const pendingPhotosRef = useRef<PendingPhoto[]>([]);
+  const replacePhotoIdRef = useRef<string | null>(null);
   const [sendError, setSendError] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
-    pendingPhotoRef.current = pendingPhoto;
-  }, [pendingPhoto]);
+    pendingPhotosRef.current = pendingPhotos;
+  }, [pendingPhotos]);
 
   useEffect(() => {
     return () => {
-      if (pendingPhotoRef.current) revokePreparedPhoto(pendingPhotoRef.current.previewUrl);
+      pendingPhotosRef.current.forEach((photo) => revokePreparedPhoto(photo.previewUrl));
     };
   }, []);
 
@@ -92,6 +123,8 @@ export function ConciergeWidget() {
     const pending = Boolean(data.bookingPending);
     setBookingPending(pending);
     setShowResumeBooking(Boolean(data.showResumeBooking));
+    setShowPhotoCta(Boolean(data.showPhotoCta));
+    setPhotosRemaining(typeof data.photosRemaining === "number" ? data.photosRemaining : 4);
     if (pending) setBookingExpanded(false);
     else if (Array.isArray(data.chips) && data.chips.length) setBookingExpanded(true);
     setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
@@ -133,7 +166,21 @@ export function ConciergeWidget() {
     const node = scroller.current;
     if (!node || !stick.current) return;
     node.scrollTop = node.scrollHeight;
-  }, [messages, pending, open, pendingPhoto]);
+  }, [messages, pending, open, pendingPhotos]);
+
+  useEffect(() => {
+    if (!photoMenuOpen) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const node = photoMenuRef.current;
+      if (node && !node.contains(event.target as Node)) setPhotoMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [photoMenuOpen]);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -201,32 +248,61 @@ export function ConciergeWidget() {
     }
   }, [ended, sendChatTurn]);
 
-  const clearPendingPhoto = useCallback(() => {
-    setPendingPhoto((current) => {
-      if (current) revokePreparedPhoto(current.previewUrl);
-      return null;
+  const clearPendingPhotos = useCallback(() => {
+    setPendingPhotos((current) => {
+      current.forEach((photo) => revokePreparedPhoto(photo.previewUrl));
+      return [];
+    });
+    setPhotoError(null);
+    setReplacePhotoId(null);
+  }, []);
+
+  const removePendingPhoto = useCallback((id: string) => {
+    setPendingPhotos((current) => {
+      const target = current.find((photo) => photo.id === id);
+      if (target) revokePreparedPhoto(target.previewUrl);
+      return current.filter((photo) => photo.id !== id);
     });
     setPhotoError(null);
   }, []);
 
-  const uploadPhotoTurn = useCallback(async (photo: PendingPhoto, caption: string, localKey: string) => {
-    const form = new FormData();
-    form.append("photo", photo.file);
-    if (caption) form.append("caption", caption);
-    const upload = await fetch("/api/concierge/photo", { method: "POST", body: form });
-    const uploaded = await upload.json();
-    if (!upload.ok || !uploaded.ok) {
-      throw new Error(typeof uploaded.message === "string" ? uploaded.message : "upload_failed");
+  const contextualPhotoCta = useMemo(() => {
+    if (showPhotoCta) return true;
+    const lastAssistant = [...messages].reverse().find((item) => item.role === "assistant");
+    return lastAssistant ? assistantRequestsPhoto(lastAssistant.body) : false;
+  }, [messages, showPhotoCta]);
+
+  const pendingPreparing = pendingPhotos.some((photo) => photo.preparing);
+  const slotsLeftForPending = Math.max(0, photosRemaining - pendingPhotos.length);
+
+  const uploadPhotoTurn = useCallback(async (photos: PendingPhoto[], caption: string, localKey: string) => {
+    const uploadedIds: string[] = [];
+    for (const photo of photos) {
+      const form = new FormData();
+      form.append("photo", photo.file);
+      const upload = await fetch("/api/concierge/photo", { method: "POST", body: form });
+      const uploaded = await upload.json();
+      if (!upload.ok || !uploaded.ok) {
+        throw new Error(typeof uploaded.message === "string" ? uploaded.message : "upload_failed");
+      }
+      uploadedIds.push(String(uploaded.photoId || ""));
+      revokePreparedPhoto(photo.previewUrl);
     }
-    const photoId = String(uploaded.photoId || "");
+
     setMessages((current) =>
       current.map((item) =>
         item.localKey === localKey
-          ? { ...item, photoId, photoStatus: "sent", photoPreviewUrl: undefined }
+          ? {
+              ...item,
+              photoId: uploadedIds[0],
+              photoIds: uploadedIds,
+              photoStatus: "sent",
+              photoPreviewUrl: undefined,
+              photoPreviewUrls: undefined,
+            }
           : item,
       ),
     );
-    revokePreparedPhoto(photo.previewUrl);
 
     const ai = await fetch("/api/concierge/photo", {
       method: "PUT",
@@ -240,10 +316,10 @@ export function ConciergeWidget() {
 
   const submitComposer = useCallback(async () => {
     const caption = input.trim();
-    const photo = pendingPhoto;
-    if ((!caption && !photo) || pendingRef.current || ended) return;
+    const photos = pendingPhotos.filter((photo) => !photo.preparing && photo.previewUrl);
+    if ((!caption && !photos.length) || pendingRef.current || ended) return;
 
-    if (photo) {
+    if (photos.length) {
       pendingRef.current = true;
       setPending(true);
       setSendError(false);
@@ -251,19 +327,19 @@ export function ConciergeWidget() {
       setWhatsapp(null);
       setChips([]);
       const localKey = `photo-${Date.now()}`;
-      const snapshot = photo;
+      const snapshot = photos;
       setMessages((current) => [
         ...current,
         {
           role: "user",
           body: caption,
-          photoPreviewUrl: snapshot.previewUrl,
+          photoPreviewUrls: snapshot.map((photo) => photo.previewUrl),
           photoStatus: "uploading",
           localKey,
         },
       ]);
       setInput("");
-      clearPendingPhoto();
+      clearPendingPhotos();
       try {
         await uploadPhotoTurn(snapshot, caption, localKey);
       } catch (error) {
@@ -283,24 +359,62 @@ export function ConciergeWidget() {
     }
 
     await sendMessage(caption);
-  }, [clearPendingPhoto, ended, input, pendingPhoto, sendMessage, uploadPhotoTurn]);
+  }, [clearPendingPhotos, ended, input, pendingPhotos, sendMessage, uploadPhotoTurn]);
 
-  async function onFileSelected(file: File) {
+  const onFileSelected = useCallback(async (file: File, replaceId: string | null) => {
     setPhotoError(null);
-    setPendingPhoto({ file, previewUrl: "", name: file.name, preparing: true });
+    const id = replaceId || newPendingId();
+    const placeholder: PendingPhoto = { id, file, previewUrl: "", name: file.name, preparing: true };
+
+    setPendingPhotos((current) => {
+      if (replaceId) {
+        const previous = current.find((photo) => photo.id === replaceId);
+        if (previous) revokePreparedPhoto(previous.previewUrl);
+        return current.map((photo) => (photo.id === replaceId ? placeholder : photo));
+      }
+      if (current.length >= photosRemaining) return current;
+      return [...current, placeholder];
+    });
+    setReplacePhotoId(null);
+    replacePhotoIdRef.current = null;
+    setPhotoMenuOpen(false);
+
     try {
       const prepared = await prepareConciergePhoto(file);
-      setPendingPhoto({
-        file: prepared.file,
-        previewUrl: prepared.previewUrl,
-        name: file.name,
-        preparing: false,
-      });
+      setPendingPhotos((current) =>
+        current.map((photo) =>
+          photo.id === id
+            ? {
+                id,
+                file: prepared.file,
+                previewUrl: prepared.previewUrl,
+                name: file.name,
+                preparing: false,
+              }
+            : photo,
+        ),
+      );
     } catch {
-      setPhotoError("No pudimos preparar esta foto. Intenta con otra.");
-      setPendingPhoto(null);
+      setPhotoError("No pudimos leer esta imagen. Prueba con otra foto.");
+      setPendingPhotos((current) => current.filter((photo) => photo.id !== id));
     }
-  }
+  }, [photosRemaining]);
+
+  const openCameraPicker = useCallback(() => {
+    replacePhotoIdRef.current = null;
+    setReplacePhotoId(null);
+    cameraRef.current?.click();
+  }, []);
+
+  const openGalleryPicker = useCallback(() => {
+    replacePhotoIdRef.current = null;
+    setReplacePhotoId(null);
+    galleryRef.current?.click();
+  }, []);
+
+  useEffect(() => {
+    replacePhotoIdRef.current = replacePhotoId;
+  }, [replacePhotoId]);
 
   function openChat() {
     sessionStorage.setItem(GREET_KEY, "1");
@@ -324,7 +438,7 @@ export function ConciergeWidget() {
     closeChat();
   }
 
-  const canSend = Boolean((input.trim() || pendingPhoto) && !pending && !ended && !pendingPhoto?.preparing);
+  const canSend = Boolean((input.trim() || pendingPhotos.some((p) => p.previewUrl && !p.preparing)) && !pending && !ended && !pendingPreparing);
 
   return (
     <div
@@ -396,7 +510,19 @@ export function ConciergeWidget() {
             }}
           >
             {messages.map((item, index) => {
-              const src = photoSrc(item.photoId, item.photoPreviewUrl);
+              const previewUrls = item.photoPreviewUrls?.length
+                ? item.photoPreviewUrls
+                : item.photoPreviewUrl
+                  ? [item.photoPreviewUrl]
+                  : [];
+              const sentIds = item.photoIds?.length
+                ? item.photoIds
+                : item.photoId
+                  ? [item.photoId]
+                  : [];
+              const imageSources = previewUrls.length
+                ? previewUrls
+                : sentIds.map((id) => photoSrc(id));
               const isUser = item.role === "user";
               return (
                 <div
@@ -410,20 +536,25 @@ export function ConciergeWidget() {
                         : "overflow-hidden rounded-2xl border border-line bg-white text-charcoal"
                     }
                   >
-                    {src && (
-                      <button
-                        type="button"
-                        className="block w-full"
-                        onClick={() => item.photoStatus !== "uploading" && setLightboxSrc(src)}
-                        disabled={item.photoStatus === "uploading"}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={src}
-                          alt="Foto enviada"
-                          className="h-auto max-h-44 w-full max-w-[min(100%,20rem)] object-cover md:max-h-48"
-                        />
-                      </button>
+                    {imageSources.length > 0 && (
+                      <div className={`grid gap-0.5 ${imageSources.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+                        {imageSources.map((src, photoIndex) => (
+                          <button
+                            key={`${src}-${photoIndex}`}
+                            type="button"
+                            className="block w-full"
+                            onClick={() => item.photoStatus !== "uploading" && setLightboxSrc(src)}
+                            disabled={item.photoStatus === "uploading"}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={src}
+                              alt="Foto enviada"
+                              className="h-auto max-h-36 w-full object-cover md:max-h-44"
+                            />
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {item.photoStatus === "uploading" && (
                       <p className="px-4 py-2 text-xs text-cream/75">Enviando foto...</p>
@@ -513,6 +644,26 @@ export function ConciergeWidget() {
               ))}
             </div>
           )}
+          {contextualPhotoCta && !ended && pendingPhotos.length === 0 && slotsLeftForPending > 0 && (
+            <div className="flex flex-wrap gap-2 border-t border-line bg-white px-4 py-2">
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-navy/20 px-3 text-xs text-navy"
+                onClick={openCameraPicker}
+              >
+                <CameraIcon className="h-4 w-4" />
+                {isMobile ? "Tomar foto" : "Tomar foto"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-navy/20 px-3 text-xs text-navy"
+                onClick={openGalleryPicker}
+              >
+                <ImageIcon className="h-4 w-4" />
+                {isMobile ? "Elegir de galería" : "Adjuntar imagen"}
+              </button>
+            </div>
+          )}
           {whatsapp && (
             <a
               href={whatsapp}
@@ -527,38 +678,73 @@ export function ConciergeWidget() {
             <p className="px-4 pb-4 text-sm text-mist">Cuando quieras, vuelve a escribirnos.</p>
           ) : (
             <>
-              {pendingPhoto && (
+              {pendingPhotos.length > 0 && (
                 <div className="border-t border-line bg-white px-4 py-3">
-                  <div className="flex items-start gap-3 rounded-xl border border-line bg-cream-deep p-3">
-                    <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-lg border border-line bg-white md:h-32 md:w-32">
-                      {pendingPhoto.preparing ? (
-                        <div className="flex h-full items-center justify-center px-2 text-center text-xs text-mist">
-                          Preparando foto...
-                        </div>
-                      ) : pendingPhoto.previewUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={pendingPhoto.previewUrl}
-                          alt="Vista previa"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center px-2 text-center text-xs text-mist">
-                          {pendingPhoto.name}
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs text-charcoal">{pendingPhoto.name}</p>
-                      <button
-                        type="button"
-                        className="mt-2 min-h-11 text-xs text-accent"
-                        onClick={clearPendingPhoto}
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {pendingPhotos.map((photo) => (
+                      <div
+                        key={photo.id}
+                        className="relative h-[7.5rem] w-[7.5rem] shrink-0 overflow-hidden rounded-lg border border-line bg-cream-deep md:h-36 md:w-36"
                       >
-                        × Quitar imagen
-                      </button>
-                    </div>
+                        {photo.preparing ? (
+                          <div className="flex h-full items-center justify-center px-2 text-center text-xs text-mist">
+                            Preparando foto...
+                          </div>
+                        ) : photo.previewUrl ? (
+                          <button
+                            type="button"
+                            className="block h-full w-full"
+                            aria-label="Ampliar fotografía"
+                            onClick={() => setLightboxSrc(photo.previewUrl)}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={photo.previewUrl}
+                              alt="Vista previa"
+                              className="h-full w-full object-cover"
+                            />
+                          </button>
+                        ) : (
+                          <div className="flex h-full items-center justify-center px-2 text-center text-xs text-mist">
+                            {photo.name}
+                          </div>
+                        )}
+                        {!photo.preparing && (
+                          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-navy/70 px-2 py-1">
+                            <button
+                              type="button"
+                              className="min-h-8 text-[0.65rem] text-cream"
+                              aria-label="Cambiar fotografía"
+                              onClick={() => {
+                                replacePhotoIdRef.current = photo.id;
+                                setReplacePhotoId(photo.id);
+                                setPhotoMenuOpen(true);
+                              }}
+                            >
+                              Cambiar
+                            </button>
+                            <button
+                              type="button"
+                              className="min-h-8 min-w-8 text-cream"
+                              aria-label="Eliminar fotografía"
+                              onClick={() => removePendingPhoto(photo.id)}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
+                  {slotsLeftForPending > 0 && pendingPhotos.every((photo) => !photo.preparing) && (
+                    <button
+                      type="button"
+                      className="mt-2 min-h-11 text-xs text-navy"
+                      onClick={() => setPhotoMenuOpen(true)}
+                    >
+                      + Agregar otra foto
+                    </button>
+                  )}
                 </div>
               )}
               {photoError && (
@@ -573,23 +759,63 @@ export function ConciergeWidget() {
                   void submitComposer();
                 }}
               >
-                <button
-                  type="button"
-                  className="min-h-11 min-w-11 rounded-lg text-navy"
-                  aria-label="Adjuntar foto"
-                  disabled={pending || Boolean(pendingPhoto?.preparing)}
-                  onClick={() => fileRef.current?.click()}
-                >
-                  +
-                </button>
+                <div className="relative shrink-0" ref={photoMenuRef}>
+                  <button
+                    type="button"
+                    className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-navy hover:bg-cream-deep"
+                    aria-label="Enviar fotografía"
+                    title="Enviar foto"
+                    disabled={pending || pendingPreparing || slotsLeftForPending <= 0}
+                    onClick={() => setPhotoMenuOpen((open) => !open)}
+                  >
+                    <CameraIcon />
+                  </button>
+                  {photoMenuOpen && (
+                    <div
+                      className="absolute bottom-full left-0 z-20 mb-2 min-w-[12.5rem] overflow-hidden rounded-xl border border-line bg-white py-1 shadow-[0_12px_32px_rgba(31,51,68,0.18)]"
+                      role="menu"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full min-h-11 items-center gap-3 px-4 text-left text-sm text-charcoal hover:bg-cream-deep"
+                        onClick={openCameraPicker}
+                      >
+                        <CameraIcon className="h-4 w-4 shrink-0" />
+                        {isMobile ? "Tomar una foto" : "Tomar foto"}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full min-h-11 items-center gap-3 px-4 text-left text-sm text-charcoal hover:bg-cream-deep"
+                        onClick={openGalleryPicker}
+                      >
+                        <ImageIcon className="h-4 w-4 shrink-0" />
+                        {isMobile ? "Elegir una fotografía" : "Adjuntar imagen"}
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <input
-                  ref={fileRef}
+                  ref={cameraRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                  accept={PHOTO_ACCEPT}
+                  capture="environment"
                   className="hidden"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
-                    if (file) void onFileSelected(file);
+                    if (file) void onFileSelected(file, replacePhotoIdRef.current);
+                    event.target.value = "";
+                  }}
+                />
+                <input
+                  ref={galleryRef}
+                  type="file"
+                  accept={PHOTO_ACCEPT}
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void onFileSelected(file, replacePhotoIdRef.current);
                     event.target.value = "";
                   }}
                 />
@@ -610,7 +836,7 @@ export function ConciergeWidget() {
                     event.preventDefault();
                     void submitComposer();
                   }}
-                  placeholder="Cuéntame qué necesitas"
+                  placeholder={pendingPhotos.length ? "Añade un mensaje..." : "Cuéntame qué necesitas"}
                   className="max-h-28 min-h-11 flex-1 resize-none bg-transparent py-2 text-sm outline-none disabled:opacity-60"
                 />
                 <button

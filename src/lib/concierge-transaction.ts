@@ -3,6 +3,8 @@ import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SlotGroup } from "@/lib/concierge-turn-routing";
 import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routing";
+import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import { photosRemainingFromCount } from "@/lib/concierge-photo-cta";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
 export const OFFERED_SLOTS_TTL_MS = 45 * 60 * 1000;
@@ -16,6 +18,8 @@ export type ActiveSessionSnapshot = {
   slotGroups: SlotGroup[];
   serviceContext: string | null;
   showResumeBooking: boolean;
+  showPhotoCta: boolean;
+  photosRemaining: number;
 };
 
 const SLOT_PICK =
@@ -194,10 +198,20 @@ export function validateActiveSlotBooking(state: ConversationState, date: string
   return { ok: true as const };
 }
 
+export function shouldShowPhotoCta(state: ConversationState) {
+  const service = state.primaryService || state.service;
+  if (!service) return false;
+  const playbook = getPlaybook(service);
+  if (!playbook) return false;
+  if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1) return true;
+  return false;
+}
+
 export function buildSessionSnapshot(state: ConversationState, now = Date.now()): ActiveSessionSnapshot {
   const active = areOfferedSlotsActive(state, now);
   const showChips = active && !state.bookingSuspended;
   const chips = showChips ? state.offeredSlots.slice(0, 6).map((item) => item.label) : [];
+  const photosRemaining = photosRemainingFromCount(state.photoCount || 0);
   return {
     chips,
     historicalChips: state.historicalSlotLabels || [],
@@ -207,6 +221,8 @@ export function buildSessionSnapshot(state: ConversationState, now = Date.now())
     slotGroups: active ? buildSlotGroups(state.offeredSlots) : [],
     serviceContext: serviceContextLabel(state),
     showResumeBooking: active && Boolean(state.bookingSuspended),
+    showPhotoCta: shouldShowPhotoCta(state) && photosRemaining > 0,
+    photosRemaining,
   };
 }
 

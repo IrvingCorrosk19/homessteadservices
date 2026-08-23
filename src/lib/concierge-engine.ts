@@ -233,6 +233,8 @@ export async function conciergeTurn(input: {
         slotGroups: session.slotGroups,
         serviceContext: session.serviceContext,
         showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
       };
     }
 
@@ -504,6 +506,8 @@ export async function conciergeTurn(input: {
       slotGroups: session.slotGroups,
       serviceContext: session.serviceContext,
       showResumeBooking: session.showResumeBooking,
+      showPhotoCta: session.showPhotoCta,
+      photosRemaining: session.photosRemaining,
     };
   } finally {
     endTurn(input.conversationId);

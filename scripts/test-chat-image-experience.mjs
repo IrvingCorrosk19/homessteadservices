@@ -21,8 +21,8 @@ function ok(name, value) {
   } else console.log("PASS", name);
 }
 
-ok("IMG-01 preview before send", /pendingPhoto/.test(widget) && /Preparando foto/.test(widget));
-ok("IMG-02 remove before send", /Quitar imagen/.test(widget));
+ok("IMG-01 preview before send", /pendingPhotos/.test(widget) && /Preparando foto/.test(widget));
+ok("IMG-02 remove before send", /Eliminar fotograf/.test(widget));
 ok("IMG-03 object-fit cover preview", /object-cover/.test(widget));
 ok("IMG-04 sent image bubble", /photoSrc/.test(widget) && /max-h-44/.test(widget));
 ok("IMG-05 lightbox", /lightboxSrc/.test(widget));
@@ -54,7 +54,7 @@ ok("IMG-26 client side prepare", /prepareConciergePhoto/.test(clientPhoto));
 ok("IMG-27 no svg accepted", !/image\/svg/.test(widget));
 
 ok("IMG-28 nginx upload limit documented", /client_max_body_size 12m/.test(nginx));
-ok("IMG-29 single file picker", !/multiple/.test(widget.match(/type="file"[\s\S]*?onChange/)?.[0] || ""));
+ok("IMG-29 single file picker per input", !/multiple/.test(widget));
 ok("IMG-30 photo link copy preserved", /copyConciergePhotosToRequest/.test(engine));
 
 if (failed) {

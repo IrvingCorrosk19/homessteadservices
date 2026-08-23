@@ -11,13 +11,22 @@ function isHeic(file: File) {
   return /heic|heif/i.test(file.type) || /\.heic$|\.heif$/i.test(file.name);
 }
 
-function loadImageFromFile(file: File) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
+async function loadBitmapFromFile(file: File) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      /* fall through */
+    }
+  }
+  return new Promise<ImageBitmap>((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      resolve(img);
+      createImageBitmap(img)
+        .then(resolve)
+        .catch(reject);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -43,18 +52,19 @@ export async function prepareConciergePhoto(file: File): Promise<PreparedClientP
   }
 
   try {
-    const img = await loadImageFromFile(file);
-    const longEdge = Math.max(img.naturalWidth, img.naturalHeight);
+    const bitmap = await loadBitmapFromFile(file);
+    const longEdge = Math.max(bitmap.width, bitmap.height);
     const scale = longEdge > LONG_EDGE ? LONG_EDGE / longEdge : 1;
-    const width = Math.max(1, Math.round(img.naturalWidth * scale));
-    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas");
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
 
     const blob = await canvasToJpegBlob(canvas);
     const optimized = new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" });

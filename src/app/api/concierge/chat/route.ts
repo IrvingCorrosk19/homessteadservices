@@ -83,6 +83,8 @@ export async function GET(request: Request) {
     slotGroups: [],
     serviceContext: null,
     showResumeBooking: false,
+    showPhotoCta: false,
+    photosRemaining: 4,
   };
   return NextResponse.json({
     ok: true,
@@ -95,6 +97,8 @@ export async function GET(request: Request) {
     slotGroups: session.slotGroups,
     serviceContext: session.serviceContext,
     showResumeBooking: session.showResumeBooking,
+    showPhotoCta: session.showPhotoCta,
+    photosRemaining: session.photosRemaining,
   });
 }
 
