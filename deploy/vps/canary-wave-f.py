@@ -109,8 +109,8 @@ def main():
         conn.execute(
             """
             INSERT INTO service_requests (
-              public_id, created_at, name, phone, email, service, message, status, property_type
-            ) VALUES (?, ?, ?, ?, ?, 'air_conditioning', 'wave f', 'NEW', 'residential')
+              public_id, created_at, name, phone, email, property, service, message, photos_json, status
+            ) VALUES (?, ?, ?, ?, ?, 'residential', 'air_conditioning', 'wave f', '[]', 'NEW')
             """,
             (lead, now, f"WAVE-F {stamp}", phone, f"wave-f-{stamp}@example.invalid"),
         )
