@@ -33,10 +33,16 @@ def report(name: str, ok: bool, detail: str = ""):
     print(f"{name}: {'PASS' if ok else 'FAIL'} {detail}".strip())
 
 
-def get_code(path: str) -> int:
+def get_code(path: str, follow: bool = True) -> int:
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            return None
+
+    handlers = [] if follow else [NoRedirect()]
+    opener = urllib.request.build_opener(*handlers)
     req = urllib.request.Request(BASE + path, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=20) as res:
+        with opener.open(req, timeout=20) as res:
             return res.status
     except urllib.error.HTTPError as err:
         return err.code
@@ -67,8 +73,8 @@ def main():
     env = env_map()
     secret = env.get("N8N_HOMESTEAD_WEBHOOK_SECRET") or ""
     report("HEALTH", get_code("/") == 200)
-    report("ADMIN_DASHBOARD_AUTH", get_code("/admin") in (200, 302, 307))
-    report("ADMIN_CLIENTES_AUTH", get_code("/admin/clientes") in (200, 302, 307))
+    report("ADMIN_DASHBOARD_AUTH", get_code("/admin", follow=False) in (200, 302, 307))
+    report("ADMIN_CLIENTES_AUTH", get_code("/admin/clientes", follow=False) in (200, 302, 307))
     report("INTEGRITY", sqlite3.connect(DB).execute("PRAGMA integrity_check").fetchone()[0] == "ok")
 
     conn = sqlite3.connect(DB, timeout=30)
@@ -186,7 +192,7 @@ def main():
     report("LIVE_NO_AUTO_MERGE", cust != dup_id and dups >= 2)
 
     # Admin pages exist (auth gate)
-    report("IDOR_UNAUTH", get_code(f"/admin/clientes/{cust}") in (302, 307, 401))
+    report("IDOR_UNAUTH", get_code(f"/admin/clientes/{cust}", follow=False) in (302, 307, 401))
 
     if secret:
         hdrs = {
