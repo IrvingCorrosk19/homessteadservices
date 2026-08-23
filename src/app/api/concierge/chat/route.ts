@@ -13,6 +13,7 @@ import {
   recentMessages,
 } from "@/lib/concierge-store";
 import { logError } from "@/lib/log";
+import { CONCIERGE_BUILD_MARKER, CONCIERGE_PROMPT_VERSION } from "@/lib/concierge-knowledge";
 
 export const runtime = "nodejs";
 
@@ -85,7 +86,12 @@ export async function POST(request: Request) {
 
   if (payload.event === "CHAT_STARTED") {
     addEvent(conversationId, "CHAT_STARTED");
-    const res = NextResponse.json({ ok: true, conversationId });
+    const res = NextResponse.json({
+      ok: true,
+      conversationId,
+      build: CONCIERGE_BUILD_MARKER,
+      promptVersion: CONCIERGE_PROMPT_VERSION,
+    });
     res.cookies.set(COOKIE, conversationId, {
       httpOnly: true,
       sameSite: "lax",

@@ -44,6 +44,9 @@ export function conciergeKnowledge() {
 
 export const CONCIERGE_PROMPT_VERSION = "hs-concierge-v3.1-he";
 
+/** Build marker for production deploy verification (no secrets). */
+export const CONCIERGE_BUILD_MARKER = "v3.1-he-live";
+
 function personaPrompt(brand: string, region: string) {
   return `PERSONA
 Eres el asesor de servicios de ${brand} en ${region}.

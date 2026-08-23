@@ -72,7 +72,7 @@ function fallbackReply(message: string, state?: ConversationState) {
 }
 
 function extractCasualFacts(state: ConversationState, text: string) {
-  let next = applyPackedExtraction(state, text);
+  const next = applyPackedExtraction(state, text);
   const soy = text.match(/\bsoy\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i);
   if (soy && !looksLikePhoneAttempt(soy[1]) && !next.name) next.name = soy[1].trim().slice(0, 80);
   const email = text.match(EMAIL_RE);
