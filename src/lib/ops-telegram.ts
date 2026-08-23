@@ -65,7 +65,10 @@ function homeKeyboard(includeTest: boolean, canManageOperators = false): Telegra
       { text: "📊 Resumen", callback_data: `cc:s${flag}` },
       { text: "❤️ Clientes", callback_data: "cc:ret" },
     ],
-    [{ text: "🔎 Buscar cliente", callback_data: "cc:cu" }],
+    [
+      { text: "🤖 Copiloto", callback_data: "cc:cop" },
+      { text: "🔎 Buscar cliente", callback_data: "cc:cu" },
+    ],
     [
       {
         text: includeTest ? "Ocultar pruebas" : "Ver pruebas",
@@ -583,7 +586,7 @@ export async function applyCommandCenterCallback(
       if (operator && !hasTelegramPermission(operator, "analytics.read") && !hasTelegramPermission(operator, "dashboard.read")) {
         view = { text: "No autorizado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
       } else view = summaryView(parseFlag(parts, 2));
-    } else if (action === "cu") {
+    }     else if (action === "cu") {
       const { hasTelegramPermission } = await import("@/lib/telegram-operators");
       if (operator && !hasTelegramPermission(operator, "customers.read")) {
         view = { text: "No autorizado para clientes.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
@@ -593,6 +596,43 @@ export async function applyCommandCenterCallback(
       if (operator && !hasTelegramPermission(operator, "customers.read")) {
         view = { text: "No autorizado para clientes.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
       } else view = customerCardView(Number(parts[2] || 0));
+    } else if (action === "cop" || action === "cp") {
+      const {
+        copilotWelcome,
+        handleCopilotTurn,
+        handleCopilotConfirm,
+      } = await import("@/lib/copilot/service");
+      const { saveCopilotSession } = await import("@/lib/copilot/session");
+      if (!operator) {
+        view = { text: "No autorizado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
+      } else if (action === "cp") {
+        const verb = parts[2];
+        const token = parts.slice(3).join(":");
+        const reply = handleCopilotConfirm({
+          operator,
+          token,
+          accept: verb === "ok",
+        });
+        view = { text: reply.text, keyboard: reply.keyboard };
+      } else if (parts[2] === "brief") {
+        const reply = await handleCopilotTurn({
+          operator,
+          telegramUserId: operator.telegramUserId,
+          text: "¿Cómo vamos hoy?",
+        });
+        view = { text: reply.text, keyboard: reply.keyboard };
+      } else if (parts[2] === "attn") {
+        const reply = await handleCopilotTurn({
+          operator,
+          telegramUserId: operator.telegramUserId,
+          text: "¿Qué necesita atención?",
+        });
+        view = { text: reply.text, keyboard: reply.keyboard };
+      } else {
+        saveCopilotSession(operator.id, operator.telegramUserId, { active: true, recentTurns: [] });
+        const welcome = copilotWelcome();
+        view = { text: welcome.text, keyboard: welcome.keyboard };
+      }
     }
     else if (action === "j") view = jobsView(Number(parts[2] || 0), parseFlag(parts, 3));
     else if (action === "k") view = jobDetail(parts.slice(2).join(":"));

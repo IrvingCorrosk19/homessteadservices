@@ -435,17 +435,31 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     await sendCommandCenter(chatId, false, operator);
     return { ok: true };
   }
-  if (
-    nl.includes("qué tengo pendiente") ||
-    nl.includes("que tengo pendiente") ||
-    nl === "qué hago hoy?" ||
-    nl === "¿qué hago hoy?" ||
-    nl.includes("qué debo hacer ahora")
-  ) {
-    const { sendCommandCenter } = await import("@/lib/ops-telegram");
-    await sendCommandCenter(chatId);
+  if (text === "/copilot" || text.startsWith("/copilot@") || text === "/copiloto" || text.startsWith("/copiloto@")) {
+    const { copilotWelcome } = await import("@/lib/copilot/service");
+    const { saveCopilotSession } = await import("@/lib/copilot/session");
+    saveCopilotSession(operator.id, operator.telegramUserId, { active: true, recentTurns: [] });
+    const welcome = copilotWelcome();
+    await sendTelegramMessage({ chatId, text: welcome.text, keyboard: welcome.keyboard });
     return { ok: true };
   }
+
+  // Wave G — Business Copilot natural language (before legacy NL shortcuts)
+  {
+    const { getCopilotSession } = await import("@/lib/copilot/session");
+    const { looksLikeCopilotQuery, handleCopilotTurn } = await import("@/lib/copilot/service");
+    const session = getCopilotSession(operator.id);
+    if (text && !text.startsWith("/") && (session.active || looksLikeCopilotQuery(text))) {
+      const reply = await handleCopilotTurn({
+        operator,
+        telegramUserId: operator.telegramUserId,
+        text,
+      });
+      await sendTelegramMessage({ chatId, text: reply.text, keyboard: reply.keyboard });
+      return { ok: true };
+    }
+  }
+
   if (text === "/hoy" || text.startsWith("/hoy@")) {
     const { agendaView } = await import("@/lib/ops-telegram");
     const view = agendaView(0, false);

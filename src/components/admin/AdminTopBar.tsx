@@ -16,6 +16,8 @@ export function AdminTopBar() {
           ? "Clientes"
           : pathname.startsWith("/admin/retencion")
             ? "Retención"
+          : pathname.startsWith("/admin/copilot")
+            ? "Copiloto"
             : pathname.startsWith("/admin/configuracion")
               ? "Configuración"
               : "Solicitudes";
@@ -52,6 +54,9 @@ export function AdminTopBar() {
             </Link>
             <Link className={pathname.startsWith("/admin/retencion") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/retencion">
               Retención
+            </Link>
+            <Link className={pathname.startsWith("/admin/copilot") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/copilot">
+              Copiloto
             </Link>
             <Link className={pathname.startsWith("/admin/configuracion") ? "text-accent" : "text-cream/60 hover:text-cream"} href="/admin/configuracion/operadores">
               Operadores

@@ -518,6 +518,12 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateTelegramOperatorsTable(database);
   migrateRetentionWaveETable(database);
   migrateCustomerIdentityWaveFTable(database);
+  migrateCopilotWaveGTable(database);
+}
+
+function migrateCopilotWaveGTable(database: Database.Database) {
+  const { migrateCopilotWaveG } = require("@/lib/copilot/schema") as typeof import("@/lib/copilot/schema");
+  migrateCopilotWaveG(database);
 }
 
 function migrateCustomerIdentityWaveFTable(database: Database.Database) {
