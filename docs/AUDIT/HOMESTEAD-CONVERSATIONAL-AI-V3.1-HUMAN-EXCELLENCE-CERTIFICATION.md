@@ -178,9 +178,11 @@ Scoring basis: live transcripts + deterministic HS facts (not self-score). LLM j
 
 | Item | Value |
 | --- | --- |
-| FINAL_SHA | (certification commit after this doc) |
-| PUSH | pending with certification commit |
-| LOCAL_EQUALS_ORIGIN | after push |
+| FINAL_SHA | `dbb7b48ee92b913310d11a24134aae7c40b1497f` |
+| CERTIFICATION_COMMIT | `dbb7b48` |
+| PUSH | YES |
+| ORIGIN_SHA | `dbb7b48ee92b913310d11a24134aae7c40b1497f` |
+| LOCAL_EQUALS_ORIGIN | YES |
 
 ---
 
