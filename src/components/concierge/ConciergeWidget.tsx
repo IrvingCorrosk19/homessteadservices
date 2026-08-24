@@ -32,6 +32,8 @@ type SlotGroup = {
 
 const GREET_KEY = "hs_concierge_invite_v1";
 const CHAT_OPEN_KEY = "hs_concierge_open_v1";
+const CHAT_MINIMIZED_KEY = "hs_concierge_minimized_v1";
+const STICK_THRESHOLD_PX = 80;
 const PHOTO_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
 
 function photoSrc(photoId?: string, previewUrl?: string) {
@@ -95,7 +97,12 @@ export function ConciergeWidget() {
   const pendingPhotosRef = useRef<PendingPhoto[]>([]);
   const replacePhotoIdRef = useRef<string | null>(null);
   const [sendError, setSendError] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [historicalExpanded, setHistoricalExpanded] = useState(false);
   const isMobile = useIsMobile();
+  const scrollPositionRef = useRef(0);
+  const prevContentSigRef = useRef("");
+  const minimizeChatRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     pendingPhotosRef.current = pendingPhotos;
@@ -149,13 +156,29 @@ export function ConciergeWidget() {
       .catch(() => undefined);
   }, [applySessionState]);
 
+  const scrollToBottom = useCallback((smooth = false) => {
+    const node = scroller.current;
+    if (!node) return;
+    if (smooth) {
+      node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+    } else {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, []);
+
+  const updateStickFromScroll = useCallback((node: HTMLDivElement) => {
+    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < STICK_THRESHOLD_PX;
+    stick.current = atBottom;
+    scrollPositionRef.current = node.scrollTop;
+    if (atBottom) setShowJumpToBottom(false);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setOpen(false);
-        sessionStorage.setItem(CHAT_OPEN_KEY, "0");
+        minimizeChatRef.current();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -163,10 +186,59 @@ export function ConciergeWidget() {
   }, [open]);
 
   useEffect(() => {
+    if (!open || !isMobile) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, isMobile]);
+
+  useEffect(() => {
+    if (!open) return;
     const node = scroller.current;
-    if (!node || !stick.current) return;
-    node.scrollTop = node.scrollHeight;
-  }, [messages, pending, open, pendingPhotos]);
+    if (!node) return;
+    if (stick.current) {
+      scrollToBottom(false);
+    } else {
+      node.scrollTop = scrollPositionRef.current;
+    }
+  }, [open, scrollToBottom]);
+
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node || !open) return;
+    const sig = [
+      messages.length,
+      pending ? 1 : 0,
+      pendingPhotos.length,
+      slotGroups.length,
+      chips.length,
+      historicalChips.length,
+      historicalExpanded ? 1 : 0,
+      bookingExpanded ? 1 : 0,
+    ].join(":");
+    const changed = sig !== prevContentSigRef.current;
+    prevContentSigRef.current = sig;
+    if (!changed) return;
+    if (stick.current) {
+      scrollToBottom(false);
+      setShowJumpToBottom(false);
+    } else {
+      setShowJumpToBottom(true);
+    }
+  }, [
+    messages,
+    pending,
+    open,
+    pendingPhotos,
+    slotGroups,
+    chips,
+    historicalChips,
+    historicalExpanded,
+    bookingExpanded,
+    scrollToBottom,
+  ]);
 
   useEffect(() => {
     if (!photoMenuOpen) return;
@@ -234,6 +306,8 @@ export function ConciergeWidget() {
     setWhatsapp(null);
     setChips([]);
     setSlotGroups([]);
+    stick.current = true;
+    setShowJumpToBottom(false);
     setMessages((current) => [...current, { role: "user", body: message }]);
     try {
       await sendChatTurn(message);
@@ -326,6 +400,8 @@ export function ConciergeWidget() {
       setPhotoError(null);
       setWhatsapp(null);
       setChips([]);
+      stick.current = true;
+      setShowJumpToBottom(false);
       const localKey = `photo-${Date.now()}`;
       const snapshot = photos;
       setMessages((current) => [
@@ -419,6 +495,7 @@ export function ConciergeWidget() {
   function openChat() {
     sessionStorage.setItem(GREET_KEY, "1");
     sessionStorage.setItem(CHAT_OPEN_KEY, "1");
+    sessionStorage.removeItem(CHAT_MINIMIZED_KEY);
     setInvite(false);
     setOpen(true);
     void fetch("/api/concierge/chat", {
@@ -430,13 +507,20 @@ export function ConciergeWidget() {
   }
 
   function closeChat() {
+    if (scroller.current) scrollPositionRef.current = scroller.current.scrollTop;
     setOpen(false);
     sessionStorage.setItem(CHAT_OPEN_KEY, "0");
+    sessionStorage.removeItem(CHAT_MINIMIZED_KEY);
   }
 
   function minimizeChat() {
-    closeChat();
+    if (scroller.current) scrollPositionRef.current = scroller.current.scrollTop;
+    setOpen(false);
+    sessionStorage.setItem(CHAT_OPEN_KEY, "1");
+    sessionStorage.setItem(CHAT_MINIMIZED_KEY, "1");
   }
+
+  minimizeChatRef.current = minimizeChat;
 
   const canSend = Boolean((input.trim() || pendingPhotos.some((p) => p.previewUrl && !p.preparing)) && !pending && !ended && !pendingPreparing);
 
@@ -469,46 +553,50 @@ export function ConciergeWidget() {
 
       {open && (
         <section
-          className="pointer-events-auto flex w-[min(100vw-2rem,24rem)] flex-col overflow-hidden rounded-2xl border border-line bg-cream shadow-[0_24px_60px_rgba(31,51,68,0.22)] max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:rounded-none"
-          style={{ paddingBottom: keyboardPad ? keyboardPad : undefined }}
+          className="pointer-events-auto flex h-[min(760px,calc(100dvh-2.5rem))] w-[min(440px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-line bg-cream shadow-[0_24px_60px_rgba(31,51,68,0.22)] max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:w-full max-md:rounded-none"
+          style={{
+            paddingTop: isMobile ? "env(safe-area-inset-top)" : undefined,
+            paddingBottom: keyboardPad ? keyboardPad : isMobile ? "env(safe-area-inset-bottom)" : undefined,
+          }}
           role="dialog"
           aria-label="Asistente de servicios Homestead"
         >
-          <header className="sticky top-0 z-10 flex items-start justify-between gap-3 bg-navy px-5 py-4 text-cream">
-            <div>
+          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-navy/20 bg-navy px-5 py-4 text-cream">
+            <div className="min-w-0">
               <p className="font-display text-xl">Homestead Services</p>
               <p className="mt-1 text-xs tracking-[0.12em] uppercase text-cream/70">Asesor de servicios</p>
               {serviceContext && (
-                <p className="mt-1 text-xs text-cream/75">{serviceContext}</p>
+                <p className="mt-1 truncate text-xs text-cream/75">{serviceContext}</p>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-0.5">
               <button
                 type="button"
-                className="min-h-11 min-w-11 rounded-lg text-cream/80 hover:text-cream"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-lg leading-none text-cream/85 hover:bg-cream/10 hover:text-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"
                 aria-label="Minimizar chat"
+                title="Minimizar"
                 onClick={minimizeChat}
               >
                 —
               </button>
               <button
                 type="button"
-                className="min-h-11 min-w-11 rounded-lg text-cream/80 hover:text-cream"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-lg leading-none text-cream/85 hover:bg-cream/10 hover:text-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"
                 aria-label="Cerrar chat"
+                title="Cerrar"
                 onClick={closeChat}
               >
                 ✕
               </button>
             </div>
           </header>
-          <div
-            ref={scroller}
-            className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 py-4"
-            onScroll={(event) => {
-              const node = event.currentTarget;
-              stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-            }}
-          >
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              ref={scroller}
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 [scrollbar-gutter:stable]"
+              onScroll={(event) => updateStickFromScroll(event.currentTarget)}
+            >
+              <div className="flex flex-col gap-3">
             {messages.map((item, index) => {
               const previewUrls = item.photoPreviewUrls?.length
                 ? item.photoPreviewUrls
@@ -527,7 +615,7 @@ export function ConciergeWidget() {
               return (
                 <div
                   key={item.localKey || `${item.role}-${index}`}
-                  className={isUser ? "ml-8 max-w-[85%] self-end" : "mr-8 max-w-[85%]"}
+                  className={isUser ? "ml-auto max-w-[85%]" : "mr-auto max-w-[85%]"}
                 >
                   <div
                     className={
@@ -551,6 +639,9 @@ export function ConciergeWidget() {
                               src={src}
                               alt="Foto enviada"
                               className="h-auto max-h-36 w-full object-cover md:max-h-44"
+                              onLoad={() => {
+                                if (stick.current) scrollToBottom(false);
+                              }}
                             />
                           </button>
                         ))}
@@ -570,7 +661,7 @@ export function ConciergeWidget() {
               );
             })}
             {pending && (
-              <p className="mr-8 flex items-center gap-1 rounded-2xl border border-line bg-white px-4 py-3" aria-live="polite" aria-label="Escribiendo">
+              <p className="mr-auto max-w-[85%] flex items-center gap-1 rounded-2xl border border-line bg-white px-4 py-3" aria-live="polite" aria-label="Escribiendo">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50" />
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:120ms]" />
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:240ms]" />
@@ -581,23 +672,59 @@ export function ConciergeWidget() {
                 No se pudo enviar. El texto se conservó; puedes reintentar.
               </p>
             )}
-          </div>
-          {historicalChips.length > 0 && (
-            <div className="px-4 pb-2">
-              <p className="text-[0.65rem] tracking-[0.12em] uppercase text-mist">Horarios anteriores</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {historicalChips.map((chip) => (
-                  <span
-                    key={chip}
-                    className="min-h-11 rounded-full border border-mist/30 bg-cream-deep px-3 py-2.5 text-xs text-mist line-through opacity-70"
-                    aria-disabled="true"
+            {historicalChips.length > 0 && (
+              <div className="border-t border-line/70 pt-3">
+                {!historicalExpanded ? (
+                  <button
+                    type="button"
+                    className="min-h-11 w-full rounded-lg border border-mist/25 bg-cream-deep/80 px-3 text-left text-xs text-mist"
+                    onClick={() => setHistoricalExpanded(true)}
                   >
-                    {chip}
-                  </span>
-                ))}
+                    Horarios anteriores ({historicalChips.length}) · Ver
+                  </button>
+                ) : (
+                  <div>
+                    <button
+                      type="button"
+                      className="mb-2 text-[0.65rem] tracking-[0.12em] uppercase text-mist underline-offset-2 hover:underline"
+                      onClick={() => setHistoricalExpanded(false)}
+                    >
+                      Ocultar horarios anteriores
+                    </button>
+                    <p className="text-[0.65rem] tracking-[0.12em] uppercase text-mist">Horarios anteriores</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {historicalChips.map((chip) => (
+                        <span
+                          key={chip}
+                          className="min-h-9 rounded-full border border-mist/30 bg-cream-deep px-3 py-2 text-xs text-mist line-through opacity-70"
+                          aria-disabled="true"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
               </div>
             </div>
-          )}
+            {showJumpToBottom && (
+              <button
+                type="button"
+                className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-navy/15 bg-white px-4 py-2 text-xs text-navy shadow-[0_8px_24px_rgba(31,51,68,0.14)] hover:bg-cream-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-navy"
+                aria-label="Ir al mensaje más reciente"
+                onClick={() => {
+                  stick.current = true;
+                  scrollToBottom(true);
+                  setShowJumpToBottom(false);
+                }}
+              >
+                ↓ Nuevo mensaje
+              </button>
+            )}
+          </div>
+          <footer className="shrink-0 border-t border-line bg-white">
           {showResumeBooking && !bookingExpanded && !ended && (
             <div className="border-t border-line bg-white px-4 py-2">
               <button
@@ -849,6 +976,7 @@ export function ConciergeWidget() {
               </form>
             </>
           )}
+          </footer>
         </section>
       )}
 

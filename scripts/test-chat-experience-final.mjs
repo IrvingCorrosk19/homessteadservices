@@ -38,8 +38,14 @@ ok("CE-10 no HS banner in snapshot", /leadBanner: null/.test(transaction));
 ok("CE-11 slot groups", /buildSlotGroups/.test(routing));
 ok("CE-12 collapsible booking UI", /Cita pendiente · Ver horarios/.test(widget));
 ok("CE-13 close and minimize header", /Minimizar chat/.test(widget) && /Cerrar chat/.test(widget));
+ok("CE-13b minimize preserves session", /CHAT_MINIMIZED_KEY/.test(widget) && /minimizeChat\(\)/.test(widget));
+ok("CE-13c smart jump indicator", /Nuevo mensaje/.test(widget) && /showJumpToBottom/.test(widget));
+ok("CE-13d message scroll region", /overscroll-contain/.test(widget) && /min-h-0 flex-1/.test(widget));
+ok("CE-13e panel dvh height", /100dvh/.test(widget) && /min\(760px/.test(widget));
+ok("CE-13f historical collapse", /Horarios anteriores \(\{historicalChips\.length\}\)/.test(widget));
+ok("CE-13g footer composer fixed", /<footer className="shrink-0/.test(widget));
 ok("CE-14 service context not HS", /serviceContext/.test(widget) && !/Solicitud activa:/.test(widget));
-ok("CE-15 ESC closes chat", /Escape/.test(widget));
+ok("CE-15 ESC minimizes chat", /Escape/.test(widget) && /minimizeChatRef/.test(widget));
 ok("CE-16 date grouped slots", /group.dateLabel/.test(widget));
 
 const priceCase = interpretTurnRoute("perfecto y cuanto seria mas o menos");
