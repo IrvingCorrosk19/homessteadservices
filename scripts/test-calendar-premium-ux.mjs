@@ -51,6 +51,8 @@ const upcomingSrc = readFileSync(join(root, "src/components/admin/calendar/Upcom
 
 check("MOBILE bottom sheet component", bottomSheetSrc.includes("AppointmentDetailBottomSheet") && bottomSheetSrc.includes("overflow-y-auto"));
 check("MOBILE body scroll lock", bottomSheetSrc.includes('document.body.style.overflow = "hidden"'));
+check("DESKTOP body scroll not locked", bottomSheetSrc.includes("max-width: 1279px") && bottomSheetSrc.includes("mq.matches"));
+check("DESKTOP sheet not mounted", calendarSrc.includes("useMobileSheetViewport") && calendarSrc.includes("sheetViewport"));
 check("MOBILE no scrollIntoView hack", !calendarSrc.includes("scrollIntoView"));
 check("MOBILE sheet xl:hidden", bottomSheetSrc.includes("xl:hidden"));
 check("DESKTOP aside xl:block sticky", calendarSrc.includes("hidden space-y-6 xl:block") && calendarSrc.includes("sticky top-6"));

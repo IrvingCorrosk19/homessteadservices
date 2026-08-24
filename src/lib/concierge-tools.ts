@@ -230,6 +230,7 @@ export async function executeConciergeTool(
     state.primaryService = choosePrimary(
       state.detectedServices,
       parsed.primaryService || asString(args.primaryService) || state.primaryService || state.service,
+      state.problem || asString(args.summary) || "",
     );
     if (previousPrimary && state.primaryService && previousPrimary !== state.primaryService) {
       state = clearActiveTransactionState(state, true);

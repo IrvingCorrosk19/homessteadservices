@@ -177,8 +177,9 @@ export function firstName(name: string) {
 }
 
 export function appointmentServiceLabel(service: string, problem = "") {
-  const blob = `${service} ${problem}`.toLowerCase();
+  const blob = `${service} ${problem}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (/pintar|pintur/.test(blob) && /repar/.test(blob)) return "Reparación y pintura";
+  if (/repar/.test(blob) && /cielo\s*raso|cielo\s*razo|falso\s+techo/.test(blob)) return "Reparaciones";
   const labels: Record<string, string> = {
     ac: "Aire acondicionado",
     plumbing: "Plomería",

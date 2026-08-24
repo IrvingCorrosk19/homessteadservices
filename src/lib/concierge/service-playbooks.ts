@@ -251,8 +251,8 @@ const REMODELING: ServicePlaybook = {
 
 const REPAIRS: ServicePlaybook = {
   serviceId: "repairs",
-  label: "Reparaciones generales",
-  aliases: ["reparar", "arreglar", "se dañó", "se dano", "descompus"],
+  label: "Reparaciones",
+  aliases: ["reparar", "arreglar", "se dañó", "se dano", "descompus", "cielo raso", "cielo razo", "falso techo"],
   objective: "Entender el objeto/zona dañada sin forzar un oficio si aún no está claro.",
   facts: {
     what: fact("USEFUL", "Qué hay que reparar", ""),

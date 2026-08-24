@@ -12,7 +12,10 @@ import {
 } from "@/lib/appointment-time";
 import { useToast } from "@/components/ui/Toast";
 import { AppointmentCard, canDragAppointment } from "@/components/admin/calendar/AppointmentCard";
-import { AppointmentDetailBottomSheet } from "@/components/admin/calendar/AppointmentDetailBottomSheet";
+import {
+  AppointmentDetailBottomSheet,
+  useMobileSheetViewport,
+} from "@/components/admin/calendar/AppointmentDetailBottomSheet";
 import { AppointmentDetailContent } from "@/components/admin/calendar/AppointmentDetailContent";
 import { DayOverflowPopover } from "@/components/admin/calendar/DayOverflowPopover";
 import { RescheduleModal } from "@/components/admin/calendar/RescheduleModal";
@@ -111,6 +114,7 @@ export function AppointmentCalendar({
   const [overflowDay, setOverflowDay] = useState<string | null>(null);
   const [dragEnabled, setDragEnabled] = useState(false);
   const [showMobileReschedule, setShowMobileReschedule] = useState(false);
+  const sheetViewport = useMobileSheetViewport();
   const inflight = useRef(new Set<string>());
 
   useEffect(() => {
@@ -496,7 +500,7 @@ export function AppointmentCalendar({
         </div>
       </aside>
 
-      {open && detailProps ? (
+      {open && detailProps && sheetViewport ? (
         <AppointmentDetailBottomSheet open title={open.serviceLabel} onClose={closeDetail}>
           <AppointmentDetailContent {...detailProps} mobile />
         </AppointmentDetailBottomSheet>

@@ -9,6 +9,7 @@ import {
   mergeDetectedServices,
 } from "@/lib/concierge/playbook-engine";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 
 export type FactConfidence = "EXPLICIT" | "HIGH_CONFIDENCE" | "UNCERTAIN";
 
@@ -269,7 +270,16 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
 
   const detected = detectServices(text);
   next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
-  next.primaryService = choosePrimary(next.detectedServices, next.primaryService || next.service);
+  const previousPrimary = next.primaryService || next.service || "";
+  next.primaryService = choosePrimary(next.detectedServices, previousPrimary, text);
+  if (previousPrimary && next.primaryService && previousPrimary !== next.primaryService) {
+    next.activeLeadId = "";
+    next.appointmentId = "";
+    next.offeredSlots = [];
+    next.awaitingSlotSelection = false;
+    next.slotOfferToken = "";
+    next.bookingSuspended = false;
+  }
   if (next.primaryService) next.service = next.primaryService;
   next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
 
@@ -281,8 +291,11 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
   if (urgency !== "normal" || !next.urgency) next.urgency = urgency;
   if (/agend|cita|visita|disponib/i.test(text)) next.bookingIntent = true;
 
-  if (!next.problem && text.trim().length > 12 && !/^te envi[eé] una foto/i.test(text)) {
-    next.problem = text.trim().slice(0, 500);
+  if (text.trim().length > 12 && !/^te envi[eé] una foto/i.test(text)) {
+    const intentFromMessage = resolvePrimaryFromMessage(text);
+    if (intentFromMessage || !next.problem) {
+      next.problem = text.trim().slice(0, 500);
+    }
   }
   if (next.facts.symptom && !next.facts.need) next.facts.need = next.facts.symptom;
 

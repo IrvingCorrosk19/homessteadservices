@@ -4,6 +4,7 @@ import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SlotGroup } from "@/lib/concierge-turn-routing";
 import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routing";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 import { photosRemainingFromCount } from "@/lib/concierge-photo-cta";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
@@ -115,6 +116,8 @@ export function consumeOfferedSlots(state: ConversationState, slot: OfferedSlot)
 
 export function detectNewTransactionSignal(state: ConversationState, text: string, nextPrimary = "") {
   if (RESCHEDULE.test(text) && state.appointmentId) return false;
+  const latest = nextPrimary || resolvePrimaryFromMessage(text);
+  if (latest && state.primaryService && latest !== state.primaryService) return true;
   if (nextPrimary && state.primaryService && nextPrimary !== state.primaryService) return true;
   if (NEW_NEED.test(text) && text.trim().length > 12) return true;
   return false;
@@ -144,7 +147,7 @@ export function reconcileTransactionState(
     next.funnelStage = "DISCOVERY";
   }
 
-  if (detectNewTransactionSignal(next, text, next.primaryService)) {
+  if (detectNewTransactionSignal(next, text, resolvePrimaryFromMessage(text) || next.primaryService)) {
     next = clearActiveTransactionState(next, true);
     next.activeLeadId = "";
     next.appointmentId = "";

@@ -37,7 +37,21 @@ export async function createLeadFromConcierge(input: {
   utm?: Record<string, string>;
   escalate?: boolean;
 }) {
-  if (input.existingLeadId && !input.existingLeadId.startsWith("DRY-")) return input.existingLeadId;
+  if (input.existingLeadId && !input.existingLeadId.startsWith("DRY-")) {
+    let service = input.state.primaryService || input.state.service || "";
+    if (!playbookById(service) || service === "other" || service === "multiple" || service === "unknown") {
+      service = detectServices(`${input.state.problem} ${input.summary}`)[0] || "other";
+    }
+    const existing = getHomesteadDb()
+      .prepare("SELECT service FROM service_requests WHERE public_id = ?")
+      .get(input.existingLeadId) as { service: string } | undefined;
+    if (existing?.service === service) return input.existingLeadId;
+    logInfo("SERVICE_INTENT_RESOLVED", {
+      contentJobId: input.existingLeadId,
+      stage: "lead_service_mismatch_new_request",
+      phone: maskPhone(input.state.phone),
+    });
+  }
   if (!canHandoffLead(input.state)) return "";
   if (!shouldCreateCanonicalLead()) return "";
   const phone = classifyPhone(input.state.phone);
@@ -111,6 +125,11 @@ export async function createLeadFromConcierge(input: {
   const notify = !isConciergeDryRun();
   await dispatchServiceRequest(saved, { email: notify, n8n: notify, photos: [] });
   recordFunnelEvent(input.conversationId, "ServiceRequestCreated", { service, lead: saved.publicId });
+  logInfo("REQUEST_SERVICE_PERSISTED", {
+    contentJobId: saved.publicId,
+    stage: service,
+    phone: maskPhone(saved.phone),
+  });
   logInfo("ConciergeLeadCreated", {
     contentJobId: saved.publicId,
     stage: input.conversationId.slice(0, 8),

@@ -1,6 +1,21 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+
+const SHEET_MQ = "(max-width: 1279px)";
+
+/** Tailwind `xl` breakpoint — bottom sheet is only shown below this width. */
+export function useMobileSheetViewport() {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(SHEET_MQ);
+    const update = () => setActive(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return active;
+}
 
 type AppointmentDetailBottomSheetProps = {
   open: boolean;
@@ -16,10 +31,23 @@ export function AppointmentDetailBottomSheet({ open, title, onClose, children }:
 
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeRef.current?.focus({ preventScroll: true });
+    const mq = window.matchMedia(SHEET_MQ);
+    let previous = document.body.style.overflow;
+
+    const lockIfSheetVisible = () => {
+      if (!mq.matches) {
+        document.body.style.overflow = previous;
+        return;
+      }
+      previous = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      closeRef.current?.focus({ preventScroll: true });
+    };
+
+    lockIfSheetVisible();
+    mq.addEventListener("change", lockIfSheetVisible);
     return () => {
+      mq.removeEventListener("change", lockIfSheetVisible);
       document.body.style.overflow = previous;
     };
   }, [open]);

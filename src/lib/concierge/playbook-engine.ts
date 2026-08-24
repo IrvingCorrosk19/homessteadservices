@@ -6,6 +6,7 @@ import {
   type PlaybookServiceId,
   type ServicePlaybook,
 } from "@/lib/concierge/service-playbooks";
+import { resolvePrimaryFromMessage, serviceNeedDetail } from "@/lib/concierge/service-intent";
 import type { ConversationState } from "@/lib/concierge-store";
 
 const PHONE_MASK = /\+?\d[\d\s\-()]{6,}\d/g;
@@ -70,11 +71,19 @@ export function mergeDetectedServices(current: string[], incoming: string[]): Pl
   return [...new Set(ids)];
 }
 
-export function choosePrimary(detected: string[], current: string): PlaybookServiceId | "" {
+export function choosePrimary(detected: string[], current: string, latestText = ""): PlaybookServiceId | "" {
   const ids = detected.filter((id): id is PlaybookServiceId => Boolean(playbookById(id)));
+  const latestIntent = latestText ? resolvePrimaryFromMessage(latestText) : "";
+
+  if (latestIntent && current && latestIntent !== current) {
+    return latestIntent;
+  }
+  if (latestIntent) return latestIntent;
+
   if (current && ids.includes(current as PlaybookServiceId)) return current as PlaybookServiceId;
+  if (ids[0]) return ids[0];
   if (current && playbookById(current) && current !== "other") return current as PlaybookServiceId;
-  return ids[0] || "";
+  return "";
 }
 
 export function applyFactPatch(facts: Record<string, string>, patch: Record<string, unknown>) {
@@ -200,6 +209,10 @@ export function telegramServiceLines(input: {
 }) {
   const playbook = getPlaybook(input.service);
   const lines = [`🛠 ${playbook.label}`];
+  const detail = serviceNeedDetail(input.message, input.service);
+  if (detail && !fold(detail).includes(fold(playbook.label))) {
+    lines.push(`📝 ${detail}`);
+  }
   if (input.photoCount > 0) {
     lines.push(`📸 ${input.photoCount} ${input.photoCount === 1 ? "foto" : "fotos"} para revisión`);
   }

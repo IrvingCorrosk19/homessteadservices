@@ -14,6 +14,7 @@ import {
   reminderEligibleStatus,
   zonedLocalToUtcMs,
 } from "@/lib/appointment-time";
+import { serviceNeedDetail } from "@/lib/concierge/service-intent";
 import { adminChatIds, sendTelegramMessage, type TelegramButton } from "@/lib/content-telegram";
 import { customerWhatsAppUrl } from "@/lib/service-requests";
 import { contact, site } from "@/lib/site";
@@ -642,6 +643,10 @@ function formatAppointmentTelegram(
     "",
     `👤 ${appointment.customerName}`,
     `🛠 ${appointment.serviceLabel}`,
+    ...((): string[] => {
+      const detail = serviceNeedDetail(appointment.problem, appointment.service);
+      return detail && !detail.toLowerCase().includes(appointment.serviceLabel.toLowerCase()) ? [`📝 ${detail}`] : [];
+    })(),
     `📍 ${appointment.zone || "Por confirmar"}`,
     "",
     `📆 ${formatAppointmentDay(appointment.date)}`,
