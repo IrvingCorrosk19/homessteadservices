@@ -15,6 +15,8 @@ export type ParsedVisitWhen = {
   time: string;
   window: string;
   raw: string;
+  /** True when user named an exact calendar day (e.g. "el 27 de este mes"). */
+  exactDay: boolean;
 };
 
 function panamaParts(date: Date) {
@@ -91,12 +93,87 @@ function parseWindow(text: string) {
   return "";
 }
 
+const MONTHS: Array<{ re: RegExp; month: number }> = [
+  { re: /\beneros?\b/, month: 1 },
+  { re: /\bfebreros?\b/, month: 2 },
+  { re: /\bmarzos?\b/, month: 3 },
+  { re: /\babriles?\b/, month: 4 },
+  { re: /\bmayos?\b/, month: 5 },
+  { re: /\bjunios?\b/, month: 6 },
+  { re: /\bjulios?\b/, month: 7 },
+  { re: /\bagostos?\b/, month: 8 },
+  { re: /\bseptiembres?\b/, month: 9 },
+  { re: /\boctubres?\b/, month: 10 },
+  { re: /\bnoviembres?\b/, month: 11 },
+  { re: /\bdiciembres?\b/, month: 12 },
+];
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function ymdFromParts(year: number, month: number, day: number) {
+  if (day < 1 || day > daysInMonth(year, month)) return "";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Parse exact calendar day: "el 27", "el 27 de este mes", "27 de agosto", "día 27". */
+export function parseExactCalendarDay(text: string, todayYmd: string): string {
+  const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const year = Number(todayYmd.slice(0, 4));
+  const monthNow = Number(todayYmd.slice(5, 7));
+  const dayNow = Number(todayYmd.slice(8, 10));
+
+  const iso = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) return ymdFromParts(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  const esteMes = lower.match(/\b(?:el\s+|dia\s+|d[ií]a\s+)?(\d{1,2})\s+de\s+este\s+mes\b/);
+  if (esteMes) return ymdFromParts(year, monthNow, Number(esteMes[1]));
+
+  const dayMonth = lower.match(/\b(?:el\s+|dia\s+|d[ií]a\s+)?(\d{1,2})\s+de\s+([a-z]+)\b/);
+  if (dayMonth) {
+    const day = Number(dayMonth[1]);
+    const monthToken = dayMonth[2];
+    for (const entry of MONTHS) {
+      if (entry.re.test(monthToken)) {
+        let y = year;
+        if (entry.month < monthNow || (entry.month === monthNow && day < dayNow)) y += 1;
+        return ymdFromParts(y, entry.month, day);
+      }
+    }
+  }
+
+  const bareDay = lower.match(/\b(?:el|dia|d[ií]a)\s+(\d{1,2})\b(?!\s*(?:am|pm|a\.?\s*m|p\.?\s*m|:))/);
+  if (bareDay) {
+    const day = Number(bareDay[1]);
+    if (day >= 1 && day <= 31) {
+      let y = year;
+      let m = monthNow;
+      if (day < dayNow) {
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
+      }
+      return ymdFromParts(y, m, day);
+    }
+  }
+  return "";
+}
+
 export function parseNaturalDateTime(text: string, now = new Date()): ParsedVisitWhen {
   const raw = text.trim().replace(/\s+/g, " ").slice(0, 120);
   const lower = raw.toLowerCase();
   const today = panamaParts(now).ymd;
   let date = "";
-  if (/\bhoy\b/.test(lower)) date = today;
+  let exactDay = false;
+
+  const exact = parseExactCalendarDay(raw, today);
+  if (exact) {
+    date = exact;
+    exactDay = true;
+  } else if (/\bhoy\b/.test(lower)) date = today;
   else if (/\bpasado\s+ma[ñn]ana\b/.test(lower)) date = addYmd(today, 2);
   else if (/\bma[ñn]ana\b/.test(lower)) date = addYmd(today, 1);
   else {
@@ -113,7 +190,7 @@ export function parseNaturalDateTime(text: string, now = new Date()): ParsedVisi
   if (!inferred && window === "morning") inferred = "09:00";
   if (!inferred && window === "afternoon") inferred = "15:00";
   if (!inferred && window === "evening") inferred = "18:00";
-  return { date, time: inferred, window, raw };
+  return { date, time: inferred, window, raw, exactDay };
 }
 
 export function isBusinessClock(hm: string) {

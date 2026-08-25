@@ -228,7 +228,7 @@ const PAINTING: ServicePlaybook = {
 const REMODELING: ServicePlaybook = {
   serviceId: "remodeling",
   label: "Pequeñas remodelaciones",
-  aliases: ["remodel", "renovar", "transformar", "cocina", "baño completo", "drywall"],
+  aliases: ["remodel", "renovar", "transformar", "cocina", "baño completo", "drywall", "decorar", "decoraci", "renovaci", "hacerlo todo", "lo hagan todo"],
   objective: "Entender qué desea transformar y que casi siempre hace falta una visita.",
   facts: {
     space: fact("USEFUL", "Espacio", "baño, cocina, habitación"),

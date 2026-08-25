@@ -67,11 +67,22 @@ export async function createLeadFromConcierge(input: {
   const playbook = getPlaybook(service);
   const brief = formatRequestBrief(input.state, playbook);
   const location = input.state.location ? `Zona: ${input.state.location}. ` : "";
+  const building = input.state.facts?.building || input.state.facts?.ph || "";
+  const unit = input.state.facts?.unit || input.state.facts?.apartment || "";
+  const tower = input.state.facts?.tower || "";
+  const propertyBits = [
+    input.state.propertyType ? `Tipo: ${input.state.propertyType}` : "",
+    building ? `PH/Edificio: ${building}` : "",
+    tower ? `Torre: ${tower}` : "",
+    unit ? `Unidad: ${unit}` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
   const when = input.state.preferredTime ? `Preferencia de horario: ${input.state.preferredTime}. ` : "";
   const message = [
     "[Asistente web Homestead]",
     brief || input.summary || input.state.problem,
-    location + when,
+    location + (propertyBits ? `${propertyBits}. ` : "") + when,
     input.state.humanHandoffRequested ? "HUMAN_HANDOFF_REQUESTED" : "",
   ]
     .filter(Boolean)

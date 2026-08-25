@@ -24,6 +24,9 @@ export type PackedExtraction = {
   duration?: string;
   activeLeak?: string;
   hazard?: string;
+  building?: string;
+  tower?: string;
+  unit?: string;
   negated: string[];
   corrections: string[];
 };
@@ -155,10 +158,29 @@ function extractElectrical(text: string): { hazard?: string } {
 }
 
 function extractPropertyType(text: string) {
+  if (/\bph\b/i.test(text)) return "ph";
   if (/\bapartamento|apto\b/i.test(text)) return "apartment";
   if (/\bcasa\b/i.test(text)) return "house";
   if (/\boficina\b/i.test(text)) return "office";
+  if (/\blocal\b/i.test(text)) return "commerce";
   return "";
+}
+
+function extractBuildingFacts(text: string): { building?: string; tower?: string; unit?: string } {
+  const building =
+    text.match(/\b(?:ph|edificio|residencial)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i)?.[1] ||
+    text.match(/\ben\s+(?:el\s+)?ph\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i)?.[1] ||
+    "";
+  const tower = text.match(/\btorre\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ]+)/i)?.[1] || "";
+  const unit =
+    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*([A-Za-z0-9\-]+)/i)?.[1] ||
+    text.match(/\bapartamento\s+([A-Za-z0-9\-]+)/i)?.[1] ||
+    "";
+  return {
+    ...(building ? { building: building.trim() } : {}),
+    ...(tower ? { tower: tower.trim() } : {}),
+    ...(unit ? { unit: unit.trim() } : {}),
+  };
 }
 
 function extractSplitType(text: string) {
@@ -172,6 +194,7 @@ export function extractPackedMessage(text: string): PackedExtraction {
   const electrical = extractElectrical(text);
   const correction = applyLocationCorrection(text, "");
   const corrections = correction ? [correction] : [];
+  const buildingFacts = extractBuildingFacts(text);
   return {
     name: extractName(text),
     location: extractLocation(text) || correction,
@@ -183,6 +206,7 @@ export function extractPackedMessage(text: string): PackedExtraction {
     duration: extractDuration(text),
     activeLeak: plumbing.activeLeak,
     hazard: electrical.hazard,
+    ...buildingFacts,
     negated,
     corrections,
     ...(extractSplitType(text) ? { units: extractUnits(text) || "1" } : {}),
@@ -234,6 +258,32 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
     next.factConfidence = setConfidence(next.factConfidence || {}, "contactPreference", "EXPLICIT");
   }
   if (packed.propertyType) next.propertyType = packed.propertyType;
+  if (/^\s*mejor no[\s!.?]*$/i.test(text.trim()) || /\bmejor no[,.]?\s*(gracias)?[\s!.?]*$/i.test(text.trim())) {
+    if (next.primaryService || next.service) {
+      next.facts = { ...(next.facts || {}), abandonedService: next.primaryService || next.service };
+      next.primaryService = "";
+      next.service = "";
+      next.detectedServices = [];
+      next.activeLeadId = "";
+      next.offeredSlots = [];
+      next.awaitingSlotSelection = false;
+      next.bookingIntent = false;
+    }
+  }
+  if (packed.building) {
+    next.facts.building = packed.building;
+    next.facts.ph = packed.building;
+    next.factConfidence = setConfidence(next.factConfidence || {}, "building", "EXPLICIT");
+  }
+  if (packed.tower) {
+    next.facts.tower = packed.tower;
+    next.factConfidence = setConfidence(next.factConfidence || {}, "tower", "EXPLICIT");
+  }
+  if (packed.unit) {
+    next.facts.unit = packed.unit;
+    next.facts.apartment = packed.unit;
+    next.factConfidence = setConfidence(next.factConfidence || {}, "unit", "EXPLICIT");
+  }
   if (packed.units) {
     next.facts.units = packed.units;
     next.factConfidence = setConfidence(next.factConfidence || {}, "units", "EXPLICIT");

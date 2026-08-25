@@ -41,6 +41,8 @@ import {
   questionEconomyBlock,
   shouldFlagOverquestioning,
 } from "@/lib/concierge/turn-intelligence";
+import { getAppointmentReadiness, readinessPromptHint } from "@/lib/concierge/appointment-readiness";
+import { answerMemoryQuestion, stripFalseThankYou } from "@/lib/concierge/memory-truth";
 import {
   areOfferedSlotsActive,
   buildSessionSnapshot,
@@ -238,6 +240,34 @@ export async function conciergeTurn(input: {
       };
     }
 
+    const memory = answerMemoryQuestion(text, state);
+    if (memory.handled) {
+      addMessage(input.conversationId, "assistant", memory.reply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: memory.reply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
     if (shouldStopCommercial(text) || EXIT_RE.test(text)) {
       const reply = "Queda anotado: no te contactaremos. Si más adelante quieres retomar un servicio de Homestead, aquí estamos.";
       if (conversation.leadPublicId) stopLeadIfPresent(conversation.leadPublicId);
@@ -304,6 +334,8 @@ export async function conciergeTurn(input: {
               email: state.email ? "present" : null,
               location: state.location || null,
               propertyType: state.propertyType || null,
+              building: state.facts?.building || state.facts?.ph || null,
+              unit: state.facts?.unit || state.facts?.apartment || null,
               service: state.primaryService || state.service || null,
               detectedServices: state.detectedServices || [],
               facts: state.facts || {},
@@ -317,7 +349,8 @@ export async function conciergeTurn(input: {
               bookingStrategy: state.bookingStrategy || playbook.bookingStrategy,
               urgency: state.urgency || "normal",
               safety: SAFETY_RE.test(text),
-            })}`,
+              appointmentReadiness: getAppointmentReadiness(state),
+            })}\n${readinessPromptHint(getAppointmentReadiness(state))}`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
@@ -434,6 +467,7 @@ export async function conciergeTurn(input: {
         ? "Cuando quieras, revisamos un horario real para la visita. ¿Qué día te queda mejor?"
         : "Cuando quieras te ayudo a dejar los datos para que el equipo te contacte. ¿Me compartes un teléfono?";
     }
+    reply = stripFalseThankYou(reply, text);
     if (ctx.bookedThisTurn) {
       const slot = state.pendingSlot;
       const when = slot?.date && slot?.time ? formatPanamaSlot(slot.date, slot.time) : "el horario acordado";

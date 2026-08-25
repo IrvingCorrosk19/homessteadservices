@@ -23,6 +23,8 @@ import {
   shouldOfferAvailability,
 } from "@/lib/concierge/playbook-engine";
 import { applyTurnIntelligence, parseTurnIntelligence } from "@/lib/concierge/turn-intelligence";
+import { getAppointmentReadiness, firstMissingQuestion } from "@/lib/concierge/appointment-readiness";
+import { logInfo } from "@/lib/log";
 import {
   activateOfferedSlots,
   clearActiveTransactionState,
@@ -349,22 +351,41 @@ export async function executeConciergeTool(
       };
     }
     const availability = checkAvailability({
-      dateText: asString(args.dateText) || state.preferredDate,
-      timeText: asString(args.timeText) || state.preferredTime,
+      dateText: asString(args.dateText) || state.preferredDate || undefined,
+      timeText: asString(args.timeText) || state.preferredTime || undefined,
     });
-    state = activateOfferedSlots(state, availability.slots as OfferedSlot[]);
+    let slots = availability.slots;
+    if (availability.exactDayRequested) {
+      const mismatched = slots.filter((slot) => slot.date !== availability.requested.date);
+      if (mismatched.length) {
+        logInfo("AVAILABILITY_DATE_MISMATCH", {
+          contentJobId: ctx.conversationId.slice(0, 8),
+          stage: availability.requested.date,
+        });
+      }
+      slots = slots.filter((slot) => slot.date === availability.requested.date);
+    }
+    state = activateOfferedSlots(state, slots as OfferedSlot[]);
     state.preferredDate = availability.requested.date || state.preferredDate;
     if (availability.requested.time) state.preferredTime = availability.requested.time;
-    ctx.lastSlots.splice(0, ctx.lastSlots.length, ...availability.slots);
+    ctx.lastSlots.splice(0, ctx.lastSlots.length, ...slots);
     recordFunnelEvent(ctx.conversationId, "AvailabilityChecked", {
       date: availability.requested.date,
-      slots: availability.slots.length,
+      slots: slots.length,
     });
     return {
       result: {
         timezone: availability.timezone,
-        slots: availability.slots,
+        slots,
         requestedAvailable: availability.requestedAvailable,
+        exactDayRequested: availability.exactDayRequested,
+        requestedDateUnavailable: availability.requestedDateUnavailable,
+        message: availability.message || null,
+        instruction: availability.requestedDateUnavailable
+          ? "Di claramente que esa fecha no tiene horarios. Ofrece revisar días cercanos SOLO si el cliente acepta. NO presentes otro día como si fuera la fecha pedida."
+          : availability.exactDayRequested
+            ? `Ofrece SOLO horarios del ${availability.requested.date}. No sustituyas por otra fecha.`
+            : null,
       },
       state,
       leadId,
@@ -387,6 +408,26 @@ export async function executeConciergeTool(
       return {
         result: { ok: false, reason: slotCheck.reason, message: slotCheck.message, slots: state.offeredSlots },
         state: clearActiveTransactionState(state),
+        leadId,
+      };
+    }
+    const readiness = getAppointmentReadiness(state, { date, time });
+    if (!readiness.ready) {
+      logInfo("APPOINTMENT_BLOCKED_INCOMPLETE", {
+        contentJobId: ctx.conversationId.slice(0, 8),
+        stage: readiness.missingFields.join(","),
+      });
+      return {
+        result: {
+          ok: false,
+          reason: "missing_visit_data",
+          missingFields: readiness.missingFields,
+          knownFields: readiness.knownFields,
+          message: firstMissingQuestion(readiness),
+          instruction:
+            "NO digas que la visita quedó agendada. Pide de forma natural los datos que faltan. Cuando estén listos, resume y espera confirmación antes de volver a create_appointment.",
+        },
+        state,
         leadId,
       };
     }
@@ -493,7 +534,22 @@ export async function executeConciergeTool(
 
 export function mergeParsedWhen(state: ConversationState, text: string) {
   const parsed = parseNaturalDateTime(text);
-  if (parsed.date) state.preferredDate = parsed.date;
+  if (parsed.date) {
+    if (state.preferredDate && state.preferredDate !== parsed.date) {
+      const previousSlots = state.offeredSlots || [];
+      state = {
+        ...state,
+        offeredSlots: [],
+        awaitingSlotSelection: false,
+        slotOfferToken: "",
+        pendingSlot: null,
+        historicalSlotLabels: [
+          ...new Set([...(state.historicalSlotLabels || []), ...previousSlots.map((s) => s.label)]),
+        ].slice(-6),
+      };
+    }
+    state.preferredDate = parsed.date;
+  }
   if (parsed.time) state.preferredTime = parsed.time;
   return state;
 }

@@ -69,40 +69,74 @@ export function checkAvailability(input: { dateText?: string; timeText?: string;
   slots: AvailabilitySlot[];
   requested: { date: string; time: string };
   requestedAvailable: boolean;
+  exactDayRequested: boolean;
+  requestedDateUnavailable: boolean;
+  message?: string;
 } {
   const now = input.now || new Date();
   const parsed = parseNaturalDateTime(`${input.dateText || ""} ${input.timeText || ""}`.trim(), now);
   const today = todayInPanama(now);
-  const date = parsed.date && parsed.date >= today ? parsed.date : addYmd(today, 1);
+  const exactDayRequested = Boolean(parsed.exactDay && parsed.date);
+  let date = "";
+  if (exactDayRequested) {
+    date = parsed.date;
+  } else if (parsed.date && parsed.date >= today) {
+    date = parsed.date;
+  } else {
+    date = addYmd(today, 1);
+  }
+
   const hours = slotHours();
   const from = today;
   const to = businessYmd(now, 21);
   const busy = occupiedKeys(from, to);
   const requestedTime = parsed.time && isBusinessClock(parsed.time) ? parsed.time : "";
+
+  if (exactDayRequested && date < today) {
+    return {
+      timezone: hoursTimezone(),
+      slots: [],
+      requested: { date, time: requestedTime },
+      requestedAvailable: false,
+      exactDayRequested: true,
+      requestedDateUnavailable: true,
+      message: `Esa fecha (${date}) ya pasó. Si quieres, puedo revisar otro día.`,
+    };
+  }
+
   const requestedAvailable = Boolean(
     requestedTime && !busy.has(`${date}|${requestedTime}`) && !isPastSlot(date, requestedTime, now),
   );
 
   const slots: AvailabilitySlot[] = [];
-  const considerDates = [date, addYmd(date, 1), addYmd(date, 2)];
   if (requestedAvailable) {
     slots.push({ date, time: requestedTime, label: labelFor(date, requestedTime) });
   }
+
+  const considerDates = exactDayRequested ? [date] : [date, addYmd(date, 1), addYmd(date, 2)];
   for (const day of considerDates) {
     for (const time of hours) {
       if (slots.length >= 4) break;
       if (busy.has(`${day}|${time}`)) continue;
       if (isPastSlot(day, time, now)) continue;
       if (slots.some((item) => item.date === day && item.time === time)) continue;
+      if (exactDayRequested && day !== date) continue;
       slots.push({ date: day, time, label: labelFor(day, time) });
     }
     if (slots.length >= 4) break;
   }
+
+  const requestedDateUnavailable = exactDayRequested && slots.length === 0;
   return {
     timezone: hoursTimezone(),
     slots,
     requested: { date, time: requestedTime },
     requestedAvailable,
+    exactDayRequested,
+    requestedDateUnavailable,
+    message: requestedDateUnavailable
+      ? `El ${date.slice(8, 10)} no tengo horarios disponibles. Si quieres, puedo revisar el día anterior o el siguiente.`
+      : undefined,
   };
 }
 
