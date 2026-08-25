@@ -34,7 +34,7 @@ import {
   redactForModel,
 } from "@/lib/concierge/playbook-engine";
 import { copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
-import { formatConciergePhotoMessage } from "@/lib/concierge-photo-message";
+import { formatConciergePhotoMessage, parseConciergePhotoMessage } from "@/lib/concierge-photo-message";
 import { applyPackedExtraction } from "@/lib/concierge/packed-extraction";
 import {
   detectRepeatedQuestion,
@@ -60,6 +60,19 @@ import {
   priceGuidanceReply,
   socialAckReply,
 } from "@/lib/concierge-turn-routing";
+import {
+  activateDigitalLockFlow,
+  analyzeDigitalLockPhoto,
+  applyDigitalLockVision,
+  detectDigitalLockPurchaseIntent,
+  digitalLockIntroReply,
+  digitalLockPhotosComplete,
+  digitalLockPromptBlock,
+  getDigitalLockChecklist,
+  knownDigitalLockViews,
+  maybeCompleteDigitalLockMeasurement,
+  type VisionInspectionResult,
+} from "@/lib/concierge/digital-lock-vision";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -166,6 +179,87 @@ export async function conciergeTurn(input: {
     state = extractCasualFacts(state, text);
     const returningGreeting = isReturningGreeting(text);
     let leadCreatedThisTurn = false;
+
+    const digitalLockIntent = detectDigitalLockPurchaseIntent(text);
+    if (digitalLockIntent) {
+      state = activateDigitalLockFlow(state);
+    }
+    state = maybeCompleteDigitalLockMeasurement(state, text);
+
+    let digitalLockReply = "";
+    let digitalLockChecklist = getDigitalLockChecklist(state);
+    if (digitalLockChecklist.active) {
+      const latestPhoto = [...recentMessages(input.conversationId, 12)]
+        .reverse()
+        .map((item) => (item.role === "user" ? parseConciergePhotoMessage(item.body) : null))
+        .find((item) => item)?.photoId;
+      if (latestPhoto && latestPhoto !== digitalLockChecklist.lastPhotoId) {
+        const vision =
+          (await analyzeDigitalLockPhoto({
+            conversationId: input.conversationId,
+            photoId: latestPhoto,
+            knownViews: knownDigitalLockViews(digitalLockChecklist),
+          })) ||
+          ({
+            imageType: "unknown",
+            doorVisible: false,
+            lockVisible: false,
+            relevantAreaVisible: false,
+            quality: "poor",
+            blurred: false,
+            tooDark: false,
+            tooClose: false,
+            tooFar: false,
+            duplicateSuspected: false,
+            confidence: 0,
+            observations: ["vision_unavailable"],
+            missingVisualInformation: ["no se pudo analizar la imagen"],
+            doorTypeGuess: "",
+            lockFeaturesObserved: [],
+            measurementNeeded: false,
+            measurementSafeToInfer: false,
+          } satisfies VisionInspectionResult);
+        const applied = applyDigitalLockVision(state, latestPhoto, vision);
+        state = applied.state;
+        digitalLockReply = applied.reply;
+        digitalLockChecklist = getDigitalLockChecklist(state);
+      } else if (
+        digitalLockIntent &&
+        !digitalLockPhotosComplete(digitalLockChecklist) &&
+        !digitalLockChecklist.front &&
+        !digitalLockChecklist.inside &&
+        !digitalLockChecklist.edge
+      ) {
+        digitalLockReply = digitalLockIntroReply();
+      }
+    }
+
+    if (digitalLockReply) {
+      addMessage(input.conversationId, "assistant", digitalLockReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: digitalLockReply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
 
     const route = interpretTurnRoute(text, state);
     if (route.priceIntent || route.serviceQuestionIntent || route.objectionIntent) {
@@ -317,12 +411,13 @@ export async function conciergeTurn(input: {
               content: `INTERRUPCIÓN (${route.priceIntent ? "PRECIO" : route.newNeedIntent ? "NUEVA NECESIDAD" : route.bookingPauseIntent ? "PAUSAR AGENDA" : route.serviceQuestionIntent ? "PREGUNTA SERVICIO" : route.socialAckIntent ? "AGRADECIMIENTO" : "INTERRUPCIÓN"}): el cliente NO está eligiendo horario ahora. Responde esa intención primero. NO repitas la lista de horarios salvo que pida retomar la cita.`,
             }]
           : [];
+        const digitalLockBlock = digitalLockPromptBlock(getDigitalLockChecklist(state));
         const messages: ChatMessage[] = [
           {
             role: "system",
             content: conciergeSystemPrompt(
               knowledge,
-              `${playbookPromptBlock(playbook, state, missing)}\n\n${questionEconomyBlock(state, playbook)}`,
+              `${playbookPromptBlock(playbook, state, missing)}\n\n${questionEconomyBlock(state, playbook)}${digitalLockBlock ? `\n\n${digitalLockBlock}` : ""}`,
             ),
           },
           ...interruptionBlock,
@@ -556,7 +651,9 @@ export function attachConciergePhoto(
 ) {
   const conversation = getConversation(conversationId);
   if (!conversation) return null;
-  if (photoCount(conversationId) >= 4) return { error: "limit" as const };
+  const digitalLock = getDigitalLockChecklist(conversation.state);
+  const maxPhotos = digitalLock.active ? 8 : 4;
+  if (photoCount(conversationId) >= maxPhotos) return { error: "limit" as const };
   const stored = savePhoto(conversationId, bytes, sniffed);
   const state = { ...conversation.state, photoCount: conversation.state.photoCount + 1 };
   touchConversation(conversationId, { state });

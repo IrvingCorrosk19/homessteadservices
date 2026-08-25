@@ -6,6 +6,11 @@ import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routi
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 import { photosRemainingFromCount } from "@/lib/concierge-photo-cta";
+import {
+  emptyDigitalLockChecklist,
+  getDigitalLockChecklist,
+  setDigitalLockChecklist,
+} from "@/lib/concierge/digital-lock-vision";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
 export const OFFERED_SLOTS_TTL_MS = 45 * 60 * 1000;
@@ -152,6 +157,11 @@ export function reconcileTransactionState(
     next.activeLeadId = "";
     next.appointmentId = "";
     next.funnelStage = "DISCOVERY";
+    // CRITICAL: evidence from a prior request must not satisfy a new digital-lock case
+    const prior = getDigitalLockChecklist(next);
+    if (prior.active || prior.front || prior.inside || prior.edge) {
+      next = setDigitalLockChecklist(next, emptyDigitalLockChecklist());
+    }
   }
 
   return next;
@@ -202,6 +212,14 @@ export function validateActiveSlotBooking(state: ConversationState, date: string
 }
 
 export function shouldShowPhotoCta(state: ConversationState) {
+  const checklist = getDigitalLockChecklist(state);
+  if (checklist.active) {
+    const missing =
+      checklist.front?.status !== "PASS" ||
+      checklist.inside?.status !== "PASS" ||
+      checklist.edge?.status !== "PASS";
+    return missing;
+  }
   const service = state.primaryService || state.service;
   if (!service) return false;
   const playbook = getPlaybook(service);
@@ -214,7 +232,9 @@ export function buildSessionSnapshot(state: ConversationState, now = Date.now())
   const active = areOfferedSlotsActive(state, now);
   const showChips = active && !state.bookingSuspended;
   const chips = showChips ? state.offeredSlots.slice(0, 6).map((item) => item.label) : [];
-  const photosRemaining = photosRemainingFromCount(state.photoCount || 0);
+  const digitalLock = getDigitalLockChecklist(state);
+  const maxPhotos = digitalLock.active ? 8 : 4;
+  const photosRemaining = photosRemainingFromCount(state.photoCount || 0, maxPhotos);
   return {
     chips,
     historicalChips: state.historicalSlotLabels || [],

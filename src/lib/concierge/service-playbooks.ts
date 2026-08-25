@@ -71,10 +71,10 @@ const LOCKSMITH: ServicePlaybook = {
     "smart lock",
     "locksmith",
   ],
-  objective: "Entender visualmente la puerta y la cerradura para que el técnico revise, con la menor fricción posible.",
+  objective: "Para compra/instalación de cerradura digital: revisar frente, interior y canto con visión; para cerrajería general: fotos útiles y acceso.",
   facts: {
     need: fact("USEFUL", "Necesidad", "cambio, no abre, quedó afuera, digital, copia de llave"),
-    photos: fact("USEFUL", "Fotos", "puerta, cerradura de cerca, canto si se puede"),
+    photos: fact("USEFUL", "Fotos", "frente, interior y canto si es cerradura digital; puerta/cerradura si es genérico"),
     lockedOut: fact("USEFUL", "Acceso", "si la persona está afuera o no puede asegurar"),
     contact: fact("REQUIRED", "Contacto", "teléfono válido"),
     location: fact("USEFUL", "Zona", "zona general, no dirección exacta al inicio"),
@@ -88,12 +88,12 @@ const LOCKSMITH: ServicePlaybook = {
     "Si no puede entrar o asegurar",
   ],
   photoGuidance:
-    "Con unas fotos de la puerta y de la cerradura el técnico entiende mucho mejor el trabajo. Si puedes, una de frente y otra del canto de la puerta ayuda.",
-  photoWhy: "el técnico puede ver el herraje antes de coordinar",
+    "Si es cerradura digital (compra/instalación): pide frente, interior y canto del pestillo, una por una, y solo lo que falte. Si es cerrajería general: fotos de la puerta y la cerradura ayudan al técnico.",
+  photoWhy: "el técnico o la revisión visual puede ver el herraje antes de recomendar o coordinar",
   urgencySignals: ["no puedo entrar", "quedé afuera", "quede afuera", "no puedo asegurar", "perdí la llave", "perdi la llave"],
-  safetyRules: "No orientar a forzar la puerta ni a desarmar la cerradura. No inventar compatibilidad de modelos digitales.",
+  safetyRules: "No orientar a forzar la puerta ni a desarmar la cerradura. No inventar medidas, compatibilidad absoluta, marcas, precios ni stock de cerraduras digitales.",
   bookingStrategy: "PHOTO_REVIEW_FIRST",
-  telegramFocus: "fotos y si hay persona sin acceso",
+  telegramFocus: "cerradura digital: checklist frente/interior/canto; genérico: fotos y acceso",
   unknownCatalog: false,
 };
 

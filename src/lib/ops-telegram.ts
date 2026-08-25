@@ -176,6 +176,7 @@ export function requestDetail(publicId: string) {
         service: request.service,
         message: request.message,
         photoCount: request.photos.length,
+        factsJson: request.factsJson,
       }),
       loc ? `📍 ${loc}` : "",
       `🕐 ${agoLabel(request.createdAt)}`,

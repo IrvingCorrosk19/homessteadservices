@@ -10,6 +10,6 @@ export function assistantRequestsPhoto(text: string) {
   return false;
 }
 
-export function photosRemainingFromCount(photoCount: number) {
-  return Math.max(0, 4 - photoCount);
+export function photosRemainingFromCount(photoCount: number, maxPhotos = 4) {
+  return Math.max(0, maxPhotos - photoCount);
 }

@@ -103,6 +103,7 @@ export function buildN8nPayload(saved: SavedServiceRequest): HomesteadN8nPayload
         service: saved.service,
         message: saved.message,
         photoCount: items.length,
+        factsJson: saved.factsJson,
       }),
     },
   };

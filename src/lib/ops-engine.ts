@@ -146,6 +146,7 @@ export function enqueueSlaAlerts() {
           service: row.service,
           message: row.message,
           photoCount: photos,
+          factsJson: row.facts_json || "",
         }),
         photos > 0 ? `${photos} foto${photos === 1 ? "" : "s"} esperando revisión.` : "",
         `${opsConfig().slaFirstMinutes} min sin atención.`,
@@ -173,6 +174,7 @@ export function enqueueSlaAlerts() {
           service: row.service,
           message: row.message,
           photoCount: photos,
+          factsJson: row.facts_json || "",
         }),
         `${opsConfig().slaEscalationMinutes} min sin atender.`,
       ]

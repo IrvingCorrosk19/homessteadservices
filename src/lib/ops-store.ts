@@ -336,7 +336,7 @@ export function listSlaDue(kind: "first" | "escalation") {
       : "(r.sla_first_alerted_at IS NOT NULL AND r.sla_first_alerted_at != '' AND (r.sla_escalated_at IS NULL OR r.sla_escalated_at = ''))";
   return getHomesteadDb()
     .prepare(
-      `SELECT r.public_id, r.created_at, r.name, r.service, r.message, r.phone, r.photos_json, COALESCE(l.is_test,0) as is_test
+      `SELECT r.public_id, r.created_at, r.name, r.service, r.message, r.phone, r.photos_json, COALESCE(r.facts_json,'') as facts_json, COALESCE(l.is_test,0) as is_test
        FROM service_requests r
        LEFT JOIN revenue_leads l ON l.lead_id = r.public_id
        WHERE r.status = 'NEW'
@@ -354,6 +354,7 @@ export function listSlaDue(kind: "first" | "escalation") {
     message: string;
     phone: string;
     photos_json: string;
+    facts_json: string;
     is_test: number;
   }>;
 }

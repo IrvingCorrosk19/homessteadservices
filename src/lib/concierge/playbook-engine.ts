@@ -146,6 +146,26 @@ export function usefulQuestionHint(playbook: ServicePlaybook, missing: string[])
 }
 
 export function shouldOfferAvailability(playbook: ServicePlaybook, state: ConversationState) {
+  if (state.facts?.digitalLockFlow === "1") {
+    try {
+      const checklist = JSON.parse(state.facts.digitalLockChecklist || "{}") as {
+        front?: { status?: string };
+        inside?: { status?: string };
+        edge?: { status?: string };
+        compatibility?: string;
+      };
+      const photosReady =
+        checklist.front?.status === "PASS" &&
+        checklist.inside?.status === "PASS" &&
+        checklist.edge?.status === "PASS";
+      if (!photosReady) return false;
+      if (checklist.compatibility === "NEEDS_MORE_INFO" || checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW") {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
   if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1) return false;
   if (playbook.bookingStrategy === "TECH_REVIEW_FIRST" && state.urgency === "safety") return false;
   return true;
@@ -206,20 +226,50 @@ export function telegramServiceLines(input: {
   message: string;
   photoCount: number;
   urgency?: string;
+  factsJson?: string;
 }) {
-  const playbook = getPlaybook(input.service);
-  const lines = [`🛠 ${playbook.label}`];
-  const detail = serviceNeedDetail(input.message, input.service);
-  if (detail && !fold(detail).includes(fold(playbook.label))) {
-    lines.push(`📝 ${detail}`);
+  let digitalLockExtra: string[] = [];
+  try {
+    const parsed = JSON.parse(input.factsJson || "{}") as { facts?: Record<string, string> };
+    const raw = parsed.facts?.digitalLockChecklist;
+    if (raw) {
+      const checklist = JSON.parse(raw) as {
+        active?: boolean;
+        front?: { status?: string };
+        inside?: { status?: string };
+        edge?: { status?: string };
+        compatibility?: string;
+        doorNotes?: string;
+        lockNotes?: string;
+      };
+      if (checklist.active) {
+        digitalLockExtra = [
+          "🔐 CERRADURA DIGITAL",
+          `Fotos: Frente ${checklist.front?.status === "PASS" ? "✅" : "○"} · Interior ${checklist.inside?.status === "PASS" ? "✅" : "○"} · Canto ${checklist.edge?.status === "PASS" ? "✅" : "○"}`,
+          checklist.doorNotes ? `Puerta (obs.): ${checklist.doorNotes}` : "",
+          checklist.lockNotes ? `Cerradura (obs.): ${checklist.lockNotes}` : "",
+          `Estado: ${checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW" ? "LISTO PARA REVISIÓN TÉCNICA" : checklist.compatibility || "NEEDS_MORE_INFO"}`,
+        ].filter(Boolean);
+      }
+    }
+  } catch {
+    digitalLockExtra = [];
   }
-  if (input.photoCount > 0) {
+  const playbook = getPlaybook(input.service);
+  const lines = digitalLockExtra.length ? [...digitalLockExtra] : [`🛠 ${playbook.label}`];
+  if (!digitalLockExtra.length) {
+    const detail = serviceNeedDetail(input.message, input.service);
+    if (detail && !fold(detail).includes(fold(playbook.label))) {
+      lines.push(`📝 ${detail}`);
+    }
+  }
+  if (input.photoCount > 0 && !digitalLockExtra.length) {
     lines.push(`📸 ${input.photoCount} ${input.photoCount === 1 ? "foto" : "fotos"} para revisión`);
   }
   if (input.urgency === "safety") lines.push("⚠️ Señal de riesgo — priorizar");
   else if (input.urgency === "elevated") lines.push("Urgencia elevada");
   const snippet = input.message.replace(/\s+/g, " ").trim().slice(0, 160);
-  if (snippet) lines.push(snippet);
+  if (snippet && !digitalLockExtra.length) lines.push(snippet);
   return lines;
 }
 
@@ -246,6 +296,39 @@ export function adminFactRows(input: {
   const rows: Array<{ label: string; value: string }> = [{ label: "Servicio", value: playbook.label }];
   const need = facts.need || facts.symptom || facts.what || facts.goal || "";
   if (need) rows.push({ label: "Necesidad", value: need });
+  try {
+    if (facts.digitalLockChecklist) {
+      const checklist = JSON.parse(facts.digitalLockChecklist) as {
+        active?: boolean;
+        front?: { status?: string };
+        inside?: { status?: string };
+        edge?: { status?: string };
+        compatibility?: string;
+        doorNotes?: string;
+        lockNotes?: string;
+        measurementRequired?: boolean;
+        measurementComplete?: boolean;
+      };
+      if (checklist.active) {
+        rows.push({ label: "Flujo", value: "Cerradura digital" });
+        rows.push({
+          label: "Fotos cerradura",
+          value: `Frente ${checklist.front?.status === "PASS" ? "✅" : "○"} · Interior ${checklist.inside?.status === "PASS" ? "✅" : "○"} · Canto ${checklist.edge?.status === "PASS" ? "✅" : "○"}`,
+        });
+        if (checklist.compatibility) rows.push({ label: "Compatibilidad IA", value: checklist.compatibility });
+        if (checklist.doorNotes) rows.push({ label: "Puerta (obs.)", value: checklist.doorNotes });
+        if (checklist.lockNotes) rows.push({ label: "Cerradura (obs.)", value: checklist.lockNotes });
+        if (checklist.measurementRequired) {
+          rows.push({
+            label: "Medida",
+            value: checklist.measurementComplete ? "Completa" : "Pendiente (grosor)",
+          });
+        }
+      }
+    }
+  } catch {
+    // ignore malformed checklist
+  }
   const photos = input.photos || Number(parsed.photoCount || 0);
   if (photos > 0) rows.push({ label: "Fotos", value: String(photos) });
   const zona = parsed.location || facts.location || input.location || "";
