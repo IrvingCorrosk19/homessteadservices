@@ -16,6 +16,7 @@ export type SavedPhoto = {
   size: number;
   type: string;
   storedAs: string;
+  sourceStoredAs?: string;
 };
 
 export type BufferedPhoto = {

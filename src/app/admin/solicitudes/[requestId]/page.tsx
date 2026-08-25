@@ -11,6 +11,7 @@ import {
 } from "@/lib/service-requests";
 import type { FormService } from "@/lib/site";
 import { adminFactRows } from "@/lib/concierge/playbook-engine";
+import { buildAdminPhotoEvidenceMap } from "@/lib/concierge/digital-lock-vision";
 
 export const dynamic = "force-dynamic";
 
@@ -46,10 +47,18 @@ export default async function SolicitudDetailPage({
         slaFirstAlertedAt={sla.slaFirstAlertedAt}
         slaEscalatedAt={sla.slaEscalatedAt}
         returnTo={query.returnTo}
-        factRows={adminFactRows({          service: request.service,
+        factRows={adminFactRows({
+          service: request.service,
           photos: request.photos.length,
           factsJson: request.factsJson,
         })}
+        photoEvidenceByFile={buildAdminPhotoEvidenceMap(
+          request.photos.map((photo) => ({
+            storedAs: photo.storedAs,
+            sourceStoredAs: (photo as { sourceStoredAs?: string }).sourceStoredAs,
+          })),
+          request.factsJson,
+        )}
       />
     </>
   );

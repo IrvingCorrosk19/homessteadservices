@@ -30,6 +30,7 @@ export function RequestDetailClient({
   serviceLabel,
   whatsappUrl,
   factRows = [],
+  photoEvidenceByFile = {},
   slaFirstAlertedAt = null,
   slaEscalatedAt = null,
   returnTo,
@@ -39,6 +40,7 @@ export function RequestDetailClient({
   serviceLabel: string;
   whatsappUrl: string | null;
   factRows?: Array<{ label: string; value: string }>;
+  photoEvidenceByFile?: Record<string, { tone: "pass" | "retake" | "reject" | "pending"; title: string; detail: string }>;
   slaFirstAlertedAt?: string | null;
   slaEscalatedAt?: string | null;
   returnTo?: string;
@@ -176,6 +178,7 @@ export function RequestDetailClient({
         <AdminPhotos
           requestId={request.publicId}
           files={request.photos.map((photo) => photo.storedAs)}
+          evidenceByFile={photoEvidenceByFile}
         />
       </div>
 

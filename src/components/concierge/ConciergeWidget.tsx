@@ -378,12 +378,22 @@ export function ConciergeWidget() {
       ),
     );
 
+    setMessages((current) => [
+      ...current,
+      {
+        role: "assistant",
+        body: "Revisando foto...",
+        localKey: `review-${localKey}`,
+      },
+    ]);
+
     const ai = await fetch("/api/concierge/photo", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ caption: caption || "Comparto esta foto para orientar el servicio." }),
     });
     const data = await ai.json();
+    setMessages((current) => current.filter((item) => item.localKey !== `review-${localKey}`));
     if (!ai.ok || !data.ok) throw new Error("turn_failed");
     applyTurnResponse(data);
   }, [applyTurnResponse]);

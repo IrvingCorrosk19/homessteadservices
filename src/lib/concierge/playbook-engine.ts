@@ -159,7 +159,11 @@ export function shouldOfferAvailability(playbook: ServicePlaybook, state: Conver
         checklist.inside?.status === "PASS" &&
         checklist.edge?.status === "PASS";
       if (!photosReady) return false;
-      if (checklist.compatibility === "NEEDS_MORE_INFO" || checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW") {
+      if (
+        checklist.compatibility === "NEEDS_MORE_INFO" ||
+        checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW" ||
+        checklist.compatibility === "PHOTO_PRECHECK_INCOMPLETE"
+      ) {
         return false;
       }
     } catch {
@@ -168,6 +172,9 @@ export function shouldOfferAvailability(playbook: ServicePlaybook, state: Conver
   }
   if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1) return false;
   if (playbook.bookingStrategy === "TECH_REVIEW_FIRST" && state.urgency === "safety") return false;
+  if (state.facts?.digitalLockFlow === "1") {
+    // already handled above — keep incomplete from offering slots
+  }
   return true;
 }
 
@@ -239,16 +246,34 @@ export function telegramServiceLines(input: {
         inside?: { status?: string };
         edge?: { status?: string };
         compatibility?: string;
+        rejected?: unknown[];
         doorNotes?: string;
         lockNotes?: string;
       };
       if (checklist.active) {
+        const mark = (status: string | undefined, label: string) =>
+          status === "PASS" ? `✅ ${label}` : status === "RETAKE" ? `⚠ ${label} (retake)` : `❌ ${label} pendiente`;
+        const valid =
+          (checklist.front?.status === "PASS" ? 1 : 0) +
+          (checklist.inside?.status === "PASS" ? 1 : 0) +
+          (checklist.edge?.status === "PASS" ? 1 : 0);
         digitalLockExtra = [
           "🔐 CERRADURA DIGITAL",
-          `Fotos: Frente ${checklist.front?.status === "PASS" ? "✅" : "○"} · Interior ${checklist.inside?.status === "PASS" ? "✅" : "○"} · Canto ${checklist.edge?.status === "PASS" ? "✅" : "○"}`,
-          checklist.doorNotes ? `Puerta (obs.): ${checklist.doorNotes}` : "",
-          checklist.lockNotes ? `Cerradura (obs.): ${checklist.lockNotes}` : "",
-          `Estado: ${checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW" ? "LISTO PARA REVISIÓN TÉCNICA" : checklist.compatibility || "NEEDS_MORE_INFO"}`,
+          "Evidencia visual:",
+          mark(checklist.front?.status, "Frente"),
+          mark(checklist.inside?.status, "Interior"),
+          mark(checklist.edge?.status, "Canto"),
+          `Válidas: ${valid}/3` +
+            (Array.isArray(checklist.rejected) && checklist.rejected.length
+              ? ` · Rechazadas: ${checklist.rejected.length}`
+              : ""),
+          `Estado: ${
+            valid === 3
+              ? checklist.compatibility === "REQUIRES_TECHNICIAN_REVIEW"
+                ? "LISTO PARA REVISIÓN TÉCNICA"
+                : checklist.compatibility || "NEEDS_MORE_INFO"
+              : "PHOTO_PRECHECK_INCOMPLETE"
+          }`,
         ].filter(Boolean);
       }
     }
@@ -311,9 +336,13 @@ export function adminFactRows(input: {
       };
       if (checklist.active) {
         rows.push({ label: "Flujo", value: "Cerradura digital" });
+        const valid =
+          (checklist.front?.status === "PASS" ? 1 : 0) +
+          (checklist.inside?.status === "PASS" ? 1 : 0) +
+          (checklist.edge?.status === "PASS" ? 1 : 0);
         rows.push({
-          label: "Fotos cerradura",
-          value: `Frente ${checklist.front?.status === "PASS" ? "✅" : "○"} · Interior ${checklist.inside?.status === "PASS" ? "✅" : "○"} · Canto ${checklist.edge?.status === "PASS" ? "✅" : "○"}`,
+          label: "Evidencia cerradura digital",
+          value: `Válidas ${valid}/3 · Frente ${checklist.front?.status === "PASS" ? "✅" : "❌"} · Interior ${checklist.inside?.status === "PASS" ? "✅" : "❌"} · Canto ${checklist.edge?.status === "PASS" ? "✅" : "❌"}`,
         });
         if (checklist.compatibility) rows.push({ label: "Compatibilidad IA", value: checklist.compatibility });
         if (checklist.doorNotes) rows.push({ label: "Puerta (obs.)", value: checklist.doorNotes });

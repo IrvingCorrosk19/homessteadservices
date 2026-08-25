@@ -21,13 +21,13 @@ export function listConciergePhotoFiles(conversationId: string) {
 
 export function copyConciergePhotosToRequest(conversationId: string, publicId: string) {
   const files = listConciergePhotoFiles(conversationId).slice(0, 6);
-  if (!files.length) return [] as Array<{ name: string; size: number; type: string; storedAs: string }>;
+  if (!files.length) return [] as Array<{ name: string; size: number; type: string; storedAs: string; sourceStoredAs?: string }>;
   const photoDir = join(homesteadDataDir(), "photos", publicId);
   mkdirSync(photoDir, { recursive: true });
   const existing = getHomesteadDb()
     .prepare("SELECT photos_json FROM service_requests WHERE public_id = ?")
     .get(publicId) as { photos_json: string } | undefined;
-  const photos: Array<{ name: string; size: number; type: string; storedAs: string }> = JSON.parse(
+  const photos: Array<{ name: string; size: number; type: string; storedAs: string; sourceStoredAs?: string }> = JSON.parse(
     existing?.photos_json || "[]",
   );
   const seen = new Set(photos.map((item) => `${item.size}:${item.type}`));
@@ -40,7 +40,13 @@ export function copyConciergePhotosToRequest(conversationId: string, publicId: s
     if (photos.length >= 6) break;
     const storedAs = storedPhotoName(photos.length, sniffed.ext);
     copyFileSync(file.abs, join(photoDir, storedAs));
-    photos.push({ name: storedAs, size: bytes.length, type: sniffed.mime, storedAs });
+    photos.push({
+      name: storedAs,
+      size: bytes.length,
+      type: sniffed.mime,
+      storedAs,
+      sourceStoredAs: file.storedAs,
+    });
     seen.add(key);
   }
   getHomesteadDb()

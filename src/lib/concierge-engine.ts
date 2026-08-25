@@ -68,10 +68,12 @@ import {
   digitalLockIntroReply,
   digitalLockPhotosComplete,
   digitalLockPromptBlock,
+  enforceDigitalLockReplyTruth,
   getDigitalLockChecklist,
+  historySuggestsDigitalLockFlow,
   knownDigitalLockViews,
   maybeCompleteDigitalLockMeasurement,
-  type VisionInspectionResult,
+  visionFailedResult,
 } from "@/lib/concierge/digital-lock-vision";
 
 export { isConciergeDryRun, isConciergeEnabled };
@@ -181,7 +183,9 @@ export async function conciergeTurn(input: {
     let leadCreatedThisTurn = false;
 
     const digitalLockIntent = detectDigitalLockPurchaseIntent(text);
-    if (digitalLockIntent) {
+    const historyForLock = recentMessages(input.conversationId, 14);
+    const historyDigital = historySuggestsDigitalLockFlow(historyForLock);
+    if (digitalLockIntent || historyDigital) {
       state = activateDigitalLockFlow(state);
     }
     state = maybeCompleteDigitalLockMeasurement(state, text);
@@ -189,46 +193,51 @@ export async function conciergeTurn(input: {
     let digitalLockReply = "";
     let digitalLockChecklist = getDigitalLockChecklist(state);
     if (digitalLockChecklist.active) {
-      const latestPhoto = [...recentMessages(input.conversationId, 12)]
+      const pendingPhotoIds: string[] = [];
+      for (const item of historyForLock) {
+        if (item.role !== "user") continue;
+        const parsed = parseConciergePhotoMessage(item.body);
+        if (!parsed) continue;
+        if (digitalLockChecklist.analyzedPhotoIds.includes(parsed.photoId)) continue;
+        pendingPhotoIds.push(parsed.photoId);
+      }
+      const latestPhoto = [...historyForLock]
         .reverse()
         .map((item) => (item.role === "user" ? parseConciergePhotoMessage(item.body) : null))
         .find((item) => item)?.photoId;
-      if (latestPhoto && latestPhoto !== digitalLockChecklist.lastPhotoId) {
-        const vision =
-          (await analyzeDigitalLockPhoto({
+      if (
+        latestPhoto &&
+        !pendingPhotoIds.includes(latestPhoto) &&
+        latestPhoto !== digitalLockChecklist.lastPhotoId &&
+        !digitalLockChecklist.analyzedPhotoIds.includes(latestPhoto)
+      ) {
+        pendingPhotoIds.push(latestPhoto);
+      }
+
+      if (pendingPhotoIds.length) {
+        const replies: string[] = [];
+        for (const photoId of pendingPhotoIds) {
+          const analyzed = await analyzeDigitalLockPhoto({
             conversationId: input.conversationId,
-            photoId: latestPhoto,
+            photoId,
             knownViews: knownDigitalLockViews(digitalLockChecklist),
-          })) ||
-          ({
-            imageType: "unknown",
-            doorVisible: false,
-            lockVisible: false,
-            relevantAreaVisible: false,
-            quality: "poor",
-            blurred: false,
-            tooDark: false,
-            tooClose: false,
-            tooFar: false,
-            duplicateSuspected: false,
-            confidence: 0,
-            observations: ["vision_unavailable"],
-            missingVisualInformation: ["no se pudo analizar la imagen"],
-            doorTypeGuess: "",
-            lockFeaturesObserved: [],
-            measurementNeeded: false,
-            measurementSafeToInfer: false,
-          } satisfies VisionInspectionResult);
-        const applied = applyDigitalLockVision(state, latestPhoto, vision);
-        state = applied.state;
-        digitalLockReply = applied.reply;
-        digitalLockChecklist = getDigitalLockChecklist(state);
+            cachedByHash: digitalLockChecklist.analysisByHash,
+          });
+          const vision = analyzed?.vision || visionFailedResult("VISION_ANALYSIS_FAILED");
+          const applied = applyDigitalLockVision(state, photoId, vision, analyzed?.sha256);
+          state = applied.state;
+          digitalLockChecklist = getDigitalLockChecklist(state);
+          replies.push(applied.reply);
+        }
+        digitalLockReply = replies[replies.length - 1] || "";
       } else if (
-        digitalLockIntent &&
+        (digitalLockIntent || historyDigital) &&
         !digitalLockPhotosComplete(digitalLockChecklist) &&
         !digitalLockChecklist.front &&
         !digitalLockChecklist.inside &&
-        !digitalLockChecklist.edge
+        !digitalLockChecklist.edge &&
+        digitalLockChecklist.rejected.length === 0 &&
+        digitalLockChecklist.analyzedPhotoIds.length === 0
       ) {
         digitalLockReply = digitalLockIntroReply();
       }
@@ -563,6 +572,7 @@ export async function conciergeTurn(input: {
         : "Cuando quieras te ayudo a dejar los datos para que el equipo te contacte. ¿Me compartes un teléfono?";
     }
     reply = stripFalseThankYou(reply, text);
+    reply = enforceDigitalLockReplyTruth(reply, getDigitalLockChecklist(state));
     if (ctx.bookedThisTurn) {
       const slot = state.pendingSlot;
       const when = slot?.date && slot?.time ? formatPanamaSlot(slot.date, slot.time) : "el horario acordado";
