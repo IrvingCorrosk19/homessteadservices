@@ -1,12 +1,13 @@
+"use client";
+
 import Image from "next/image";
 import { ButtonLink } from "@/components/ui/Button";
+import { OpenChatButton } from "@/components/concierge/ServiceConsultButton";
 import { images, imageAlts } from "@/data/images";
-import { whatsappHref } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 export function Hero() {
   const dictionary = getDictionary();
-  const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
 
   return (
     <section id="inicio" className="relative min-h-[100svh] overflow-hidden">
@@ -33,14 +34,9 @@ export function Hero() {
           <ButtonLink href="/contact" variant="light">
             {dictionary.common.request}
           </ButtonLink>
-          <ButtonLink
-            href={whatsapp ?? "/contact"}
-            variant="secondary"
-            target={whatsapp ? "_blank" : undefined}
-            rel={whatsapp ? "noopener noreferrer" : undefined}
-          >
-            WhatsApp
-          </ButtonLink>
+          <OpenChatButton className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-cream/50 bg-transparent px-6 text-[0.78rem] font-medium tracking-[0.14em] uppercase text-cream transition-colors duration-300 hover:border-cream hover:bg-cream/10">
+            Hablar con Homestead
+          </OpenChatButton>
         </div>
         <p className="mt-10 max-w-xl text-[0.78rem] tracking-[0.08em] text-cream/70">
           {dictionary.hero.chips}

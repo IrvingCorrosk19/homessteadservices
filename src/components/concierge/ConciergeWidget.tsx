@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { prepareConciergePhoto, revokePreparedPhoto } from "@/lib/concierge-client-photo";
 import { assistantRequestsPhoto } from "@/lib/concierge-photo-cta";
 import { CameraIcon, ImageIcon, TrashIcon } from "@/components/concierge/ConciergePhotoIcons";
+import {
+  contextSwitchPrompt,
+  HOMESTEAD_OPEN_CHAT_EVENT,
+  isWebsiteImageChatContext,
+  type WebsiteImageChatContext,
+} from "@/lib/concierge-entry-context";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -22,6 +28,13 @@ type PendingPhoto = {
   previewUrl: string;
   name: string;
   preparing: boolean;
+};
+
+type RequestCard = {
+  publicId: string;
+  serviceLabel: string;
+  status: "open" | "scheduled";
+  when: string;
 };
 
 type SlotGroup = {
@@ -79,14 +92,20 @@ export function ConciergeWidget() {
   const [replacePhotoId, setReplacePhotoId] = useState<string | null>(null);
   const [showPhotoCta, setShowPhotoCta] = useState(false);
   const [photosRemaining, setPhotosRemaining] = useState(4);
+  const [requestCard, setRequestCard] = useState<RequestCard | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [imageContext, setImageContext] = useState<WebsiteImageChatContext | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<WebsiteImageChatContext | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       body: "Hola. Cuéntame qué está pasando en tu hogar o propiedad: una reparación, un mantenimiento o algo que quieras instalar.",
     },
   ]);
+  const imageContextRef = useRef<WebsiteImageChatContext | null>(null);
+  const openRef = useRef(false);
+  const inputDraftRef = useRef("");
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -136,6 +155,14 @@ export function ConciergeWidget() {
     else if (Array.isArray(data.chips) && data.chips.length) setBookingExpanded(true);
     setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
     setEnded(Boolean(data.ended));
+    const card = data.requestCard;
+    if (card && typeof card === "object" && typeof (card as RequestCard).publicId === "string") {
+      setRequestCard(card as RequestCard);
+    } else if (typeof data.leadId === "string" && data.leadId.startsWith("HS-")) {
+      setRequestCard({ publicId: data.leadId, serviceLabel: "", status: "open", when: "" });
+    } else if (typeof data.leadBanner === "string" && data.leadBanner.startsWith("HS-")) {
+      setRequestCard({ publicId: data.leadBanner, serviceLabel: "", status: "open", when: "" });
+    }
   }, []);
 
   useEffect(() => {
@@ -152,6 +179,10 @@ export function ConciergeWidget() {
           );
         }
         applySessionState(data);
+        if (data.imageContext && isWebsiteImageChatContext(data.imageContext)) {
+          setImageContext(data.imageContext);
+          imageContextRef.current = data.imageContext;
+        }
       })
       .catch(() => undefined);
   }, [applySessionState]);
@@ -516,6 +547,92 @@ export function ConciergeWidget() {
     window.setTimeout(() => inputRef.current?.focus(), 50);
   }
 
+  const applyImageContext = useCallback(async (context: WebsiteImageChatContext) => {
+    sessionStorage.setItem(GREET_KEY, "1");
+    sessionStorage.setItem(CHAT_OPEN_KEY, "1");
+    sessionStorage.removeItem(CHAT_MINIMIZED_KEY);
+    setInvite(false);
+    setOpen(true);
+    setPendingSwitch(null);
+    setPending(true);
+    try {
+      const response = await fetch("/api/concierge/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "CONTEXT_STARTED", context }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error("context_failed");
+      setImageContext(context);
+      imageContextRef.current = context;
+      setMessages((current) => {
+        const withoutDefault =
+          current.length === 1 &&
+          current[0]?.role === "assistant" &&
+          /Cuéntame qué está pasando/.test(current[0].body)
+            ? []
+            : current;
+        return [...withoutDefault, { role: "assistant", body: String(data.reply || "") }];
+      });
+      if (typeof data.serviceContext === "string") setServiceContext(data.serviceContext);
+      if (typeof data.showPhotoCta === "boolean") setShowPhotoCta(data.showPhotoCta);
+      if (typeof data.photosRemaining === "number") setPhotosRemaining(data.photosRemaining);
+    } catch {
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          body: `Claro. Veo que te interesa ${context.serviceName.toLowerCase()}. Cuéntame un poco más para orientarte.`,
+        },
+      ]);
+      setImageContext(context);
+      imageContextRef.current = context;
+    } finally {
+      setPending(false);
+      window.setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, []);
+
+  useEffect(() => {
+    imageContextRef.current = imageContext;
+  }, [imageContext]);
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    inputDraftRef.current = input;
+  }, [input]);
+
+  useEffect(() => {
+    function onOpenChat(event: Event) {
+      const detail = (event as CustomEvent).detail;
+      if (!detail) {
+        openChat();
+        return;
+      }
+      if (!isWebsiteImageChatContext(detail)) {
+        openChat();
+        return;
+      }
+      const current = imageContextRef.current;
+      const differentContext =
+        current &&
+        (current.itemId !== detail.itemId || current.serviceId !== detail.serviceId);
+      if (openRef.current && differentContext) {
+        setPendingSwitch(detail);
+        setOpen(true);
+        setMessages((msgs) => [...msgs, { role: "assistant", body: contextSwitchPrompt(detail) }]);
+        // Unsent draft stays in `input` state — never cleared here
+        return;
+      }
+      void applyImageContext(detail);
+    }
+    window.addEventListener(HOMESTEAD_OPEN_CHAT_EVENT, onOpenChat);
+    return () => window.removeEventListener(HOMESTEAD_OPEN_CHAT_EVENT, onOpenChat);
+  }, [applyImageContext]);
+
   function closeChat() {
     if (scroller.current) scrollPositionRef.current = scroller.current.scrollTop;
     setOpen(false);
@@ -607,6 +724,44 @@ export function ConciergeWidget() {
               onScroll={(event) => updateStickFromScroll(event.currentTarget)}
             >
               <div className="flex flex-col gap-3">
+            {imageContext && (
+              <div className="flex items-center gap-3 rounded-xl border border-navy/10 bg-white px-3 py-2 shadow-sm">
+                {imageContext.imageSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageContext.imageSrc}
+                    alt=""
+                    className="h-11 w-11 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-cream-deep text-[0.65rem] uppercase tracking-wide text-mist">
+                    HS
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-navy">{imageContext.itemTitle}</p>
+                  <p className="text-[0.68rem] tracking-[0.1em] uppercase text-mist">Consultando este servicio</p>
+                </div>
+              </div>
+            )}
+            {pendingSwitch && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-full bg-navy px-3 py-2 text-xs tracking-[0.08em] uppercase text-cream"
+                  onClick={() => void applyImageContext(pendingSwitch)}
+                >
+                  Sí, hablar de {pendingSwitch.serviceName}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-navy/20 px-3 py-2 text-xs tracking-[0.08em] uppercase text-navy"
+                  onClick={() => setPendingSwitch(null)}
+                >
+                  Seguir con lo actual
+                </button>
+              </div>
+            )}
             {messages.map((item, index) => {
               const previewUrls = item.photoPreviewUrls?.length
                 ? item.photoPreviewUrls
@@ -888,6 +1043,17 @@ export function ConciergeWidget() {
                 <p className="px-4 pb-1 text-xs text-accent" role="alert">
                   {photoError}
                 </p>
+              )}
+              {requestCard && (
+                <div className="border-t border-line bg-cream/50 px-4 py-2 text-xs text-charcoal" aria-live="polite">
+                  <div className="font-medium text-navy">
+                    {requestCard.status === "scheduled" ? "Visita confirmada" : "Solicitud registrada"}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[0.72rem] tracking-wide">{requestCard.publicId}</div>
+                  {requestCard.serviceLabel ? (
+                    <div className="text-charcoal/75">{requestCard.serviceLabel}</div>
+                  ) : null}
+                </div>
               )}
               <form
                 className="flex items-end gap-2 border-t border-line bg-white px-3 py-3"

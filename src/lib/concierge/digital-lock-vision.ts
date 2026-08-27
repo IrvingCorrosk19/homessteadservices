@@ -1,12 +1,17 @@
 import { createHash } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import {
+  detectDigitalLockPurchaseIntent,
+  type DigitalLockView,
+} from "@/lib/concierge/digital-lock-intent";
 import { homesteadDataDir } from "@/lib/service-requests";
 import { conciergeApiKey, conciergeModel } from "@/lib/concierge-flags";
 import { logError, logInfo } from "@/lib/log";
 import type { ConversationState } from "@/lib/concierge-store";
 
-export type DigitalLockView = "front" | "inside" | "edge" | "unknown";
+export type { DigitalLockView } from "@/lib/concierge/digital-lock-intent";
+export { detectDigitalLockPurchaseIntent, normalizeDigitalLockText } from "@/lib/concierge/digital-lock-intent";
 export type DigitalLockPhotoStatus = "PASS" | "MISSING" | "RETAKE" | "REJECTED";
 export type DigitalLockQuality = "good" | "usable" | "poor";
 export type DigitalLockCompatibility =
@@ -86,9 +91,6 @@ export type VisionInspectionResult = {
 export const DIGITAL_LOCK_VISION_ACCEPT_MIN = Number(process.env.DIGITAL_LOCK_VISION_ACCEPT_MIN || 0.62);
 export const DIGITAL_LOCK_VISION_REVIEW_MIN = Number(process.env.DIGITAL_LOCK_VISION_REVIEW_MIN || 0.45);
 
-const DIGITAL_LOCK_INTENT =
-  /\b(cerradura\s+digital|cerradura\s+inteligente|smart\s*lock|huella|fingerprint|teclado|keypad|quiero\s+(comprar|poner|instalar|cambiar).{0,40}cerradura|cerradura.{0,40}(digital|inteligente|huella))\b/i;
-
 export function emptyDigitalLockChecklist(): DigitalLockChecklist {
   return {
     active: false,
@@ -105,31 +107,6 @@ export function emptyDigitalLockChecklist(): DigitalLockChecklist {
     lockNotes: "",
     lastPhotoId: "",
   };
-}
-
-/** Tolerate common typos: cerddaura digitapl → cerradura digital */
-export function normalizeDigitalLockText(text: string) {
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/cer+d+a+uras?/g, "cerradura")
-    .replace(/cer+r?a?d+a?uras?/g, "cerradura")
-    .replace(/digit+a+[pl]*|digit+al+/g, "digital")
-    .replace(/intelig+ente/g, "inteligente");
-}
-
-export function detectDigitalLockPurchaseIntent(text: string) {
-  const raw = text || "";
-  const n = normalizeDigitalLockText(raw);
-  if (DIGITAL_LOCK_INTENT.test(raw) || DIGITAL_LOCK_INTENT.test(n)) return true;
-  if (/\bcerradura\b/.test(n) && /\b(digital|inteligente|huella|smart\s*lock|teclado|keypad)\b/.test(n)) return true;
-  // fuzzy: misspelled cerradura + digit*
-  if (/cer\w{2,8}ura/.test(n) && /digit/.test(n)) return true;
-  if (/\b(comprar|instalar|poner|cambiar).{0,30}cer\w{2,8}ura/.test(n) && /digit|intelig|huella|smart/.test(n)) {
-    return true;
-  }
-  return false;
 }
 
 export function historySuggestsDigitalLockFlow(messages: Array<{ role: string; body: string }>) {
@@ -415,22 +392,23 @@ export function visionFailedResult(reason: string): VisionInspectionResult {
   };
 }
 
-export async function analyzeDigitalLockPhoto(input: {
-  conversationId: string;
+export async function analyzeDigitalLockPhotoFromBytes(input: {
+  bytes: Buffer;
   photoId: string;
   knownViews: Array<{ view: DigitalLockView; photoId: string; sha256?: string }>;
   cachedByHash?: Record<string, VisionInspectionResult>;
+  correlationId?: string;
 }): Promise<{ vision: VisionInspectionResult; sha256: string; cached: boolean } | null> {
   const key = conciergeApiKey();
   if (!key) return null;
-  const abs = join(homesteadDataDir(), "concierge", input.conversationId, input.photoId);
-  if (!existsSync(abs)) return null;
-  const bytes = readFileSync(abs);
+  const bytes = input.bytes;
+  if (!bytes?.length) return null;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const cached = input.cachedByHash?.[sha256];
+  const corr = (input.correlationId || input.photoId).slice(0, 8);
   if (cached) {
     logInfo("PHOTO_VISION_CACHED", {
-      contentJobId: input.conversationId.slice(0, 8),
+      contentJobId: corr,
       stage: cached.imageType,
       phone: sha256.slice(0, 12),
     });
@@ -482,7 +460,7 @@ Reglas:
 - measurementSafeToInfer siempre false.`;
 
   logInfo("PHOTO_VISION_STARTED", {
-    contentJobId: input.conversationId.slice(0, 8),
+    contentJobId: corr,
     stage: input.photoId.slice(0, 24),
     phone: sha256.slice(0, 12),
   });
@@ -524,14 +502,14 @@ Reglas:
     const content = json.choices?.[0]?.message?.content || "{}";
     const parsed = normalizeVision(JSON.parse(content) as Record<string, unknown>);
     logInfo(parsed.usableForDigitalLockAssessment && parsed.containsDoor ? "PHOTO_VISION_ACCEPTED" : "PHOTO_VISION_REJECTED", {
-      contentJobId: input.conversationId.slice(0, 8),
+      contentJobId: corr,
       stage: parsed.imageType,
       phone: String(Math.round(parsed.confidence * 100)),
     });
     return { vision: parsed, sha256, cached: false };
   } catch (error) {
     logError("DIGITAL_LOCK_VISION_FAILED", {
-      contentJobId: input.conversationId.slice(0, 8),
+      contentJobId: corr,
       stage: error instanceof Error ? error.message.slice(0, 80) : "fail",
     });
     return null;
@@ -540,20 +518,43 @@ Reglas:
   }
 }
 
+export async function analyzeDigitalLockPhoto(input: {
+  conversationId: string;
+  photoId: string;
+  knownViews: Array<{ view: DigitalLockView; photoId: string; sha256?: string }>;
+  cachedByHash?: Record<string, VisionInspectionResult>;
+}): Promise<{ vision: VisionInspectionResult; sha256: string; cached: boolean } | null> {
+  const abs = join(homesteadDataDir(), "concierge", input.conversationId, input.photoId);
+  if (!existsSync(abs)) return null;
+  const bytes = readFileSync(abs);
+  return analyzeDigitalLockPhotoFromBytes({
+    bytes,
+    photoId: input.photoId,
+    knownViews: input.knownViews,
+    cachedByHash: input.cachedByHash,
+    correlationId: input.conversationId,
+  });
+}
+
 function isAssignedView(view: DigitalLockView): view is "front" | "inside" | "edge" {
   return view === "front" || view === "inside" || view === "edge";
 }
 
-export function applyDigitalLockVision(
-  state: ConversationState,
+/** Apply Vision result to checklist. Slot hints are ignored — Vision classification wins. */
+export function applyVisionToChecklist(
+  checklistInput: DigitalLockChecklist,
   photoId: string,
   vision: VisionInspectionResult,
   sha256?: string,
-): { state: ConversationState; assigned: DigitalLockView; reply: string; accepted: boolean } {
-  let checklist = getDigitalLockChecklist(state);
-  if (!checklist.active) {
-    checklist = { ...emptyDigitalLockChecklist(), active: true, compatibility: "PHOTO_PRECHECK_INCOMPLETE" };
-  }
+): {
+  checklist: DigitalLockChecklist;
+  assigned: DigitalLockView;
+  reply: string;
+  accepted: boolean;
+} {
+  let checklist = checklistInput.active
+    ? { ...checklistInput }
+    : { ...emptyDigitalLockChecklist(), active: true, compatibility: "PHOTO_PRECHECK_INCOMPLETE" as const };
 
   if (sha256) {
     checklist.analysisByHash = { ...checklist.analysisByHash, [sha256]: vision };
@@ -581,7 +582,6 @@ export function applyDigitalLockVision(
       !vision.relevantAreaVisible ||
       vision.missingVisualInformation.some((item) => /pestillo|latch|placa|cerrojo/i.test(item)));
 
-  // HARD GATE: never PASS without a real door + usable assessment + confidence
   const passesDoorGate =
     vision.containsDoor &&
     vision.containsLock &&
@@ -689,12 +689,27 @@ export function applyDigitalLockVision(
     });
   }
 
-  const nextState = setDigitalLockChecklist(state, checklist);
   return {
-    state: nextState,
+    checklist,
     assigned,
     reply: digitalLockHumanReply(checklist, effectiveVision, assigned),
     accepted: passesDoorGate,
+  };
+}
+
+export function applyDigitalLockVision(
+  state: ConversationState,
+  photoId: string,
+  vision: VisionInspectionResult,
+  sha256?: string,
+): { state: ConversationState; assigned: DigitalLockView; reply: string; accepted: boolean } {
+  const current = getDigitalLockChecklist(state);
+  const applied = applyVisionToChecklist(current, photoId, vision, sha256);
+  return {
+    state: setDigitalLockChecklist(state, applied.checklist),
+    assigned: applied.assigned,
+    reply: applied.reply,
+    accepted: applied.accepted,
   };
 }
 

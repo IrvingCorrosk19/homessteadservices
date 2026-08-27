@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Logo } from "@/components/brand/Logo";
 import { SocialIcons } from "@/components/brand/SocialIcons";
 import { contact, emailHref, phoneHref, site, whatsappHref } from "@/lib/site";
@@ -10,6 +11,36 @@ export function Footer() {
   const phone = phoneHref();
   const email = emailHref();
   const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
+
+  const contactItems: Array<{ key: string; node: ReactNode }> = [];
+  if (whatsapp) {
+    contactItems.push({
+      key: "whatsapp",
+      node: (
+        <a href={whatsapp} target="_blank" rel="noopener noreferrer">
+          WhatsApp
+        </a>
+      ),
+    });
+  }
+  if (phone) {
+    contactItems.push({
+      key: "phone",
+      node: <a href={phone}>{contact.phone.value}</a>,
+    });
+  }
+  if (email) {
+    contactItems.push({
+      key: "email",
+      node: <a href={email}>{contact.email.value}</a>,
+    });
+  }
+  if (contact.hours.isConfigured) {
+    contactItems.push({ key: "hours", node: contact.hours.value });
+  }
+  if (contact.serviceArea.isConfigured) {
+    contactItems.push({ key: "area", node: contact.serviceArea.value });
+  }
 
   return (
     <footer className="border-t border-line bg-cream-deep">
@@ -48,34 +79,13 @@ export function Footer() {
           <p className="text-[0.68rem] font-medium tracking-[0.18em] uppercase text-mist">
             Contacto
           </p>
-          <ul className="mt-4 space-y-2 text-sm text-navy">
-            {whatsapp && (
-              <li>
-                <a href={whatsapp} target="_blank" rel="noopener noreferrer">
-                  WhatsApp
-                </a>
-              </li>
-            )}
-            {phone && (
-              <li>
-                <a href={phone}>{contact.phone.value}</a>
-              </li>
-            )}
-            {email && (
-              <li>
-                <a href={email}>{contact.email.value}</a>
-              </li>
-            )}
-            {contact.hours.isConfigured && (
-              <li>{contact.hours.value}</li>
-            )}
-            {contact.serviceArea.isConfigured && (
-              <li>{contact.serviceArea.value}</li>
-            )}
-            {!whatsapp && !phone && !email && (
-              <li className="text-mist">{dictionary.contact.pending}</li>
-            )}
-          </ul>
+          {contactItems.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-sm text-navy">
+              {contactItems.map((item) => (
+                <li key={item.key}>{item.node}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
       <div className="border-t border-line">

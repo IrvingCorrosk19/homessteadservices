@@ -18,7 +18,7 @@ import { assessUserContact, isPassiveClose, shouldStopCommercial } from "@/lib/c
 import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
 import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
 import { whatsappHref } from "@/lib/site";
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
 import { CONCIERGE_TOOLS, executeConciergeTool, mergeParsedWhen, type ToolContext } from "@/lib/concierge-tools";
 import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/concierge-intelligence";
@@ -42,16 +42,35 @@ import {
   shouldFlagOverquestioning,
 } from "@/lib/concierge/turn-intelligence";
 import { getAppointmentReadiness, readinessPromptHint } from "@/lib/concierge/appointment-readiness";
+import {
+  determineNextAction,
+  enforceDeterministicAsk,
+  logNextAction,
+  markOptionalDeclined,
+} from "@/lib/concierge/conversation-next-action";
 import { answerMemoryQuestion, stripFalseThankYou } from "@/lib/concierge/memory-truth";
 import {
+  activateOfferedSlots,
   areOfferedSlotsActive,
   buildSessionSnapshot,
   clearActiveTransactionState,
+  hasRescheduleSignal,
   isReturningGreeting,
+  isSlotConfirmed,
+  lockSelectedSlot,
   reconcileTransactionState,
   resolveSlotFromMessage,
   shouldShowLeadBanner,
 } from "@/lib/concierge-transaction";
+import { hasRequestedExactWhen } from "@/lib/concierge/appointment-readiness";
+import { logStateTransition } from "@/lib/concierge/canonical-state";
+import { checkAvailability } from "@/lib/concierge-availability";
+import type { OfferedSlot } from "@/lib/concierge-store";
+import {
+  ensureActiveServiceRequest,
+  requestFolioBookingConfirm,
+  requestFolioIntro,
+} from "@/lib/concierge/service-request-lifecycle";
 import {
   bookingPauseReply,
   interpretTurnRoute,
@@ -61,6 +80,13 @@ import {
   socialAckReply,
 } from "@/lib/concierge-turn-routing";
 import {
+  applyConversationTransition,
+  detectConversationTransition,
+  paintingFollowUpQuestion,
+  responseReferencesStaleService,
+  switchAckPrefix,
+} from "@/lib/concierge/service-transition";
+import {
   activateDigitalLockFlow,
   analyzeDigitalLockPhoto,
   applyDigitalLockVision,
@@ -68,13 +94,20 @@ import {
   digitalLockIntroReply,
   digitalLockPhotosComplete,
   digitalLockPromptBlock,
+  emptyDigitalLockChecklist,
   enforceDigitalLockReplyTruth,
   getDigitalLockChecklist,
   historySuggestsDigitalLockFlow,
   knownDigitalLockViews,
   maybeCompleteDigitalLockMeasurement,
+  setDigitalLockChecklist,
   visionFailedResult,
 } from "@/lib/concierge/digital-lock-vision";
+import {
+  detectLockoutIntent,
+  getServiceRequirements,
+  isDigitalLockEvidenceIntent,
+} from "@/lib/service-requirements";
 
 export { isConciergeDryRun, isConciergeEnabled };
 
@@ -178,21 +211,217 @@ export async function conciergeTurn(input: {
     addEvent(input.conversationId, "CHAT_MESSAGE");
     let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
     touchConversation(input.conversationId, { state });
+
+    // USER MESSAGE → INTENT TRANSITION before any pending playbook / photo reply.
+    const transition = detectConversationTransition(state, text);
+    const serviceContextAtTurnStart = state.facts?.serviceContextId || "";
     state = extractCasualFacts(state, text);
+    if (
+      transition.kind === "SWITCH_SERVICE" ||
+      transition.kind === "CANCEL_CURRENT_SERVICE" ||
+      transition.kind === "REFINE_CURRENT_SERVICE" ||
+      transition.kind === "ADD_ANOTHER_SERVICE"
+    ) {
+      // Re-bind previous service identity for cancel/switch (packed extract may have already moved primaryService).
+      const priorLead = conversation.state.activeLeadId || state.activeLeadId || "";
+      const priorService = conversation.state.primaryService || conversation.state.service || "";
+      state = applyConversationTransition(
+        {
+          ...state,
+          activeLeadId: priorLead,
+          primaryService:
+            transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE"
+              ? priorService || state.primaryService
+              : state.primaryService,
+          service:
+            transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE"
+              ? priorService || state.service
+              : state.service,
+        },
+        transition,
+      );
+      logStateTransition(input.conversationId, {
+        stage: `TRANSITION_${transition.kind}`,
+        service: state.primaryService || state.service || "",
+        previousService: transition.previousService,
+        nextService: transition.nextService,
+        requestId: state.activeLeadId || "",
+      });
+    }
+
+    logStateTransition(input.conversationId, {
+      stage: "TURN_EXTRACT",
+      service: state.primaryService || state.service || "",
+      location: (state.location || "").slice(0, 40),
+      unit: state.facts?.unit || "",
+      name: state.name ? "1" : "0",
+      phone: state.contactStatus,
+      preferredDate: state.preferredDate || "",
+      preferredTime: state.preferredTime || "",
+      slotConfirmed: isSlotConfirmed(state) ? "1" : "0",
+      requestId: state.activeLeadId || "",
+    });
     const returningGreeting = isReturningGreeting(text);
     let leadCreatedThisTurn = false;
+    let transitionAck = switchAckPrefix(transition);
 
-    const digitalLockIntent = detectDigitalLockPurchaseIntent(text);
+    if (transition.kind === "ADD_ANOTHER_SERVICE") {
+      const clarify =
+        state.facts?.lastBotQuestion ||
+        "Claro. ¿Quieres agregar eso además del servicio actual, o dejamos el actual y seguimos solo con lo nuevo?";
+      addMessage(input.conversationId, "assistant", clarify);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: clarify,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    if (transition.kind === "CANCEL_CURRENT_SERVICE") {
+      const cancelReply = transitionAck || "Claro, lo dejamos por ahora. Cuando quieras, aquí estamos.";
+      addMessage(input.conversationId, "assistant", cancelReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: cancelReply,
+        chips: [],
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: session.serviceContext,
+        showResumeBooking: false,
+        showPhotoCta: false,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    if (transition.kind === "SWITCH_SERVICE" && transition.nextService === "painting") {
+      try {
+        const ensured = await ensureActiveServiceRequest({
+          conversationId: input.conversationId,
+          state,
+          summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
+          conversationLeadId: "",
+          utm: input.utm,
+        });
+        if (ensured) {
+          state.activeLeadId = ensured.publicId;
+          if (ensured.announce) {
+            leadCreatedThisTurn = true;
+            const playbook = getPlaybook(state.primaryService || state.service);
+            transitionAck = [transitionAck, requestFolioIntro(ensured.publicId, playbook?.label || "")]
+              .filter(Boolean)
+              .join("\n\n");
+            state.facts = { ...(state.facts || {}), requestFolioShown: "1" };
+          }
+        }
+      } catch {
+        // non-blocking
+      }
+      const paintReply = `${transitionAck}\n\n${paintingFollowUpQuestion(state)}`.trim();
+      addMessage(input.conversationId, "assistant", paintReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+      return {
+        ok: true as const,
+        reply: paintReply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: session.serviceContext,
+        showResumeBooking: false,
+        showPhotoCta: false,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    const digitalLockAbandoned = state.facts?.digitalLockAbandoned === "1";
+    const digitalLockIntent = detectDigitalLockPurchaseIntent(text) && !digitalLockAbandoned;
     const historyForLock = recentMessages(input.conversationId, 14);
-    const historyDigital = historySuggestsDigitalLockFlow(historyForLock);
-    if (digitalLockIntent || historyDigital) {
+    const historyDigital =
+      !digitalLockAbandoned &&
+      transition.kind !== "SWITCH_SERVICE" &&
+      historySuggestsDigitalLockFlow(historyForLock);
+    const lockoutNow = detectLockoutIntent(text) && !digitalLockIntent;
+    const policy = getServiceRequirements({
+      service: state.primaryService || state.service || "locksmith",
+      message: text,
+      intent: state.facts?.serviceIntent || "",
+    });
+
+    if (lockoutNow || policy.intentId === "lockout") {
+      const prior = getDigitalLockChecklist(state);
+      if (prior.active) {
+        state = setDigitalLockChecklist(state, emptyDigitalLockChecklist());
+      }
+      state = {
+        ...state,
+        facts: {
+          ...(state.facts || {}),
+          serviceIntent: "lockout",
+          lockedOut: "1",
+        },
+      };
+    } else if (
+      !digitalLockAbandoned &&
+      transition.kind !== "SWITCH_SERVICE" &&
+      (isDigitalLockEvidenceIntent(policy.intentId) ||
+        digitalLockIntent ||
+        (!lockoutNow && historyDigital))
+    ) {
       state = activateDigitalLockFlow(state);
+      state = {
+        ...state,
+        facts: {
+          ...(state.facts || {}),
+          serviceIntent: "digital_lock_purchase_install",
+        },
+      };
     }
     state = maybeCompleteDigitalLockMeasurement(state, text);
 
     let digitalLockReply = "";
     let digitalLockChecklist = getDigitalLockChecklist(state);
-    if (digitalLockChecklist.active) {
+    // Never chase lock photos after an explicit service switch / abandon.
+    if (digitalLockChecklist.active && !digitalLockAbandoned && transition.kind !== "SWITCH_SERVICE") {
       const pendingPhotoIds: string[] = [];
       for (const item of historyForLock) {
         if (item.role !== "user") continue;
@@ -215,6 +444,7 @@ export async function conciergeTurn(input: {
       }
 
       if (pendingPhotoIds.length) {
+        const contextBeforeVision = state.facts?.serviceContextId || serviceContextAtTurnStart;
         const replies: string[] = [];
         for (const photoId of pendingPhotoIds) {
           const analyzed = await analyzeDigitalLockPhoto({
@@ -223,6 +453,21 @@ export async function conciergeTurn(input: {
             knownViews: knownDigitalLockViews(digitalLockChecklist),
             cachedByHash: digitalLockChecklist.analysisByHash,
           });
+          // Stale async guard: if context switched while vision ran, discard.
+          const fresh = getConversation(input.conversationId);
+          const currentCtx = fresh?.state?.facts?.serviceContextId || state.facts?.serviceContextId || "";
+          const abandonedNow = fresh?.state?.facts?.digitalLockAbandoned === "1";
+          if (
+            abandonedNow ||
+            (contextBeforeVision && currentCtx && contextBeforeVision !== currentCtx) ||
+            (fresh?.state && (fresh.state.primaryService || fresh.state.service) !== "locksmith" && getDigitalLockChecklist(fresh.state).active === false)
+          ) {
+            logInfo("STALE_ASYNC_RESULT_DISCARDED", {
+              contentJobId: input.conversationId.slice(0, 8),
+              stage: photoId.slice(0, 12),
+            });
+            continue;
+          }
           const vision = analyzed?.vision || visionFailedResult("VISION_ANALYSIS_FAILED");
           const applied = applyDigitalLockVision(state, photoId, vision, analyzed?.sha256);
           state = applied.state;
@@ -243,7 +488,7 @@ export async function conciergeTurn(input: {
       }
     }
 
-    if (digitalLockReply) {
+    if (digitalLockReply && getDigitalLockChecklist(state).active && state.facts?.digitalLockAbandoned !== "1") {
       addMessage(input.conversationId, "assistant", digitalLockReply);
       touchConversation(input.conversationId, { state });
       const session = buildSessionSnapshot(state);
@@ -282,13 +527,19 @@ export async function conciergeTurn(input: {
     }
 
     const matchedSlot =
-      route.slotSelectionIntent && areOfferedSlotsActive(state)
-        ? resolveSlotFromMessage(text, state.offeredSlots)
+      route.slotSelectionIntent && state.offeredSlots?.length
+        ? resolveSlotFromMessage(text, state.offeredSlots, state.preferredDate)
         : null;
     if (matchedSlot) {
-      state.preferredDate = matchedSlot.date;
-      state.preferredTime = matchedSlot.time;
+      state = lockSelectedSlot(state, matchedSlot as OfferedSlot);
+      logStateTransition(input.conversationId, {
+        stage: "SLOT_SELECTED",
+        selectedDate: matchedSlot.date,
+        selectedTime: matchedSlot.time,
+      });
     }
+
+    state = markOptionalDeclined(state, text);
 
     if (route.isInterruption) {
       addEvent(input.conversationId, "INTENT_INTERRUPTION");
@@ -314,6 +565,104 @@ export async function conciergeTurn(input: {
       state.contactStatus = "INCOMPLETE";
     } else if (contact.status === "INVALID") {
       state.contactStatus = "INVALID";
+    }
+
+    let requestAnnounce = "";
+    try {
+      const ensured = await ensureActiveServiceRequest({
+        conversationId: input.conversationId,
+        state,
+        summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
+        conversationLeadId: conversation.leadPublicId,
+        utm: input.utm,
+      });
+      if (ensured) {
+        state.activeLeadId = ensured.publicId;
+        if (!state.appointmentId && state.funnelStage !== "BOOKED") {
+          state.funnelStage = "HANDOFF";
+        }
+        if (ensured.announce) {
+          leadCreatedThisTurn = true;
+          const playbook = getPlaybook(state.primaryService || state.service);
+          requestAnnounce = requestFolioIntro(ensured.publicId, playbook?.label || "");
+          state.facts = { ...(state.facts || {}), requestFolioShown: "1" };
+          addEvent(input.conversationId, "REQUEST_FOLIO_CREATED");
+        } else if (ensured.updated) {
+          addEvent(input.conversationId, "REQUEST_UPDATED");
+        }
+      }
+    } catch {
+      addEvent(input.conversationId, "REQUEST_CREATE_FAILED");
+    }
+
+    let availabilityHint = "";
+    const bookingSignal =
+      state.bookingIntent ||
+      route.slotSelectionIntent ||
+      hasRequestedExactWhen(state) ||
+      /\b(disponib|agend|cita|visita|horario|mañana|manana|pasado)\b/i.test(text);
+    const needsExactSlotQuery =
+      hasRequestedExactWhen(state) && !isSlotConfirmed(state) && !state.pendingSlot;
+    const shouldQueryCalendar =
+      bookingSignal &&
+      !route.isInterruption &&
+      !state.bookingSuspended &&
+      (!isSlotConfirmed(state) || hasRescheduleSignal(text)) &&
+      (needsExactSlotQuery ||
+        !areOfferedSlotsActive(state) ||
+        hasRescheduleSignal(text) ||
+        /\b(disponib|qu[eé] tienen|horario|mañana|manana|el \d+|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i.test(
+          text,
+        ));
+    if (shouldQueryCalendar) {
+      const whenText =
+        needsExactSlotQuery && state.preferredDate && state.preferredTime
+          ? `${state.preferredDate} ${state.preferredTime}`
+          : text || `${state.preferredDate} ${state.preferredTime}`.trim();
+      const availability = checkAvailability({
+        dateText: whenText,
+        timeText: whenText,
+        logId: input.conversationId,
+      });
+      addEvent(input.conversationId, "AVAILABILITY_QUERY_EXECUTED");
+      recordFunnelEvent(input.conversationId, "AvailabilityChecked", {
+        date: availability.requested.date,
+        slots: availability.slots.length,
+        busy: availability.requestedSlotBusy ? "1" : "0",
+      });
+      if (availability.slots.length) {
+        state = activateOfferedSlots(state, availability.slots as OfferedSlot[]);
+        if (availability.requested.date) state.preferredDate = availability.requested.date;
+        if (availability.requested.time) state.preferredTime = availability.requested.time;
+      }
+      // Exact requested slot free → lock selection (do not re-offer as open choice)
+      if (
+        availability.requestedAvailable &&
+        availability.requested.date &&
+        availability.requested.time
+      ) {
+        const exact = (availability.slots as OfferedSlot[]).find(
+          (s) => s.date === availability.requested.date && s.time === availability.requested.time,
+        ) || {
+          date: availability.requested.date,
+          time: availability.requested.time,
+          label: formatPanamaSlot(availability.requested.date, availability.requested.time),
+        };
+        state = lockSelectedSlot(state, exact);
+        logStateTransition(input.conversationId, {
+          stage: "EXACT_SLOT_LOCKED",
+          selectedDate: exact.date,
+          selectedTime: exact.time,
+        });
+      }
+      if (availability.message) availabilityHint = availability.message;
+      else if (availability.requestedAvailable && availability.requested.time) {
+        availabilityHint = `Sí, ${formatPanamaSlot(availability.requested.date, availability.requested.time)} está disponible.`;
+      }
+      state.facts = {
+        ...(state.facts || {}),
+        lastAvailabilityQuery: `${availability.requested.date}|${availability.requested.time || ""}`,
+      };
     }
 
     if (INJECTION_RE.test(text)) {
@@ -343,19 +692,20 @@ export async function conciergeTurn(input: {
       };
     }
 
-    const memory = answerMemoryQuestion(text, state);
+    const memory = answerMemoryQuestion(text, state, state.activeLeadId || conversation.leadPublicId);
     if (memory.handled) {
       addMessage(input.conversationId, "assistant", memory.reply);
       touchConversation(input.conversationId, { state });
-      const session = buildSessionSnapshot(state);
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
       return {
         ok: true as const,
         reply: memory.reply,
         chips: session.chips,
         historicalChips: session.historicalChips,
-        leadBanner: null,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
         nextAction: "CONTINUE",
-        leadId: null,
         dryLead: false,
         whatsappUrl: null,
         contactUrl: "/contact",
@@ -412,13 +762,38 @@ export async function conciergeTurn(input: {
     if (conciergeApiKey()) {
       try {
         const playbook = getPlaybook(state.primaryService || state.service);
-        const missing = missingUsefulFacts(state, playbook);
+        const missing = missingUsefulFacts(state, playbook).filter((key) => {
+          // Photos are USEFUL, never block or prompt as if required near booking
+          if (key === "photos" && (state.bookingIntent || state.offeredSlots?.length || state.pendingSlot)) {
+            return false;
+          }
+          if (key === "location" && getAppointmentReadiness(state).knownFields.includes("location")) {
+            return false;
+          }
+          return true;
+        });
+        const nextDecision = determineNextAction(state, {
+          userText: text,
+          interruption: route.isInterruption && !route.slotSelectionIntent,
+        });
+        logNextAction(input.conversationId, nextDecision, {
+          bookingIntent: state.bookingIntent,
+          offered: state.offeredSlots?.length || 0,
+        });
         const history = recentMessages(input.conversationId, 10);
         const interruptionBlock = route.isInterruption
           ? [{
               role: "system" as const,
               content: `INTERRUPCIÓN (${route.priceIntent ? "PRECIO" : route.newNeedIntent ? "NUEVA NECESIDAD" : route.bookingPauseIntent ? "PAUSAR AGENDA" : route.serviceQuestionIntent ? "PREGUNTA SERVICIO" : route.socialAckIntent ? "AGRADECIMIENTO" : "INTERRUPCIÓN"}): el cliente NO está eligiendo horario ahora. Responde esa intención primero. NO repitas la lista de horarios salvo que pida retomar la cita.`,
             }]
+          : [];
+        const calendarBlock = availabilityHint
+          ? [
+              {
+                role: "system" as const,
+                content: `CALENDAR_RESULT (consulta REAL; NO inventes horarios): ${availabilityHint}. Slots: ${JSON.stringify(state.offeredSlots?.slice(0, 4) || [])}. Si falta confirmación del cliente, NO agendes todavía.`,
+              },
+            ]
           : [];
         const digitalLockBlock = digitalLockPromptBlock(getDigitalLockChecklist(state));
         const messages: ChatMessage[] = [
@@ -430,6 +805,7 @@ export async function conciergeTurn(input: {
             ),
           },
           ...interruptionBlock,
+          ...calendarBlock,
           {
             role: "system",
             content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
@@ -453,8 +829,11 @@ export async function conciergeTurn(input: {
               bookingStrategy: state.bookingStrategy || playbook.bookingStrategy,
               urgency: state.urgency || "normal",
               safety: SAFETY_RE.test(text),
-              appointmentReadiness: getAppointmentReadiness(state),
-            })}\n${readinessPromptHint(getAppointmentReadiness(state))}`,
+              appointmentReadiness: nextDecision.readiness,
+              nextAction: nextDecision.action,
+              requiredMissing: nextDecision.requiredMissing,
+              locationSufficient: nextDecision.locationSufficient,
+            })}\n${readinessPromptHint(nextDecision.readiness)}\nNEXT_ACTION_ENGINE: action=${nextDecision.action}; reason=${nextDecision.reason}; askField=${nextDecision.askField || "none"}; requiredMissing=[${nextDecision.requiredMissing.join(", ") || "none"}]. Solo puedes solicitar campos en requiredMissing. Si action=CONFIRM_OR_BOOK debes llamar create_appointment ahora. PROHIBIDO inventar referencia/dirección/detalle adicional.`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
@@ -515,10 +894,58 @@ export async function conciergeTurn(input: {
       reply = fallbackReply(text, state);
     }
 
+    const finalDecision = determineNextAction(state, {
+      userText: text,
+      interruption: route.isInterruption && !route.slotSelectionIntent,
+    });
+
+    // Server-authoritative booking: when requirements are complete, do not wait for the LLM to invent more questions.
+    if (
+      finalDecision.action === "CONFIRM_OR_BOOK" &&
+      !ctx.bookedThisTurn &&
+      !state.appointmentId &&
+      !route.isInterruption
+    ) {
+      const slot =
+        state.pendingSlot ||
+        (state.preferredDate && state.preferredTime
+          ? { date: state.preferredDate, time: state.preferredTime, label: `${state.preferredDate} ${state.preferredTime}` }
+          : null);
+      if (slot?.date && slot?.time) {
+        const booked = await executeConciergeTool(
+          "create_appointment",
+          { date: slot.date, time: slot.time, customerConfirmed: true },
+          ctx,
+        );
+        ctx.state = booked.state;
+        ctx.leadId = booked.leadId || ctx.leadId;
+        state = booked.state;
+        if (booked.result && typeof booked.result === "object" && (booked.result as { ok?: boolean }).ok) {
+          addEvent(input.conversationId, "DETERMINISTIC_BOOK");
+          logNextAction(input.conversationId, finalDecision, { deterministicBook: true });
+        }
+      }
+    }
+
+    const enforced = enforceDeterministicAsk(reply, state, finalDecision);
+    reply = enforced.reply;
+    state = enforced.state;
+    if (enforced.rewritten) {
+      addEvent(input.conversationId, "DETERMINISTIC_ASK_REWRITE");
+      logNextAction(input.conversationId, finalDecision, { rewritten: true });
+    }
+
     const repeated = detectRepeatedQuestion(reply, state);
     if (repeated.length) {
       addEvent(input.conversationId, "REPEATED_QUESTION");
       recordFunnelEvent(input.conversationId, "IntentDetected", { intent: "repeated_question", service: repeated.join(",") });
+      // Hard rewrite if still asking known location
+      if (repeated.includes("location") && finalDecision.locationSufficient) {
+        reply = finalDecision.action === "CONFIRM_OR_BOOK" || ctx.bookedThisTurn
+          ? "Perfecto. Con los datos que ya tengo confirmo la visita."
+          : finalDecision.cannedQuestion || "Con la ubicación que me diste es suficiente. Sigamos con la cita.";
+        state = markOptionalDeclined(state, "no ningún detalle más");
+      }
     }
 
     if (!ctx.leadId && canCreateLead(state) && !returningGreeting) {
@@ -573,10 +1000,35 @@ export async function conciergeTurn(input: {
     }
     reply = stripFalseThankYou(reply, text);
     reply = enforceDigitalLockReplyTruth(reply, getDigitalLockChecklist(state));
+    if (responseReferencesStaleService(reply, state)) {
+      logInfo("STALE_ASSISTANT_RESPONSE_BLOCKED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: state.primaryService || state.service || "",
+      });
+      reply =
+        transitionAck ||
+        (state.primaryService === "painting"
+          ? paintingFollowUpQuestion(state)
+          : "Claro, sigamos con lo que me acabas de pedir. ¿Qué más necesitas contarme?");
+      if (transitionAck && !reply.startsWith(transitionAck)) {
+        reply = `${transitionAck}\n\n${reply}`;
+      }
+    } else if (transitionAck && transition.kind === "SWITCH_SERVICE" && !reply.includes("dejamos")) {
+      reply = `${transitionAck}\n\n${reply}`;
+    }
+
+    if (requestAnnounce && state.activeLeadId && !reply.includes(state.activeLeadId)) {
+      reply = reply.trim() ? `${requestAnnounce}\n\n${reply}` : requestAnnounce;
+    }
+
     if (ctx.bookedThisTurn) {
       const slot = state.pendingSlot;
       const when = slot?.date && slot?.time ? formatPanamaSlot(slot.date, slot.time) : "el horario acordado";
-      if (!/\b(agendad|confirmad)\b/i.test(reply) || /estos horarios sí están libres/i.test(reply)) {
+      const hs = ctx.leadId || state.activeLeadId;
+      const playbook = getPlaybook(state.primaryService || state.service);
+      if (hs) {
+        reply = requestFolioBookingConfirm(hs, when, playbook?.label || "");
+      } else if (!/\b(agendad|confirmad)\b/i.test(reply) || /estos horarios sí están libres/i.test(reply)) {
         reply = `Listo. La visita quedó agendada para ${when}. Ya está en nuestro calendario.`;
       }
     } else {
@@ -618,12 +1070,12 @@ export async function conciergeTurn(input: {
     });
     addMessage(input.conversationId, "assistant", reply);
 
-    const leadBanner = shouldShowLeadBanner();
-    const session = buildSessionSnapshot(state);
+    const leadBanner = shouldShowLeadBanner(state, ctx.leadId || state.activeLeadId);
+    const session = buildSessionSnapshot(state, Date.now(), ctx.leadId || state.activeLeadId || "");
 
     const wa =
-      knowledge.whatsappConfigured && ctx.leadId && leadBanner
-        ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${ctx.leadId}.`)
+      knowledge.whatsappConfigured && leadBanner
+        ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${leadBanner}.`)
         : null;
 
     return {
@@ -632,8 +1084,10 @@ export async function conciergeTurn(input: {
       chips: chipsFrom(state, ctx.bookedThisTurn, state.humanRequested),
       historicalChips: session.historicalChips,
       leadBanner,
+      requestCard: session.requestCard,
+      requestCreatedThisTurn: leadCreatedThisTurn,
       nextAction: ctx.bookedThisTurn ? "CLOSE" : state.humanRequested ? "ESCALATE_HUMAN" : "CONTINUE",
-      leadId: leadBanner,
+      leadId: ctx.leadId || state.activeLeadId || null,
       appointmentId: state.appointmentId || null,
       dryLead: false,
       whatsappUrl: wa,

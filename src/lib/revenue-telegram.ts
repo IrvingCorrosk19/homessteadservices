@@ -17,6 +17,7 @@ import {
 import { serviceNeedDetail } from "@/lib/concierge/service-intent";
 import { adminChatIds, sendTelegramMessage, type TelegramButton } from "@/lib/content-telegram";
 import { customerWhatsAppUrl } from "@/lib/service-requests";
+import { isPublicWhatsAppEnabled } from "@/lib/site";
 import { contact, site } from "@/lib/site";
 import { logError, logInfo } from "@/lib/log";
 import {
@@ -321,10 +322,12 @@ export async function applyRevenueCallback(data: string, chatId = ""): Promise<R
   }
   if (action === "contact") {
     setPipeline(leadId, "CONTACTED");
-    const wa = customerWhatsAppUrl(
-      lead.phone,
-      `Hola ${lead.name}, le contactamos de Homestead Services con relación a su solicitud ${lead.leadId}.`,
-    );
+    const wa = isPublicWhatsAppEnabled()
+      ? customerWhatsAppUrl(
+          lead.phone,
+          `Hola ${lead.name}, le contactamos de Homestead Services con relación a su solicitud ${lead.leadId}.`,
+        )
+      : null;
     const lines = [
       `CONTACTAR · ${leadId}`,
       `Cliente: ${lead.name}`,

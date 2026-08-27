@@ -17,10 +17,24 @@ import { areOfferedSlotsActive, buildSessionSnapshot, clearActiveTransactionStat
 import { parseConciergePhotoMessage } from "@/lib/concierge-photo-message";
 import { logError } from "@/lib/log";
 import { CONCIERGE_BUILD_MARKER, CONCIERGE_PROMPT_VERSION } from "@/lib/concierge-knowledge";
+import { isWebsiteImageChatContext } from "@/lib/concierge-entry-context";
+import { startChatFromWebsiteImage } from "@/lib/concierge/website-image-context";
 
 export const runtime = "nodejs";
 
 const COOKIE = "hs_cid";
+
+function readStoredImageContext(state: { facts?: Record<string, string> } | undefined) {
+  const raw = state?.facts?.websiteImageContext;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isWebsiteImageChatContext(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 
 function clientIp(request: Request) {
   return (
@@ -74,10 +88,11 @@ export async function GET(request: Request) {
       touchConversation(conversationId, { state });
     }
   }
-  const session = state ? buildSessionSnapshot(state) : {
+  const session = state ? buildSessionSnapshot(state, Date.now(), conversation?.leadPublicId || state.activeLeadId || "") : {
     chips: [],
     historicalChips: [],
     leadBanner: null,
+    requestCard: null,
     awaitingSlotSelection: false,
     bookingPending: false,
     slotGroups: [],
@@ -92,6 +107,8 @@ export async function GET(request: Request) {
     chips: session.chips,
     historicalChips: session.historicalChips,
     leadBanner: session.leadBanner,
+    leadId: session.leadBanner,
+    requestCard: session.requestCard,
     awaitingSlotSelection: session.awaitingSlotSelection,
     bookingPending: session.bookingPending,
     slotGroups: session.slotGroups,
@@ -99,6 +116,7 @@ export async function GET(request: Request) {
     showResumeBooking: session.showResumeBooking,
     showPhotoCta: session.showPhotoCta,
     photosRemaining: session.photosRemaining,
+    imageContext: readStoredImageContext(state),
   });
 }
 
@@ -110,7 +128,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false }, { status: 403 });
   }
   const payload = (await request.json().catch(() => null)) as
-    | { message?: string; utm?: Record<string, string>; event?: string }
+    | { message?: string; utm?: Record<string, string>; event?: string; context?: unknown }
     | null;
   if (!payload) return NextResponse.json({ ok: false }, { status: 400 });
   const ip = clientIp(request);
@@ -132,6 +150,43 @@ export async function POST(request: Request) {
     const res = NextResponse.json({
       ok: true,
       conversationId,
+      build: CONCIERGE_BUILD_MARKER,
+      promptVersion: CONCIERGE_PROMPT_VERSION,
+    });
+    res.cookies.set(COOKIE, conversationId, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+      secure: process.env.NODE_ENV === "production",
+    });
+    return res;
+  }
+
+  if (payload.event === "CONTEXT_STARTED") {
+    const started = await startChatFromWebsiteImage({
+      conversationId,
+      context: payload.context,
+    });
+    if (!started.ok) {
+      return NextResponse.json({ ok: false, error: started.error }, { status: 400 });
+    }
+    const conversation = getConversation(conversationId);
+    const session = conversation?.state ? buildSessionSnapshot(conversation.state) : null;
+    const res = NextResponse.json({
+      ok: true,
+      conversationId,
+      reply: started.reply,
+      imageContext: started.context,
+      chips: session?.chips || [],
+      historicalChips: session?.historicalChips || [],
+      serviceContext: session?.serviceContext || started.stateService || null,
+      showPhotoCta: session?.showPhotoCta || false,
+      photosRemaining: session?.photosRemaining ?? 4,
+      awaitingSlotSelection: session?.awaitingSlotSelection || false,
+      bookingPending: session?.bookingPending || false,
+      slotGroups: session?.slotGroups || [],
+      showResumeBooking: session?.showResumeBooking || false,
       build: CONCIERGE_BUILD_MARKER,
       promptVersion: CONCIERGE_PROMPT_VERSION,
     });

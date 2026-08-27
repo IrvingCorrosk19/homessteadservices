@@ -1,4 +1,4 @@
-import { contact, formServices, site, type ServiceSlug } from "@/lib/site";
+import { contact, formServices, isPublicWhatsAppEnabled, site, type ServiceSlug } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 export const CONCIERGE_SERVICES = [
@@ -23,7 +23,7 @@ export function conciergeKnowledge() {
     serviceArea: contact.serviceArea.isConfigured ? contact.serviceArea.value : null,
     email: contact.email.isConfigured ? contact.email.value : null,
     phone: contact.phone.isConfigured ? contact.phone.value : null,
-    whatsappConfigured: contact.whatsapp.isConfigured,
+    whatsappConfigured: isPublicWhatsAppEnabled() && contact.whatsapp.isConfigured,
     pricingPublished: false,
     services: formServices.map((slug) => ({
       slug,

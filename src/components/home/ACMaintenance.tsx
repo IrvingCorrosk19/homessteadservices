@@ -1,6 +1,8 @@
+"use client";
+
 import Image from "next/image";
-import { ButtonLink } from "@/components/ui/Button";
 import { Reveal } from "@/components/ui/Reveal";
+import { ServiceConsultButton } from "@/components/concierge/ServiceConsultButton";
 import { images, imageAlts } from "@/data/images";
 import { getDictionary } from "@/i18n/get-dictionary";
 
@@ -18,6 +20,21 @@ export function ACMaintenance() {
             sizes="(max-width: 1024px) 100vw, 50vw"
             className="object-cover"
           />
+          <div className="absolute inset-x-0 bottom-0 flex justify-end bg-gradient-to-t from-navy/40 to-transparent p-4">
+            <ServiceConsultButton
+              serviceId="ac"
+              serviceName={dictionary.ac.title}
+              imageId="feature-ac-maintenance"
+              imageSrc={images.acFeature}
+              itemId="ac-maintenance"
+              itemTitle={dictionary.ac.title}
+              contextLabel={dictionary.ac.title}
+              intentHint="maintenance"
+              className="rounded-full bg-cream/95 px-3 py-1.5 text-[0.68rem] font-medium tracking-[0.12em] uppercase text-navy shadow-sm"
+            >
+              Consultar
+            </ServiceConsultButton>
+          </div>
         </Reveal>
         <Reveal>
           <p className="text-[0.72rem] tracking-[0.2em] uppercase text-accent-deep">
@@ -36,7 +53,19 @@ export function ACMaintenance() {
             ))}
           </ul>
           <div className="mt-8">
-            <ButtonLink href="/contact?service=ac">{dictionary.ac.cta}</ButtonLink>
+            <ServiceConsultButton
+              serviceId="ac"
+              serviceName={dictionary.ac.title}
+              imageId="feature-ac-maintenance"
+              imageSrc={images.acFeature}
+              itemId="ac-maintenance"
+              itemTitle={dictionary.ac.title}
+              contextLabel={dictionary.ac.title}
+              intentHint="maintenance"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-navy bg-navy px-6 text-[0.78rem] font-medium tracking-[0.14em] uppercase text-cream transition-colors duration-300 hover:bg-navy-soft"
+            >
+              {dictionary.ac.cta}
+            </ServiceConsultButton>
           </div>
         </Reveal>
       </div>

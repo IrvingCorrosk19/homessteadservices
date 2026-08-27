@@ -1,10 +1,12 @@
-import { phoneHref, whatsappHref } from "@/lib/site";
+"use client";
+
+import { OpenChatButton } from "@/components/concierge/ServiceConsultButton";
+import { phoneHref } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 export function MobileBar() {
   const dictionary = getDictionary();
   const phone = phoneHref();
-  const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
   const columns = phone ? "grid-cols-3" : "grid-cols-2";
 
   return (
@@ -21,14 +23,9 @@ export function MobileBar() {
             {dictionary.common.call}
           </a>
         )}
-        <a
-          href={whatsapp ?? "/contact"}
-          target={whatsapp ? "_blank" : undefined}
-          rel={whatsapp ? "noopener noreferrer" : undefined}
-          className="flex min-h-14 flex-col items-center justify-center border-x border-line text-[0.68rem] tracking-[0.12em] uppercase text-navy"
-        >
-          {dictionary.whatsapp.label}
-        </a>
+        <OpenChatButton className="flex min-h-14 flex-col items-center justify-center border-x border-line text-[0.68rem] tracking-[0.12em] uppercase text-navy">
+          Hablar
+        </OpenChatButton>
         <a
           href="/contact"
           className="flex min-h-14 flex-col items-center justify-center bg-navy text-[0.68rem] tracking-[0.12em] uppercase text-cream"

@@ -11,6 +11,7 @@ import { getPlaybook, playbookById } from "@/lib/concierge/service-playbooks";
 import { detectServices, formatRequestBrief } from "@/lib/concierge/playbook-engine";
 import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
 import { getHomesteadDb } from "@/lib/service-requests";
+import { syncServiceRequestFromState } from "@/lib/concierge/service-request-lifecycle";
 
 export function canHandoffLead(state: ConversationState) {
   const phone = classifyPhone(state.phone);
@@ -38,19 +39,24 @@ export async function createLeadFromConcierge(input: {
   escalate?: boolean;
 }) {
   if (input.existingLeadId && !input.existingLeadId.startsWith("DRY-")) {
-    let service = input.state.primaryService || input.state.service || "";
-    if (!playbookById(service) || service === "other" || service === "multiple" || service === "unknown") {
-      service = detectServices(`${input.state.problem} ${input.summary}`)[0] || "other";
+    const row = getHomesteadDb()
+      .prepare("SELECT public_id FROM service_requests WHERE public_id = ?")
+      .get(input.existingLeadId) as { public_id: string } | undefined;
+    if (row) {
+      syncServiceRequestFromState(
+        input.existingLeadId,
+        input.state,
+        input.summary,
+        input.conversationId,
+      );
+      copyConciergePhotosToRequest(input.conversationId, input.existingLeadId);
+      logInfo("SERVICE_INTENT_RESOLVED", {
+        contentJobId: input.existingLeadId,
+        stage: "lead_service_refined_same_request",
+        phone: maskPhone(input.state.phone),
+      });
+      return input.existingLeadId;
     }
-    const existing = getHomesteadDb()
-      .prepare("SELECT service FROM service_requests WHERE public_id = ?")
-      .get(input.existingLeadId) as { service: string } | undefined;
-    if (existing?.service === service) return input.existingLeadId;
-    logInfo("SERVICE_INTENT_RESOLVED", {
-      contentJobId: input.existingLeadId,
-      stage: "lead_service_mismatch_new_request",
-      phone: maskPhone(input.state.phone),
-    });
   }
   if (!canHandoffLead(input.state)) return "";
   if (!shouldCreateCanonicalLead()) return "";
@@ -70,11 +76,13 @@ export async function createLeadFromConcierge(input: {
   const building = input.state.facts?.building || input.state.facts?.ph || "";
   const unit = input.state.facts?.unit || input.state.facts?.apartment || "";
   const tower = input.state.facts?.tower || "";
+  const reference = input.state.facts?.reference || "";
   const propertyBits = [
     input.state.propertyType ? `Tipo: ${input.state.propertyType}` : "",
     building ? `PH/Edificio: ${building}` : "",
     tower ? `Torre: ${tower}` : "",
     unit ? `Unidad: ${unit}` : "",
+    reference ? `Referencia: ${reference}` : "",
   ]
     .filter(Boolean)
     .join(". ");
@@ -136,6 +144,13 @@ export async function createLeadFromConcierge(input: {
   const notify = !isConciergeDryRun();
   await dispatchServiceRequest(saved, { email: notify, n8n: notify, photos: [] });
   recordFunnelEvent(input.conversationId, "ServiceRequestCreated", { service, lead: saved.publicId });
+  if (input.state.facts?.entryPoint === "service_image") {
+    recordFunnelEvent(input.conversationId, "RequestCreatedFromImage", {
+      service,
+      intent: input.state.facts.entryItemId || input.state.facts.entryImageId || "",
+      lead: saved.publicId,
+    });
+  }
   logInfo("REQUEST_SERVICE_PERSISTED", {
     contentJobId: saved.publicId,
     stage: service,

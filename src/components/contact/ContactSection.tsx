@@ -1,6 +1,12 @@
 import { RequestForm } from "@/components/contact/RequestForm";
-import { contact, emailHref, phoneHref, whatsappHref } from "@/lib/site";
+import { contact, emailHref, isPublicWhatsAppEnabled, phoneHref, whatsappHref } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
+
+type ContactDetail = {
+  label: string;
+  value: string;
+  href: string | null;
+};
 
 export function ContactSection({
   defaultService = "",
@@ -12,35 +18,49 @@ export function ContactSection({
   const dictionary = getDictionary();
   const phone = phoneHref();
   const email = emailHref();
-  const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
+  const whatsapp =
+    isPublicWhatsAppEnabled() && contact.whatsapp.isConfigured
+      ? whatsappHref(dictionary.whatsapp.defaultMessage)
+      : null;
 
-  const details = [
-    {
+  // Only real, usable public contact data — never placeholders.
+  const details: ContactDetail[] = [];
+
+  if (whatsapp && contact.whatsapp.isConfigured) {
+    details.push({
       label: dictionary.contact.whatsapp,
-      value: contact.whatsapp.isConfigured ? contact.whatsapp.value : null,
+      value: contact.whatsapp.value,
       href: whatsapp,
-    },
-    {
+    });
+  }
+  if (contact.phone.isConfigured && phone) {
+    details.push({
       label: dictionary.contact.phone,
-      value: contact.phone.isConfigured ? contact.phone.value : null,
+      value: contact.phone.value,
       href: phone,
-    },
-    {
+    });
+  }
+  if (contact.email.isConfigured && email) {
+    details.push({
       label: dictionary.contact.email,
-      value: contact.email.isConfigured ? contact.email.value : null,
+      value: contact.email.value,
       href: email,
-    },
-    {
+    });
+  }
+  if (contact.hours.isConfigured) {
+    details.push({
       label: dictionary.contact.hours,
-      value: contact.hours.isConfigured ? contact.hours.value : null,
+      value: contact.hours.value,
       href: null,
-    },
-    {
+    });
+  }
+  if (contact.serviceArea.isConfigured) {
+    details.push({
       label: dictionary.contact.area,
-      value: contact.serviceArea.isConfigured ? contact.serviceArea.value : null,
+      value: contact.serviceArea.value,
       href: null,
-    },
-  ];
+    });
+  }
 
   return (
     <section id="contacto" className="bg-cream py-20 md:py-28">
@@ -52,15 +72,15 @@ export function ContactSection({
           <p className="mt-5 text-lg leading-8 text-navy-soft">
             {dictionary.contact.body}
           </p>
-          <dl className="mt-10 space-y-5">
-            {details.map((item) => (
-              <div key={item.label}>
-                <dt className="text-[0.68rem] tracking-[0.16em] uppercase text-mist">
-                  {item.label}
-                </dt>
-                <dd className="mt-1 text-navy">
-                  {item.value ? (
-                    item.href ? (
+          {details.length > 0 && (
+            <dl className="mt-10 space-y-5">
+              {details.map((item) => (
+                <div key={item.label}>
+                  <dt className="text-[0.68rem] tracking-[0.16em] uppercase text-mist">
+                    {item.label}
+                  </dt>
+                  <dd className="mt-1 text-navy">
+                    {item.href ? (
                       <a
                         href={item.href}
                         target={item.href.startsWith("http") ? "_blank" : undefined}
@@ -70,14 +90,12 @@ export function ContactSection({
                       </a>
                     ) : (
                       item.value
-                    )
-                  ) : (
-                    <span className="text-mist">{dictionary.contact.pending}</span>
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
         <div className="rounded-2xl border border-line bg-white p-6 md:p-8">
           <h3 className="font-display text-2xl text-navy">{dictionary.form.title}</h3>

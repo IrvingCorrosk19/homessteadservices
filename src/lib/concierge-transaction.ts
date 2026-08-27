@@ -1,16 +1,23 @@
 import { randomUUID } from "crypto";
 import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
+import { parseClock } from "@/lib/concierge-datetime";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SlotGroup } from "@/lib/concierge-turn-routing";
 import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routing";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
+import { buildRequestCard } from "@/lib/concierge/service-request-lifecycle";
 import { photosRemainingFromCount } from "@/lib/concierge-photo-cta";
 import {
   emptyDigitalLockChecklist,
   getDigitalLockChecklist,
   setDigitalLockChecklist,
 } from "@/lib/concierge/digital-lock-vision";
+import {
+  isSlotConfirmed,
+  lockSelectedSlot,
+  hasRescheduleSignal,
+} from "@/lib/concierge/canonical-state";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
 export const OFFERED_SLOTS_TTL_MS = 45 * 60 * 1000;
@@ -19,6 +26,12 @@ export type ActiveSessionSnapshot = {
   chips: string[];
   historicalChips: string[];
   leadBanner: string | null;
+  requestCard: {
+    publicId: string;
+    serviceLabel: string;
+    status: "open" | "scheduled";
+    when: string;
+  } | null;
   awaitingSlotSelection: boolean;
   bookingPending: boolean;
   slotGroups: SlotGroup[];
@@ -95,12 +108,15 @@ export function clearActiveTransactionState(state: ConversationState, archiveSlo
   };
 }
 
+export { isSlotConfirmed, lockSelectedSlot, hasRescheduleSignal };
+
 export function activateOfferedSlots(state: ConversationState, slots: OfferedSlot[]): ConversationState {
+  const confirmed = isSlotConfirmed(state);
   return {
     ...state,
     offeredSlots: slots,
-    pendingSlot: null,
-    awaitingSlotSelection: slots.length > 0,
+    pendingSlot: confirmed ? state.pendingSlot : null,
+    awaitingSlotSelection: confirmed ? false : slots.length > 0,
     slotOfferToken: randomUUID(),
     lastAvailabilityAt: new Date().toISOString(),
     funnelStage: "BOOKING",
@@ -142,7 +158,7 @@ export function reconcileTransactionState(
     next.activeLeadId = conversationLeadId;
   }
 
-  if (!areOfferedSlotsActive(next) && next.offeredSlots.length) {
+  if (!areOfferedSlotsActive(next) && next.offeredSlots.length && !isSlotConfirmed(next)) {
     next = clearActiveTransactionState(next);
   }
 
@@ -177,7 +193,7 @@ export function matchOfferedSlotLabel(text: string, slots: OfferedSlot[]) {
   );
 }
 
-export function resolveSlotFromMessage(text: string, slots: AvailabilitySlot[]) {
+export function resolveSlotFromMessage(text: string, slots: AvailabilitySlot[], preferredDate = "") {
   const direct = matchOfferedSlotLabel(text, slots as OfferedSlot[]);
   if (direct) return direct;
   const lower = text.toLowerCase();
@@ -190,18 +206,47 @@ export function resolveSlotFromMessage(text: string, slots: AvailabilitySlot[]) 
     });
     if (match) return match;
   }
+  const parsedTime = parseClock(text);
+  if (parsedTime) {
+    const sameDate = preferredDate
+      ? slots.filter((s) => s.date === preferredDate && s.time === parsedTime)
+      : slots.filter((s) => s.time === parsedTime);
+    if (sameDate.length === 1) return sameDate[0];
+    if (sameDate.length > 1) return sameDate[0];
+    const any = slots.find((s) => s.time === parsedTime);
+    if (any) return any;
+  }
+  const meSirve = lower.match(/(?:me sirve|prefiero|el de|a las|confirmo)\s+(\d{1,2})(?:\s*(?:a\.?\s*m|p\.?\s*m|am|pm))?/);
+  if (meSirve) {
+    let hour = Number(meSirve[1]);
+    const afternoon = /p\.?\s*m|pm/.test(lower) || (hour >= 1 && hour <= 7 && !/a\.?\s*m|am/.test(lower));
+    if (/p\.?\s*m|pm/.test(meSirve[0] || lower)) {
+      if (hour < 12) hour += 12;
+    } else if (hour >= 1 && hour <= 7 && !/a\.?\s*m|am/.test(lower)) {
+      hour += 12;
+    }
+    const target = padTimeFromHour(hour);
+    const match = slots.find((s) => s.time === target || Number(s.time.split(":")[0]) === hour);
+    if (match) return match;
+  }
   return null;
 }
 
+function padTimeFromHour(hours: number) {
+  return `${String(hours).padStart(2, "0")}:00`;
+}
+
 export function validateActiveSlotBooking(state: ConversationState, date: string, time: string) {
-  if (!areOfferedSlotsActive(state)) {
+  const slotStillValid =
+    state.pendingSlot?.date === date && state.pendingSlot?.time === time && isSlotConfirmed(state);
+  if (!areOfferedSlotsActive(state) && !slotStillValid) {
     return {
       ok: false as const,
       reason: "stale_offers" as const,
       message: "Esos horarios ya no están vigentes. Déjame revisar la agenda nuevamente.",
     };
   }
-  if (!state.offeredSlots.some((slot) => slot.date === date && slot.time === time)) {
+  if (!state.offeredSlots.some((slot) => slot.date === date && slot.time === time) && !slotStillValid) {
     return {
       ok: false as const,
       reason: "slot_not_offered" as const,
@@ -228,17 +273,24 @@ export function shouldShowPhotoCta(state: ConversationState) {
   return false;
 }
 
-export function buildSessionSnapshot(state: ConversationState, now = Date.now()): ActiveSessionSnapshot {
+export function buildSessionSnapshot(
+  state: ConversationState,
+  now = Date.now(),
+  requestPublicId = "",
+): ActiveSessionSnapshot {
   const active = areOfferedSlotsActive(state, now);
-  const showChips = active && !state.bookingSuspended;
+  const slotLocked = isSlotConfirmed(state);
+  const showChips = active && !state.bookingSuspended && !slotLocked;
   const chips = showChips ? state.offeredSlots.slice(0, 6).map((item) => item.label) : [];
   const digitalLock = getDigitalLockChecklist(state);
   const maxPhotos = digitalLock.active ? 8 : 4;
   const photosRemaining = photosRemainingFromCount(state.photoCount || 0, maxPhotos);
+  const hsId = requestPublicId || state.activeLeadId || "";
   return {
     chips,
     historicalChips: state.historicalSlotLabels || [],
-    leadBanner: null,
+    leadBanner: hsId && !hsId.startsWith("DRY-") ? hsId : null,
+    requestCard: buildRequestCard(state, hsId),
     awaitingSlotSelection: active,
     bookingPending: active && Boolean(state.bookingSuspended),
     slotGroups: active ? buildSlotGroups(state.offeredSlots) : [],
@@ -249,6 +301,7 @@ export function buildSessionSnapshot(state: ConversationState, now = Date.now())
   };
 }
 
-export function shouldShowLeadBanner() {
-  return null;
+export function shouldShowLeadBanner(state: ConversationState, requestPublicId = "") {
+  const id = requestPublicId || state.activeLeadId || "";
+  return id && !id.startsWith("DRY-") ? id : null;
 }

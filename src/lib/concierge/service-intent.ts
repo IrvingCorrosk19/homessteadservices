@@ -35,22 +35,43 @@ export function resolvePrimaryFromMessage(text: string): PlaybookServiceId | "" 
   const blob = fold(text);
   if (!blob.trim()) return "";
 
+  // Specific trades beat generic "reparación" (P0: "reparación … aire acondicionado" → ac)
+  const detected = detectServicesLocal(text);
+  if (detected.includes("ac") && /\b(aire|aires|ac|split|minisplit|climatizaci)\b/.test(blob)) {
+    return "ac";
+  }
+  if (detected.includes("plumbing") && /\b(tuber|fuga|fregad|inodor|plomer)\b/.test(blob)) {
+    return "plumbing";
+  }
+  if (detected.includes("electrical") && /\b(el[eé]ctric|tomacorriente|interruptor|chispa)\b/.test(blob)) {
+    return "electrical";
+  }
+  if (detected.includes("locksmith") && /\b(cerradur|cerrajer|llave)\b/.test(blob)) {
+    return "locksmith";
+  }
+
   const hasRepair = REPAIR_VERB.test(blob);
   const hasPaint = PAINT_VERB.test(blob);
   const hasCeiling = CEILING.test(blob);
 
   if (hasRepair && hasPaint) {
+    if (/\b(?:de|para)\s+pintura\b|\bmantenim(?:iento|ento)\s+de\s+pintura\b|\bpintura\s+en\b/.test(blob)) {
+      return "painting";
+    }
     if (/\bprimero\b.*\brepar|\brepar.*\bprimero\b|\bantes de pint/.test(blob)) return "repairs";
     if (/\bdespu[eé]s de repar|\brepar.*\b(y|e)\s+pint/.test(blob)) return "repairs";
     return "repairs";
   }
-  if (hasRepair) return "repairs";
+  if (hasRepair && detected.includes("repairs") && !detected.some((id) => id !== "repairs")) {
+    return "repairs";
+  }
+  if (hasRepair && !detected.length) return "repairs";
   if (hasPaint) return "painting";
   if (hasCeiling && /\b(grieta|filtr|gote|hund|ca[ií]|dañ|rot|moho|humeda|humedad)\b/.test(blob)) {
     return "repairs";
   }
 
-  return detectServicesLocal(text)[0] || "";
+  return detected[0] || "";
 }
 
 export function serviceNeedDetail(problem: string, service = "") {

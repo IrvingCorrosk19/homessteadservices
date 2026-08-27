@@ -1,5 +1,11 @@
-import { classifyPhone, extractEmbeddedPhone } from "@/lib/phone";
+import { classifyPhone, extractEmbeddedPhone, looksLikePhoneAttempt } from "@/lib/phone";
 import type { ConversationState } from "@/lib/concierge-store";
+import {
+  detectExplicitCorrection,
+  isValidPersonName,
+  mergeConfirmedFacts,
+  sanitizeInferredUnit,
+} from "@/lib/concierge/canonical-state";
 import {
   applyLocationCorrection,
   choosePrimary,
@@ -55,22 +61,188 @@ function negatedBefore(blob: string, index: number, window = 28) {
   return /\b(no|nunca|sin|tampoco|ni siquiera)\b/.test(slice);
 }
 
-function extractName(text: string) {
-  const match =
-    text.match(/\b(?:soy|me llamo)\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i) ||
-    text.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+),?\s+(?:estoy|vivo|tengo)/i);
-  return match?.[1]?.trim().slice(0, 80) || "";
+function normalizeNameMarkers(text: string) {
+  return text.replace(/\bmi\s+n(?:ombre|nomnre|nomre|nombr|omnre|omre)\s+es\b/gi, "mi nombre es");
 }
 
-function extractLocation(text: string) {
+function trimNameAtBoundary(raw: string) {
+  let name = raw.trim();
+  const stop = name.match(
+    /^(.+?)(?:\s*,|\s+(?:casa|apartamento|apto|ph|ll[aá]mame|llamame|en la|mi n[uú]mero|al)\b)/i,
+  );
+  if (stop?.[1]) name = stop[1].trim();
+  return name.slice(0, 80);
+}
+
+function extractName(text: string) {
+  const normalized = normalizeNameMarkers(text);
+  const explicitPatterns = [
+    /\bmi\s+nombre\s+es\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i,
+    /\ba\s+nombre\s+de\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i,
+    /\b(?:soy|me llamo)\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i,
+  ];
+  for (const pattern of explicitPatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      const candidate = trimNameAtBoundary(match[1]);
+      if (isValidPersonName(candidate)) return candidate;
+    }
+  }
+  const match =
+    normalized.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+),?\s+(?:estoy|vivo|tengo)/i);
+  if (match?.[1]) {
+    const candidate = trimNameAtBoundary(match[1]);
+    if (isValidPersonName(candidate)) return candidate;
+  }
+  // Trailing "… irving corro 67676767" in packed multi-fact messages
+  const trailing = normalized.match(
+    /(?:^|[\s,;])([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})\s+(\+?507[\s\-]?)?\d{7,8}\s*$/i,
+  );
+  if (trailing?.[1]) {
+    const candidate = trimNameAtBoundary(trailing[1].trim());
+    const bad =
+      /^(mañana|hoy|viernes|lunes|martes|miércoles|miercoles|sabado|sábado|domingo|apartamento|unidad|pm|am|p\.?\s*m\.?|a\.?\s*m\.?|esquina|llamame|ll[aá]mame)$/i.test(
+        candidate,
+      ) ||
+      /\b(pm|am|p\.?\s*m\.?|a\.?\s*m\.?|esquina|llamame|ll[aá]mame)\b/i.test(candidate);
+    if (!bad && isValidPersonName(candidate)) return candidate;
+    const cleaned = candidate
+      .replace(/^(p\.?\s*m\.?|a\.?\s*m\.?|pm|am)\s+/i, "")
+      .trim();
+    if (cleaned.split(/\s+/).length >= 1 && cleaned.length >= 3 && isValidPersonName(cleaned)) {
+      return cleaned.slice(0, 80);
+    }
+  }
+  return "";
+}
+
+function extractHouseFacts(text: string): { unit?: string; reference?: string } {
+  const casa = text.match(/\bcasa\s+(\d+[a-zA-Z]?)\b/i);
+  const ref = text.match(/\ben\s+la\s+esquina\b/i);
+  return {
+    ...(casa ? { unit: casa[1].toUpperCase() } : {}),
+    ...(ref ? { reference: "en la esquina" } : {}),
+  };
+}
+
+/** Bare "Juan Alberto" when the bot just asked for the customer name. */
+function extractBareNameReply(text: string, state: ConversationState) {
+  const awaitingName =
+    state.facts?.lastAskedField === "customer_name" ||
+    state.facts?.lastAskedField === "name" ||
+    /nombre|a nombre de qui[eé]n|c[oó]mo te llamas/i.test(state.facts?.lastBotQuestion || "");
+  if (!awaitingName || state.name) return "";
+  const trimmed = text.trim();
+  if (!/^[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]*(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]*){0,3}$/.test(trimmed)) {
+    return "";
+  }
+  if (looksLikePhoneAttempt(trimmed) || /^(si|sí|no|ok|hola|gracias|mañana|hoy)$/i.test(trimmed)) return "";
+  return trimmed.slice(0, 80);
+}
+
+function titleCasePhrase(value: string) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+const KNOWN_ZONES: Array<{ re: RegExp; label: string }> = [
+  { re: /\bedison\s+park\b/i, label: "Edison Park" },
+  { re: /\bpanam[aá]\s+centro\b/i, label: "Panamá Centro" },
+  { re: /\bbella\s+vista\b/i, label: "Bella Vista" },
+  { re: /\bbetania\b/i, label: "Betania" },
+  { re: /\bsan\s+miguelito\b/i, label: "San Miguelito" },
+  { re: /\btocumen\b/i, label: "Tocumen" },
+  { re: /\bjuan\s+d[ií]az\b/i, label: "Juan Díaz" },
+  { re: /\bel\s+cangrejo\b/i, label: "El Cangrejo" },
+  { re: /\bcosta\s+del\s+este\b/i, label: "Costa del Este" },
+  { re: /\bpueblo\s+nuevo\b/i, label: "Pueblo Nuevo" },
+  { re: /\bparque\s+lefevre\b/i, label: "Parque Lefevre" },
+  { re: /\br[ií]o\s+abajo\b/i, label: "Río Abajo" },
+  { re: /\bcalidonia\b/i, label: "Calidonia" },
+  { re: /\blas\s+cumbres\b/i, label: "Las Cumbres" },
+  { re: /\bsan\s+francisco\b/i, label: "San Francisco" },
+  { re: /\bel\s+dorado\b/i, label: "El Dorado" },
+  { re: /\bobarrio\b/i, label: "Obarrio" },
+  { re: /\bpaitilla\b/i, label: "Paitilla" },
+  { re: /\balbrook\b/i, label: "Albrook" },
+  { re: /\bclayton\b/i, label: "Clayton" },
+  { re: /\bchorrera\b/i, label: "Chorrera" },
+  { re: /\barraij[aá]n\b/i, label: "Arraiján" },
+];
+
+function extractLocation(text: string, state?: ConversationState) {
+  const trimmed = text.trim();
+  const blob = fold(trimmed);
+
+  if (/panam[aá]\s+centro[,\s]+edison\s+park|edison\s+park[,\s]+panam[aá]\s+centro/i.test(trimmed)) {
+    return "Panamá Centro, Edison Park";
+  }
+
+  const zonesFound: string[] = [];
+  for (const zone of KNOWN_ZONES) {
+    if (zone.re.test(trimmed)) zonesFound.push(zone.label);
+  }
+  if (zonesFound.length) return zonesFound.join(", ");
+
   const patterns = [
-    /\b(?:estoy en|vivo en|me encuentro en|ubicad[oa] en)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+(?:de\s+la?\s+|del?\s+)?[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i,
-    /\ben\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+(?:de\s+la?\s+|del?\s+)?[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})\b/i,
+    /\b(?:estoy en|vivo en|me encuentro en|ubicad[oa] en)\s+([^\n,.;]{3,80})/i,
+    /\ben\s+([^\n,.;]{3,60})\b/i,
   ];
   for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1] && !/\d{4}/.test(match[1])) return match[1].trim();
+    const match = trimmed.match(pattern);
+    const candidate = match?.[1]?.trim() || "";
+    if (candidate && !/\d{4}/.test(candidate) && !/^\d+$/.test(candidate)) {
+      if (!/^\bph\b|apartamento|apto$/i.test(candidate)) {
+        return titleCasePhrase(candidate);
+      }
+    }
   }
+
+  const leading = trimmed.match(
+    /^\s*([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})\s*,\s*(?:ph|edificio|apartamento|apto)\b/i,
+  );
+  if (leading?.[1]) return titleCasePhrase(leading[1]);
+
+  const awaitingLocation =
+    state?.facts?.lastAskedField === "location" ||
+    /zona|ubicaci[oó]n|d[oó]nde ser[ií]a/i.test(state?.facts?.lastBotQuestion || "");
+  if (
+    awaitingLocation &&
+    trimmed.length >= 3 &&
+    trimmed.length <= 80 &&
+    !looksLikePhoneAttempt(trimmed) &&
+    !/^\d+$/.test(trimmed) &&
+    !/^(si|sí|no|ok|hola|gracias)$/i.test(trimmed)
+  ) {
+    return titleCasePhrase(trimmed);
+  }
+
+  return "";
+}
+
+function extractBareQuantityReply(text: string, state: ConversationState) {
+  const awaiting =
+    state.facts?.lastAskedField === "units" ||
+    /cu[aá]ntos aires|cu[aá]ntos equipos|cu[aá]ntas unidades/i.test(state.facts?.lastBotQuestion || "");
+  if (!awaiting) return "";
+  const trimmed = text.trim();
+  if (/^\d{1,2}$/.test(trimmed)) return trimmed;
+  const word = fold(trimmed).match(/^(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/);
+  if (word) return WORD_NUM[word[1]] || "";
+  return "";
+}
+
+/** Bare "3A" / "3 a" when bot asked for apartment/unit. */
+function extractBareUnitReply(text: string, state: ConversationState) {
+  const awaiting =
+    state.facts?.lastAskedField === "unit" ||
+    /apartamento|unidad|n[uú]mero de apartamento|qu[eé] apartamento/i.test(state.facts?.lastBotQuestion || "");
+  if (!awaiting) return "";
+  const trimmed = text.trim().replace(/\s+/g, "");
+  if (/^(\d+[a-zA-Z]|[a-zA-Z]\d+|\d+)$/i.test(trimmed)) return trimmed.toUpperCase();
   return "";
 }
 
@@ -166,20 +338,37 @@ function extractPropertyType(text: string) {
   return "";
 }
 
-function extractBuildingFacts(text: string): { building?: string; tower?: string; unit?: string } {
+function extractBuildingFacts(text: string): {
+  building?: string;
+  tower?: string;
+  unit?: string;
+  addressText?: string;
+  inferredUnitCandidate?: string;
+} {
+  const phTrailing = text.match(/\bph\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40}?)\s+(\d{2,5})\b/i);
+  if (phTrailing && !/\b(?:apto|apartamento|unidad|apt\.?)\b/i.test(text)) {
+    const building = phTrailing[1].trim();
+    return {
+      building,
+      addressText: `PH ${building} ${phTrailing[2]}`,
+      inferredUnitCandidate: phTrailing[2],
+    };
+  }
   const building =
-    text.match(/\b(?:ph|edificio|residencial)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i)?.[1] ||
-    text.match(/\ben\s+(?:el\s+)?ph\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i)?.[1] ||
+    text.match(/\b(?:ph|edificio|residencial)\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40}?)(?:\s*,|\s*$|\s+(?:apto|apartamento|unidad))/i)?.[1]?.trim() ||
+    text.match(/\ben\s+(?:el\s+)?ph\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40})/i)?.[1]?.trim() ||
     "";
   const tower = text.match(/\btorre\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ]+)/i)?.[1] || "";
   const unit =
+    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*(\d+)\s*([A-Za-z])\b/i)?.slice(1)?.join("") ||
     text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*([A-Za-z0-9\-]+)/i)?.[1] ||
     text.match(/\bapartamento\s+([A-Za-z0-9\-]+)/i)?.[1] ||
     "";
+  const normalizedUnit = unit ? unit.replace(/\s+/g, "").toUpperCase() : "";
   return {
-    ...(building ? { building: building.trim() } : {}),
+    ...(building ? { building } : {}),
     ...(tower ? { tower: tower.trim() } : {}),
-    ...(unit ? { unit: unit.trim() } : {}),
+    ...(normalizedUnit ? { unit: normalizedUnit } : {}),
   };
 }
 
@@ -195,6 +384,7 @@ export function extractPackedMessage(text: string): PackedExtraction {
   const correction = applyLocationCorrection(text, "");
   const corrections = correction ? [correction] : [];
   const buildingFacts = extractBuildingFacts(text);
+  const houseFacts = extractHouseFacts(text);
   return {
     name: extractName(text),
     location: extractLocation(text) || correction,
@@ -207,6 +397,7 @@ export function extractPackedMessage(text: string): PackedExtraction {
     activeLeak: plumbing.activeLeak,
     hazard: electrical.hazard,
     ...buildingFacts,
+    ...houseFacts,
     negated,
     corrections,
     ...(extractSplitType(text) ? { units: extractUnits(text) || "1" } : {}),
@@ -223,21 +414,34 @@ function setConfidence(
 
 export function applyPackedExtraction(state: ConversationState, text: string): ConversationState {
   const packed = extractPackedMessage(text);
-  const next: ConversationState = {
-    ...state,
-    facts: { ...(state.facts || {}) },
-    factConfidence: { ...(state.factConfidence || {}) },
-    corrections: [...(state.corrections || [])],
-  };
+  const explicitCorrection = detectExplicitCorrection(text);
+  let next: ConversationState = mergeConfirmedFacts(state, {}, { explicitCorrection });
+
+  const locCandidate = packed.location || extractLocation(text, state);
+  if (locCandidate && (explicitCorrection || !(state.location || state.facts?.location))) {
+    const location = applyLocationCorrection(text, locCandidate);
+    next = mergeConfirmedFacts(next, {
+      location,
+      facts: { ...(next.facts || {}), location },
+    });
+    next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
+  } else if (locCandidate && explicitCorrection) {
+    next = mergeConfirmedFacts(next, {
+      location: applyLocationCorrection(text, locCandidate),
+      facts: { ...(next.facts || {}), location: applyLocationCorrection(text, locCandidate) },
+    });
+    next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
+  }
 
   if (packed.name) {
-    next.name = packed.name;
+    next = mergeConfirmedFacts(next, { name: packed.name });
     next.factConfidence = setConfidence(next.factConfidence || {}, "name", "EXPLICIT");
-  }
-  if (packed.location) {
-    next.location = applyLocationCorrection(text, packed.location);
-    next.facts.location = next.location;
-    next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
+  } else {
+    const bare = extractBareNameReply(text, state);
+    if (bare) {
+      next = mergeConfirmedFacts(next, { name: bare });
+      next.factConfidence = setConfidence(next.factConfidence || {}, "name", "EXPLICIT");
+    }
   }
   if (packed.corrections.length) {
     next.corrections = [...new Set([...(next.corrections || []), ...packed.corrections])];
@@ -257,7 +461,10 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
     next.facts.contactPreference = packed.contactPreference;
     next.factConfidence = setConfidence(next.factConfidence || {}, "contactPreference", "EXPLICIT");
   }
-  if (packed.propertyType) next.propertyType = packed.propertyType;
+  if (packed.propertyType) {
+    next.propertyType = packed.propertyType;
+    next.facts.propertyType = packed.propertyType;
+  }
   if (/^\s*mejor no[\s!.?]*$/i.test(text.trim()) || /\bmejor no[,.]?\s*(gracias)?[\s!.?]*$/i.test(text.trim())) {
     if (next.primaryService || next.service) {
       next.facts = { ...(next.facts || {}), abandonedService: next.primaryService || next.service };
@@ -271,21 +478,50 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
     }
   }
   if (packed.building) {
-    next.facts.building = packed.building;
-    next.facts.ph = packed.building;
+    next.facts = { ...(next.facts || {}), building: packed.building, ph: packed.building };
     next.factConfidence = setConfidence(next.factConfidence || {}, "building", "EXPLICIT");
+    if (!next.propertyType) {
+      next.propertyType = "ph";
+      next.facts.propertyType = "ph";
+    }
+  }
+  if ((packed as { addressText?: string }).addressText) {
+    next.facts.addressText = (packed as { addressText?: string }).addressText || "";
+  }
+  if ((packed as { inferredUnitCandidate?: string }).inferredUnitCandidate) {
+    next.facts.inferredUnitCandidate = (packed as { inferredUnitCandidate?: string }).inferredUnitCandidate || "";
   }
   if (packed.tower) {
     next.facts.tower = packed.tower;
     next.factConfidence = setConfidence(next.factConfidence || {}, "tower", "EXPLICIT");
   }
-  if (packed.unit) {
-    next.facts.unit = packed.unit;
-    next.facts.apartment = packed.unit;
+  if ((packed as { reference?: string }).reference) {
+    next.facts.reference = (packed as { reference?: string }).reference || "";
+    next.factConfidence = setConfidence(next.factConfidence || {}, "reference", "EXPLICIT");
+  }
+  const bareUnit = extractBareUnitReply(text, state);
+  const unitCandidate = bareUnit || packed.unit || (packed as { unit?: string }).unit || "";
+  const safeUnit = sanitizeInferredUnit(text, unitCandidate, packed.building || next.facts?.building || "");
+  if (safeUnit) {
+    next.facts.unit = safeUnit;
+    next.facts.apartment = safeUnit;
     next.factConfidence = setConfidence(next.factConfidence || {}, "unit", "EXPLICIT");
   }
-  if (packed.units) {
-    next.facts.units = packed.units;
+  // If PH/unit known but zone empty, recover leading district from the same message
+  if (!next.location && (packed.building || packed.unit)) {
+    const leading = text.match(
+      /^\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})\s*,/i,
+    );
+    if (leading?.[1] && !/\bph\b|apartamento|apto/i.test(leading[1])) {
+      next.location = leading[1].trim();
+      next.facts.location = next.location;
+      next.factConfidence = setConfidence(next.factConfidence || {}, "location", "HIGH_CONFIDENCE");
+    }
+  }
+  const bareQty = extractBareQuantityReply(text, state);
+  const unitsVal = bareQty || packed.units;
+  if (unitsVal) {
+    next.facts.units = unitsVal;
     next.factConfidence = setConfidence(next.factConfidence || {}, "units", "EXPLICIT");
   }
   if (packed.symptom && !packed.negated.includes("notCooling") && !packed.negated.includes("waterLeak")) {
@@ -323,12 +559,11 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
   const previousPrimary = next.primaryService || next.service || "";
   next.primaryService = choosePrimary(next.detectedServices, previousPrimary, text);
   if (previousPrimary && next.primaryService && previousPrimary !== next.primaryService) {
-    next.activeLeadId = "";
-    next.appointmentId = "";
-    next.offeredSlots = [];
-    next.awaitingSlotSelection = false;
-    next.slotOfferToken = "";
-    next.bookingSuspended = false;
+    next.facts = {
+      ...(next.facts || {}),
+      serviceRefinedFrom: previousPrimary,
+      serviceRefinedTo: next.primaryService,
+    };
   }
   if (next.primaryService) next.service = next.primaryService;
   next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);

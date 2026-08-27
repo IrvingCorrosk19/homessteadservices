@@ -92,6 +92,8 @@ export type Dictionary = {
     upload: string;
     uploadHint: string;
     removePhoto: string;
+    locksmithIntent: string;
+    reviewingPhotos: string;
     submit: string;
     sending: string;
     successTitle: string;
@@ -109,6 +111,8 @@ export type Dictionary = {
       service: string;
       message: string;
       files: string;
+      intent: string;
+      digitalLockPhotos: string;
     };
   };
   whatsapp: {
@@ -325,13 +329,15 @@ export const es: Dictionary = {
     upload: "Agregar fotografías",
     uploadHint: "Hasta 6 imágenes, 5 MB cada una.",
     removePhoto: "Quitar",
+    locksmithIntent: "¿Qué necesitas?",
+    reviewingPhotos: "Estamos revisando tus fotos de la puerta…",
     submit: "Solicitar servicio",
     sending: "Enviando",
     successTitle: "Solicitud recibida",
     successBody: "Gracias. Hemos recibido la información de tu servicio.",
     successAnother: "Enviar otra solicitud",
     errorTitle: "No se pudo enviar",
-    errorBody: "Inténtalo de nuevo en un momento. Si el problema continúa, escríbenos por WhatsApp.",
+    errorBody: "Inténtalo de nuevo en un momento. Si el problema continúa, habla con Homestead desde el chat o el formulario.",
     propertyOptions: {
       house: "Casa",
       apartment: "Apartamento",
@@ -359,6 +365,8 @@ export const es: Dictionary = {
       service: "Selecciona un servicio.",
       message: "Cuéntanos un poco más sobre lo que necesitas.",
       files: "Usa imágenes de hasta 5 MB. Máximo 6 fotografías.",
+      intent: "Indica qué necesitas en cerrajería.",
+      digitalLockPhotos: "Necesitamos las tres vistas de tu puerta para continuar.",
     },
   },
   whatsapp: {

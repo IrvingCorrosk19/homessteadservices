@@ -38,8 +38,17 @@ function propertyLabel(state: ConversationState) {
   return map[raw] || "";
 }
 
-/** Deterministic truthful answers to "do you know my name / where / PH?" */
-export function answerMemoryQuestion(text: string, state: ConversationState): MemoryAnswer {
+const REQUEST_Q = /\b(cu[aá]l es mi solicitud|mi solicitud|n[uú]mero de solicitud|mi referencia|mi folio|hs-\d)/i;
+
+/** Deterministic truthful answers to memory / reference questions. */
+export function answerMemoryQuestion(text: string, state: ConversationState, activeRequestId = ""): MemoryAnswer {
+  const hs = activeRequestId || state.activeLeadId || "";
+  if (REQUEST_Q.test(text) && /\?|cu[aá]l|n[uú]mero|referencia|folio/.test(text.toLowerCase())) {
+    return hs && !hs.startsWith("DRY-")
+      ? { handled: true, reply: `Tu solicitud activa es ${hs}.` }
+      : { handled: true, reply: "Todavía no tengo una solicitud registrada. Cuéntame qué servicio necesitas y la abro enseguida." };
+  }
+
   if (!MEMORY_Q.test(text) && !(NAME_Q.test(text) && /\?|sabes|conoces|tienes/.test(text.toLowerCase()))) {
     if (!(NAME_Q.test(text) || LOCATION_Q.test(text) || PROPERTY_Q.test(text)) || !/\?|sabes|conoces|tienes|pero/.test(text.toLowerCase())) {
       return { handled: false, reply: "" };

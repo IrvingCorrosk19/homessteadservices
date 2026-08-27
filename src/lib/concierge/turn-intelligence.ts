@@ -2,6 +2,7 @@ import type { ConversationState } from "@/lib/concierge-store";
 import { getPlaybook, type ServicePlaybook } from "@/lib/concierge/service-playbooks";
 import { missingUsefulFacts } from "@/lib/concierge/playbook-engine";
 import type { FactConfidence } from "@/lib/concierge/packed-extraction";
+import { isPresent, isValidPersonName, sanitizeInferredUnit } from "@/lib/concierge/canonical-state";
 
 export type TurnUnderstanding = {
   intent: string;
@@ -91,7 +92,24 @@ export function applyTurnIntelligence(state: ConversationState, intel: TurnUnder
   }
   next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
   for (const [key, value] of Object.entries(intel.extractedFacts)) {
-    next.facts[key] = value;
+    if (!isPresent(value)) continue;
+    if (key === "location" && isPresent(state.location || state.facts?.location) && !intel.corrections.length) {
+      continue;
+    }
+    if (key === "name" || key === "customer_name") {
+      if (!isValidPersonName(value)) continue;
+      if (isPresent(state.name) && !intel.corrections.length) continue;
+      next.name = value;
+      next.factConfidence = { ...(next.factConfidence || {}), name: intel.factConfidence[key] || "HIGH_CONFIDENCE" };
+      continue;
+    }
+    let safeValue = value;
+    if (key === "unit") {
+      const cleaned = sanitizeInferredUnit("", value, next.facts?.building || next.facts?.ph || "");
+      if (!cleaned && /^\d{2,5}$/.test(value)) continue;
+      safeValue = cleaned || value;
+    }
+    next.facts[key] = safeValue;
     if (intel.factConfidence[key]) {
       next.factConfidence = { ...(next.factConfidence || {}), [key]: intel.factConfidence[key] };
     } else if (!next.factConfidence?.[key]) {
@@ -123,12 +141,14 @@ export function applyTurnIntelligence(state: ConversationState, intel: TurnUnder
 }
 
 const REASK_PATTERNS: Array<{ key: string; re: RegExp }> = [
-  { key: "name", re: /(?:c[oó]mo te llamas|tu nombre|me das tu nombre)/i },
-  { key: "location", re: /(?:en qu[eé] zona|qu[eé] zona|d[oó]nde est[aá]s|cu[aá]l es tu zona)/i },
+  { key: "name", re: /(?:c[oó]mo te llamas|tu nombre|me das tu nombre|a nombre de qui[eé]n)/i },
+  { key: "location", re: /(?:en qu[eé] zona|qu[eé] zona|d[oó]nde est[aá]s|cu[aá]l es tu zona|direcci[oó]n precisa|detalle\s+(espec[ií]fico|adicional)|referencia\s+adicional|ubicaci[oó]n)/i },
   { key: "phone", re: /(?:tu tel[eé]fono|n[uú]mero de contacto|me das tu n[uú]mero|a qu[eé] n[uú]mero)/i },
   { key: "symptom", re: /(?:qu[eé] problema|qu[eé] s[ií]ntoma|qu[eé] le pasa|qu[eé] pasa con)/i },
   { key: "units", re: /(?:cu[aá]ntos equipos|cu[aá]ntas unidades|cu[aá]ntos aires)/i },
   { key: "photos", re: /(?:env[ií]a(?:me)? una foto|mand[aá] una foto|tienes foto)/i },
+  { key: "building", re: /(?:nombre del ph|qu[eé] ph|edificio)/i },
+  { key: "unit", re: /(?:qu[eé] apartamento|qu[eé] unidad|n[uú]mero de apartamento)/i },
 ];
 
 export function detectRepeatedQuestion(reply: string, state: ConversationState): string[] {
@@ -136,11 +156,15 @@ export function detectRepeatedQuestion(reply: string, state: ConversationState):
   for (const pattern of REASK_PATTERNS) {
     if (!pattern.re.test(reply)) continue;
     if (pattern.key === "name" && state.name) repeated.push("name");
-    if (pattern.key === "location" && (state.location || state.facts?.location)) repeated.push("location");
+    if (pattern.key === "location" && (state.location || state.facts?.location || state.facts?.building)) {
+      repeated.push("location");
+    }
     if (pattern.key === "phone" && state.contactStatus === "VALID") repeated.push("phone");
     if (pattern.key === "symptom" && (state.facts?.symptom || state.facts?.need || state.problem)) repeated.push("symptom");
     if (pattern.key === "units" && state.facts?.units) repeated.push("units");
     if (pattern.key === "photos" && (state.photoCount || 0) > 0) repeated.push("photos");
+    if (pattern.key === "building" && (state.facts?.building || state.facts?.ph)) repeated.push("building");
+    if (pattern.key === "unit" && (state.facts?.unit || state.facts?.apartment)) repeated.push("unit");
   }
   return repeated;
 }
@@ -173,6 +197,9 @@ export function questionEconomyBlock(state: ConversationState, playbook: Service
   const known = {
     name: state.name || null,
     location: state.location || state.facts?.location || null,
+    propertyType: state.propertyType || state.facts?.propertyType || null,
+    building: state.facts?.building || state.facts?.ph || null,
+    unit: state.facts?.unit || state.facts?.apartment || null,
     phone: state.contactStatus === "VALID" ? "valid" : state.contactStatus,
     service: state.primaryService || state.service || null,
     symptom: state.facts?.symptom || state.facts?.need || null,
@@ -180,8 +207,13 @@ export function questionEconomyBlock(state: ConversationState, playbook: Service
     duration: state.facts?.duration || null,
     photos: state.photoCount || 0,
     contactPreference: state.facts?.contactPreference || state.preferredTime || null,
+    additionalReference: state.facts?.additionalReference || null,
   };
-  const missing = missingUsefulFacts(state, playbook);
+  const missing = missingUsefulFacts(state, playbook).filter((key) => {
+    if (key === "photos") return false;
+    if (key === "location" && (known.location || (known.building && known.unit))) return false;
+    return true;
+  });
   const combined =
     playbook.serviceId === "locksmith" &&
     (state.photoCount || 0) > 0 &&
@@ -189,7 +221,8 @@ export function questionEconomyBlock(state: ConversationState, playbook: Service
     missing.includes("contact");
   return `ECONOMÍA DE PREGUNTAS
 Ya sabemos (NO volver a preguntar ni confirmar uno por uno): ${JSON.stringify(known)}
-Falta de verdad: ${missing.join(", ") || "nada crítico"}
+Falta de verdad (REQUIRED/útil que aún bloquea avance): ${missing.join(", ") || "nada crítico"}
 ${combined ? "Cerrajería con foto: puedes pedir zona y teléfono en UNA sola pregunta natural." : "Una pregunta útil por turno; combina solo si encaja naturalmente."}
-Si ya hay suficiente contexto: micro-cierre (solicitud, fotos faltantes, o agenda real) — no más interrogatorio.`;
+Si ya hay suficiente contexto: micro-cierre (solicitud o agenda real) — no más interrogatorio.
+PROHIBIDO preguntar "algún otro detalle", "dirección precisa" o "referencia" si location/building/unit ya están.`;
 }

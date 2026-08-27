@@ -23,7 +23,7 @@ const PRICE =
 const BOOKING_PAUSE =
   /\b(no quiero agendar|no agendar|todav[ií]a no|despu[eé]s veo|quiero pensarlo|mejor no agendar|cancelar la cita|no estoy seguro)\b/i;
 const NEW_NEED =
-  /\b(otra cosa|algo m[aá]s|quiero otra|diferente|tambi[eé]n necesito|mejor primero|cambiar de|otra solicitud|necesito otra)\b/i;
+  /\b(otra cosa|algo m[aá]s|quiero otra|diferente|tambi[eé]n necesito|mejor primero|cambiar de|otra solicitud|necesito otra|olvidemos|olvidalo|dejemos eso|mejor ayudame|ya no quiero eso)\b/i;
 const HUMAN = /persona|humano|asesor|hablar con alguien|un t[eé]cnico|alguien real/i;
 const SERVICE_Q =
   /\b(qu[eé] incluye|cu[aá]nto demora|cu[aá]nto tarda|garant[ií]a|c[oó]mo funciona|qu[eé] hacen|antes quiero saber)\b/i;

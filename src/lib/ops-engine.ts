@@ -1,5 +1,6 @@
 import { enqueueOutbox, getOutboxByIdempotency, setEngineState } from "@/lib/automation-outbox";
 import { getHomesteadDb, customerWhatsAppUrl } from "@/lib/service-requests";
+import { isPublicWhatsAppEnabled } from "@/lib/site";
 import { adminChatIds, type TelegramButton } from "@/lib/content-telegram";
 import { logInfo } from "@/lib/log";
 import { agoLabel, isQuietHours, nextQuietEndIso, opsConfig, panamaParts } from "@/lib/ops-config";
@@ -52,7 +53,7 @@ function enqueueOpsAlert(input: {
 }
 
 function contactButtons(id: string, phone: string): TelegramButton[][] {
-  const wa = customerWhatsAppUrl(phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(phone) : null;
   const row: TelegramButton[] = [];
   if (wa) row.push({ text: "💬 WhatsApp", url: wa });
   if (id.startsWith("HS-")) {

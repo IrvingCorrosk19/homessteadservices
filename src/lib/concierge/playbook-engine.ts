@@ -99,7 +99,7 @@ export function applyFactPatch(facts: Record<string, string>, patch: Record<stri
 
 export function applyLocationCorrection(text: string, current: string) {
   const match = text.match(
-    /(?:perd[oó]n[,.]?|mejor dicho|no[,.]?\s*estoy en|no[,.]?\s*es)\s+(?:es\s+|estoy en\s+)?([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})/i,
+    /(?:perd[oó]n[,.]?|mejor dicho|me equivoqu[eé][,.]?|no[,.]?\s*estoy en|no[,.]?\s*es|disculpa[,.]?)\s*(?:es\s+|estoy en\s+)?([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );
   if (match) return match[1].trim();
   return current;

@@ -58,8 +58,17 @@ function padTime(hours: number, minutes = 0) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-function parseClock(text: string) {
+export function parseClock(text: string) {
   const lower = text.toLowerCase();
+  const hmAmpm = lower.match(/\b(\d{1,2}):(\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)\b/);
+  if (hmAmpm) {
+    let hours = Number(hmAmpm[1]);
+    const minutes = Number(hmAmpm[2]);
+    const afternoon = /p/.test(hmAmpm[3]);
+    if (hours === 12) hours = afternoon ? 12 : 0;
+    else if (afternoon && hours < 12) hours += 12;
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) return padTime(hours, minutes);
+  }
   const hm = lower.match(/\b(\d{1,2}):(\d{2})\b/);
   if (hm) {
     const hours = Number(hm[1]);
@@ -90,6 +99,18 @@ function parseWindow(text: string) {
   }
   if (/\btarde\b|\bpor la tarde\b|\bdespu[eé]s de las\b/.test(lower)) return "afternoon";
   if (/\bnoche\b|\bpor la noche\b/.test(lower)) return "evening";
+  return "";
+}
+
+/** "después de las 3" → 15:00 (business-local interpretation). */
+export function parseMinTimeFromText(text: string): string {
+  const lower = text.toLowerCase();
+  const after = lower.match(/despu[eé]s de las\s+(\d{1,2})(?::(\d{2}))?/);
+  if (!after) return "";
+  let hours = Number(after[1]);
+  const minutes = Number(after[2] || 0);
+  if (!after[2] && hours >= 1 && hours <= 7) hours += 12;
+  if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) return padTime(hours, minutes);
   return "";
 }
 
@@ -163,13 +184,15 @@ export function parseExactCalendarDay(text: string, todayYmd: string): string {
 }
 
 export function parseNaturalDateTime(text: string, now = new Date()): ParsedVisitWhen {
-  const raw = text.trim().replace(/\s+/g, " ").slice(0, 120);
-  const lower = raw.toLowerCase();
+  // Parse on FULL message — truncating before parse dropped "mañana a las 2 pm"
+  // when packed into long multi-fact messages (P0 Case B).
+  const full = text.trim().replace(/\s+/g, " ").slice(0, 2000);
+  const lower = full.toLowerCase();
   const today = panamaParts(now).ymd;
   let date = "";
   let exactDay = false;
 
-  const exact = parseExactCalendarDay(raw, today);
+  const exact = parseExactCalendarDay(full, today);
   if (exact) {
     date = exact;
     exactDay = true;
@@ -190,7 +213,7 @@ export function parseNaturalDateTime(text: string, now = new Date()): ParsedVisi
   if (!inferred && window === "morning") inferred = "09:00";
   if (!inferred && window === "afternoon") inferred = "15:00";
   if (!inferred && window === "evening") inferred = "18:00";
-  return { date, time: inferred, window, raw, exactDay };
+  return { date, time: inferred, window, raw: full.slice(0, 160), exactDay };
 }
 
 export function isBusinessClock(hm: string) {

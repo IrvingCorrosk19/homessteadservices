@@ -1,5 +1,6 @@
 import { site } from "@/lib/site";
 import { customerWhatsAppUrl, getRequestByPublicId } from "@/lib/service-requests";
+import { isPublicWhatsAppEnabled } from "@/lib/site";
 import { getAppointment, getLead, latestAppointment, setOperatorPending } from "@/lib/revenue-store";
 import { listJobsByStatus } from "@/lib/content-catalog";
 import {
@@ -154,7 +155,7 @@ export function requestDetail(publicId: string) {
   const request = getRequestByPublicId(publicId);
   if (!request) return { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   const loc = requestLocation(request.message);
-  const wa = customerWhatsAppUrl(request.phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(request.phone) : null;
   const admin = `${site.url.replace(/\/$/, "")}/admin/solicitudes/${request.publicId}`;
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
@@ -223,7 +224,7 @@ export function rescueDetail(leadId: string) {
   if (!lead || lead.firstHumanActionAt || lead.doNotContact) {
     return { text: "Esta solicitud ya fue actualizada.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   }
-  const wa = customerWhatsAppUrl(lead.phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(lead.phone) : null;
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
   if (wa) contact.push({ text: "💬 WhatsApp", url: wa });
@@ -313,7 +314,7 @@ export function appointmentDetail(appointmentId: string) {
   const item = getAppointment(appointmentId);
   if (!item) return { text: "Esta cita ya no está disponible.", keyboard: [[{ text: "⬅ Agenda", callback_data: "cc:a:0" }]] };
   const lead = getLead(item.leadId);
-  const wa = customerWhatsAppUrl(item.phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(item.phone) : null;
   const calendar = `${site.url.replace(/\/$/, "")}/admin/citas`;
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];
@@ -418,7 +419,7 @@ export function customerCardView(customerId: number) {
   if (!customer) {
     return { text: "Cliente no encontrado.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
   }
-  const wa = customerWhatsAppUrl(customer.phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(customer.phone) : null;
   const keyboard: TelegramButton[][] = [];
   if (wa) keyboard.push([{ text: "📞 Contactar", url: wa }]);
   keyboard.push([{ text: "⬅ Buscar", callback_data: "cc:cu" }]);
@@ -469,7 +470,7 @@ export function jobsView(page = 0, includeTest = false) {
 export function jobDetail(jobId: string) {
   const job = getServiceJob(jobId);
   if (!job) return { text: "Este trabajo ya no está disponible.", keyboard: [[{ text: "⬅ Inicio", callback_data: "cc:h" }]] };
-  const wa = customerWhatsAppUrl(job.phone);
+  const wa = isPublicWhatsAppEnabled() ? customerWhatsAppUrl(job.phone) : null;
   const photos = jobPhotoCount(job.jobId);
   const keyboard: TelegramButton[][] = [];
   const contact: TelegramButton[] = [];

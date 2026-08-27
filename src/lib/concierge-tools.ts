@@ -1,5 +1,5 @@
 import { conciergeKnowledge } from "@/lib/concierge-knowledge";
-import { checkAvailability, type AvailabilitySlot } from "@/lib/concierge-availability";
+import { checkAvailability, isSlotStillOpen, type AvailabilitySlot } from "@/lib/concierge-availability";
 import { parseNaturalDateTime } from "@/lib/concierge-datetime";
 import { canHandoffLead, createLeadFromConcierge } from "@/lib/concierge-handoff";
 import { recordFunnelEvent } from "@/lib/concierge-intelligence";
@@ -30,8 +30,11 @@ import {
   clearActiveTransactionState,
   consumeOfferedSlots,
   detectNewTransactionSignal,
+  hasRescheduleSignal,
+  isSlotConfirmed,
   validateActiveSlotBooking,
 } from "@/lib/concierge-transaction";
+import { clearSlotSelection } from "@/lib/concierge/canonical-state";
 
 export const CONCIERGE_TOOLS = [
   {
@@ -239,6 +242,10 @@ export async function executeConciergeTool(
       state.activeLeadId = "";
       state.appointmentId = "";
       leadId = "";
+      recordFunnelEvent(ctx.conversationId, "ServiceContextChanged", {
+        service: state.primaryService,
+        intent: previousPrimary,
+      });
     }
     if (state.primaryService) state.service = state.primaryService;
     state.secondaryServices = state.detectedServices.filter((id) => id !== state.primaryService);
@@ -350,9 +357,27 @@ export async function executeConciergeTool(
         leadId,
       };
     }
+    const reschedule = hasRescheduleSignal(
+      `${asString(args.dateText)} ${asString(args.timeText)} ${state.facts?.lastBotQuestion || ""}`,
+    );
+    if (isSlotConfirmed(state) && !reschedule) {
+      return {
+        result: {
+          ok: true,
+          slots: state.offeredSlots,
+          requested: { date: state.pendingSlot?.date || state.preferredDate, time: state.pendingSlot?.time || state.preferredTime },
+          instruction:
+            "El cliente ya eligió un horario. NO vuelvas a listar opciones salvo que pida cambiar fecha/hora.",
+          queryExecuted: false,
+        },
+        state,
+        leadId,
+      };
+    }
     const availability = checkAvailability({
       dateText: asString(args.dateText) || state.preferredDate || undefined,
       timeText: asString(args.timeText) || state.preferredTime || undefined,
+      logId: ctx.conversationId,
     });
     let slots = availability.slots;
     if (availability.exactDayRequested) {
@@ -377,15 +402,24 @@ export async function executeConciergeTool(
       result: {
         timezone: availability.timezone,
         slots,
+        requested: availability.requested,
         requestedAvailable: availability.requestedAvailable,
+        requestedSlotBusy: availability.requestedSlotBusy,
         exactDayRequested: availability.exactDayRequested,
         requestedDateUnavailable: availability.requestedDateUnavailable,
+        sameDayFull: availability.sameDayFull,
+        nextAvailableDate: availability.nextAvailableDate,
         message: availability.message || null,
-        instruction: availability.requestedDateUnavailable
-          ? "Di claramente que esa fecha no tiene horarios. Ofrece revisar días cercanos SOLO si el cliente acepta. NO presentes otro día como si fuera la fecha pedida."
-          : availability.exactDayRequested
-            ? `Ofrece SOLO horarios del ${availability.requested.date}. No sustituyas por otra fecha.`
-            : null,
+        queryExecuted: availability.queryExecuted,
+        instruction: availability.requestedSlotBusy
+          ? "Di que ese horario está ocupado y ofrece SOLO los slots devueltos. Espera que el cliente elija. NO agendes automáticamente."
+          : availability.requestedAvailable
+            ? "Confirma que ese horario está disponible. Si faltan datos para agendar, pídelos sin reiniciar la agenda."
+            : availability.requestedDateUnavailable
+              ? "Di claramente que esa fecha no tiene horarios. Ofrece las alternativas devueltas si las hay."
+              : availability.exactDayRequested
+                ? `Ofrece SOLO horarios del ${availability.requested.date}. No sustituyas por otra fecha.`
+                : null,
       },
       state,
       leadId,
@@ -407,6 +441,19 @@ export async function executeConciergeTool(
     if (!slotCheck.ok) {
       return {
         result: { ok: false, reason: slotCheck.reason, message: slotCheck.message, slots: state.offeredSlots },
+        state: clearActiveTransactionState(state),
+        leadId,
+      };
+    }
+    if (!isSlotStillOpen(date, time, state.appointmentId)) {
+      recordFunnelEvent(ctx.conversationId, "AppointmentFailed", { reason: "slot_taken_race" });
+      return {
+        result: {
+          ok: false,
+          reason: "slot_taken",
+          message: "Ese horario acaba de ocuparse. Puedo revisar otras opciones disponibles.",
+          instruction: "Llama check_availability de nuevo y ofrece alternativas reales. NO digas que quedó agendada.",
+        },
         state: clearActiveTransactionState(state),
         leadId,
       };
@@ -534,22 +581,28 @@ export async function executeConciergeTool(
 
 export function mergeParsedWhen(state: ConversationState, text: string) {
   const parsed = parseNaturalDateTime(text);
+  const locked = isSlotConfirmed(state);
+  const reschedule = hasRescheduleSignal(text);
+
   if (parsed.date) {
-    if (state.preferredDate && state.preferredDate !== parsed.date) {
+    if (locked && !reschedule) {
+      // Do not reinterpret date from unrelated turns (e.g. customer name).
+    } else if (state.preferredDate && state.preferredDate !== parsed.date) {
       const previousSlots = state.offeredSlots || [];
       state = {
-        ...state,
+        ...clearSlotSelection(state),
         offeredSlots: [],
         awaitingSlotSelection: false,
         slotOfferToken: "",
-        pendingSlot: null,
         historicalSlotLabels: [
           ...new Set([...(state.historicalSlotLabels || []), ...previousSlots.map((s) => s.label)]),
         ].slice(-6),
       };
+      state.preferredDate = parsed.date;
+    } else if (!locked || reschedule) {
+      state.preferredDate = parsed.date;
     }
-    state.preferredDate = parsed.date;
   }
-  if (parsed.time) state.preferredTime = parsed.time;
+  if (parsed.time && (!locked || reschedule)) state.preferredTime = parsed.time;
   return state;
 }

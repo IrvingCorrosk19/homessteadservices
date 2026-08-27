@@ -12,6 +12,10 @@ export const FUNNEL_EVENTS = [
   "AppointmentFailed",
   "TelegramNotificationRequested",
   "ConversationCompleted",
+  "ServiceImageChatOpened",
+  "ChatContextStarted",
+  "ServiceContextChanged",
+  "RequestCreatedFromImage",
 ] as const;
 
 export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];

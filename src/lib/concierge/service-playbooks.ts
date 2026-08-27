@@ -74,22 +74,22 @@ const LOCKSMITH: ServicePlaybook = {
   objective: "Para compra/instalación de cerradura digital: revisar frente, interior y canto con visión; para cerrajería general: fotos útiles y acceso.",
   facts: {
     need: fact("USEFUL", "Necesidad", "cambio, no abre, quedó afuera, digital, copia de llave"),
-    photos: fact("USEFUL", "Fotos", "frente, interior y canto si es cerradura digital; puerta/cerradura si es genérico"),
-    lockedOut: fact("USEFUL", "Acceso", "si la persona está afuera o no puede asegurar"),
-    contact: fact("REQUIRED", "Contacto", "teléfono válido"),
-    location: fact("USEFUL", "Zona", "zona general, no dirección exacta al inicio"),
-    propertyType: fact("OPTIONAL", "Tipo de propiedad", ""),
-    brand: fact("NOT_NEEDED", "Marca", "no exigir modelo"),
-  },
-  requiredBeforeRequest: [],
-  requiredBeforeBooking: [],
-  recommendedQuestions: [
-    "Fotos de la puerta y la cerradura",
-    "Si no puede entrar o asegurar",
-  ],
-  photoGuidance:
-    "Si es cerradura digital (compra/instalación): pide frente, interior y canto del pestillo, una por una, y solo lo que falte. Si es cerrajería general: fotos de la puerta y la cerradura ayudan al técnico.",
-  photoWhy: "el técnico o la revisión visual puede ver el herraje antes de recomendar o coordinar",
+  photos: fact("REQUIRED", "Fotos", "OBLIGATORIO con Vision si compra/instalación de cerradura digital (frente+interior+canto). Lockout/apertura: no bloquear. Reparación: útil."),
+  lockedOut: fact("USEFUL", "Acceso", "si la persona está afuera o no puede asegurar"),
+  contact: fact("REQUIRED", "Contacto", "teléfono válido"),
+  location: fact("USEFUL", "Zona", "zona general, no dirección exacta al inicio"),
+  propertyType: fact("OPTIONAL", "Tipo de propiedad", ""),
+  brand: fact("NOT_NEEDED", "Marca", "no exigir modelo"),
+},
+requiredBeforeRequest: [],
+requiredBeforeBooking: [],
+recommendedQuestions: [
+  "Si es cerradura digital: fotos frente, interior y canto",
+  "Si no puede entrar o asegurar",
+],
+photoGuidance:
+  "POLÍTICA UNIFICADA (service-requirements): compra/instalación de cerradura digital exige 3 evidencias VISUALES válidas (frente, interior, canto) verificadas por Vision — nunca por conteo de archivos. Lockout/apertura: NO exigir las tres fotos. Reparación: foto útil opcional.",
+photoWhy: "el técnico o la revisión visual puede ver el herraje antes de recomendar o coordinar",
   urgencySignals: ["no puedo entrar", "quedé afuera", "quede afuera", "no puedo asegurar", "perdí la llave", "perdi la llave"],
   safetyRules: "No orientar a forzar la puerta ni a desarmar la cerradura. No inventar medidas, compatibilidad absoluta, marcas, precios ni stock de cerraduras digitales.",
   bookingStrategy: "PHOTO_REVIEW_FIRST",
@@ -252,7 +252,7 @@ const REMODELING: ServicePlaybook = {
 const REPAIRS: ServicePlaybook = {
   serviceId: "repairs",
   label: "Reparaciones",
-  aliases: ["reparar", "arreglar", "se dañó", "se dano", "descompus", "cielo raso", "cielo razo", "falso techo"],
+  aliases: ["reparar", "arreglar", "se dañó", "se dano", "descompus", "cielo raso", "cielo razo", "falso techo", "gypsum", "yeso", "drywall"],
   objective: "Entender el objeto/zona dañada sin forzar un oficio si aún no está claro.",
   facts: {
     what: fact("USEFUL", "Qué hay que reparar", ""),

@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/brand/Logo";
 import { SocialIcons } from "@/components/brand/SocialIcons";
-import { WhatsAppHeaderButton } from "@/components/brand/WhatsAppHeaderButton";
 import { ButtonLink } from "@/components/ui/Button";
 import { navItems } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
@@ -75,7 +74,6 @@ export function Header() {
           >
             {dictionary.common.request}
           </ButtonLink>
-          <WhatsAppHeaderButton />
           <button
             type="button"
             className="flex h-10 w-10 items-center justify-center rounded-lg text-navy lg:hidden"

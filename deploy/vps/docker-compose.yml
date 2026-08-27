@@ -8,6 +8,9 @@ services:
         NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
         NEXT_PUBLIC_HOURS: "${NEXT_PUBLIC_HOURS:-8:00 a.m. a 10:00 p.m.}"
         NEXT_PUBLIC_SERVICE_AREA: "${NEXT_PUBLIC_SERVICE_AREA:-Todo Panamá}"
+        NEXT_PUBLIC_PHONE: ${NEXT_PUBLIC_PHONE:-}
+        NEXT_PUBLIC_WHATSAPP: ${NEXT_PUBLIC_WHATSAPP:-}
+        NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED: ${NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED:-false}
     container_name: homestead_web
     restart: unless-stopped
     ports:
@@ -20,6 +23,9 @@ services:
       NEXT_PUBLIC_EMAIL: ${NEXT_PUBLIC_EMAIL:-servicios@homestead.lat}
       NEXT_PUBLIC_HOURS: "${NEXT_PUBLIC_HOURS:-8:00 a.m. a 10:00 p.m.}"
       NEXT_PUBLIC_SERVICE_AREA: "${NEXT_PUBLIC_SERVICE_AREA:-Todo Panamá}"
+      NEXT_PUBLIC_PHONE: ${NEXT_PUBLIC_PHONE:-}
+      NEXT_PUBLIC_WHATSAPP: ${NEXT_PUBLIC_WHATSAPP:-}
+      NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED: ${NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED:-false}
       CONTACT_INBOX: ${CONTACT_INBOX:-servicios@homestead.lat}
       SMTP_HOST: ${SMTP_HOST:-mail.privateemail.com}
       SMTP_PORT: ${SMTP_PORT:-465}

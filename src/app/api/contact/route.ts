@@ -8,6 +8,11 @@ import {
   sniffImage,
 } from "@/lib/photos";
 import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
+import {
+  checklistPublicSummary,
+  validateDigitalLockFormEvidence,
+} from "@/lib/form-digital-lock-validation";
+import { getServiceRequirements, isDigitalLockEvidenceIntent } from "@/lib/service-requirements";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const allowedServices = new Set<string>(formServices);
@@ -27,7 +32,9 @@ export async function POST(request: Request) {
     const property = String(form.get("property") ?? "").trim();
     const service = String(form.get("service") ?? "").trim();
     const message = String(form.get("message") ?? "").trim();
+    const intent = String(form.get("intent") ?? form.get("subtype") ?? "").trim();
     const photos = form.getAll("photos").filter((item) => item instanceof File);
+    const slotHints = form.getAll("photoSlots").map((item) => String(item || ""));
 
     if (
       !name ||
@@ -38,6 +45,17 @@ export async function POST(request: Request) {
       message.length < 8
     ) {
       return NextResponse.json({ ok: false }, { status: 400 });
+    }
+
+    if (service === "locksmith" && !intent) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "LOCKSMITH_INTENT_REQUIRED",
+          message: "Indica qué necesitas en cerrajería para continuar.",
+        },
+        { status: 422 },
+      );
     }
 
     if (photos.length > MAX_PHOTOS) {
@@ -66,6 +84,47 @@ export async function POST(request: Request) {
       });
     }
 
+    const requirements = getServiceRequirements({ service, intent, message });
+    let factsPayload: Record<string, unknown> = {
+      entrySource: "website",
+      entryPoint: "contact_form",
+      serviceIntent: requirements.intentId,
+    };
+
+    if (isDigitalLockEvidenceIntent(requirements.intentId)) {
+      const evidence = await validateDigitalLockFormEvidence({
+        service,
+        intent,
+        message,
+        photos: bufferedPhotos.map((photo, index) => ({
+          name: photo.name,
+          bytes: photo.bytes,
+          type: photo.type,
+          slotHint: (slotHints[index] as "front" | "inside" | "edge" | "") || "",
+        })),
+      });
+
+      if (!evidence.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            code: evidence.code || "DIGITAL_LOCK_PHOTO_REQUIREMENTS_INCOMPLETE",
+            message: evidence.message,
+            missing: evidence.missing,
+            evidence: checklistPublicSummary(evidence.checklist),
+          },
+          { status: 422 },
+        );
+      }
+
+      factsPayload = {
+        ...factsPayload,
+        digitalLockFlow: "1",
+        digitalLockChecklist: JSON.stringify(evidence.checklist),
+        need: "cerradura digital — compra/instalación",
+      };
+    }
+
     const saved = await persistServiceRequest({
       name,
       phone,
@@ -74,6 +133,7 @@ export async function POST(request: Request) {
       service,
       message,
       photos: bufferedPhotos,
+      factsJson: JSON.stringify(factsPayload),
     });
 
     const hsRef = String(form.get("hs_ref") ?? form.get("ref") ?? "").trim();
@@ -86,6 +146,7 @@ export async function POST(request: Request) {
       requestId: saved.publicId,
       service: saved.service,
       photoCount: saved.photos.length,
+      intent: requirements.intentId,
     });
 
     const photoFiles = bufferedPhotos.map(

@@ -48,45 +48,29 @@ export function SocialIcons({
   variant?: "footer" | "menu";
 }) {
   const dictionary = getDictionary();
-  const platforms = getSocialPlatforms();
+  // Only live social links — no "próximamente" placeholders on the public site.
+  const platforms = getSocialPlatforms().filter((platform) => Boolean(platform.href));
+  if (platforms.length === 0) return null;
 
   return (
     <div className={`social-block social-${variant}`}>
       <p className="social-label">{dictionary.social.follow}</p>
       <ul className="social-list">
         {platforms.map((platform) => {
-          const available = Boolean(platform.href);
           const name = `${platform.label} de Homestead Services`;
-          const label = available
-            ? name
-            : `${name} — ${dictionary.social.soon}`;
-          const tip = available
-            ? platform.label
-            : `${platform.label} — ${dictionary.social.soon}`;
-
           return (
             <li key={platform.id} className="social-item">
-              {available ? (
-                <a
-                  className="social-btn"
-                  href={platform.href ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={label}
-                >
-                  <SocialGlyph id={platform.id} />
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  className="social-btn is-soon"
-                  aria-label={label}
-                >
-                  <SocialGlyph id={platform.id} />
-                </button>
-              )}
+              <a
+                className="social-btn"
+                href={platform.href ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={name}
+              >
+                <SocialGlyph id={platform.id} />
+              </a>
               <span className="social-tip" role="tooltip">
-                {tip}
+                {platform.label}
               </span>
             </li>
           );

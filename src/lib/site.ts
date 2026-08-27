@@ -31,6 +31,11 @@ export const contact = {
   facebook: envOrEmpty(process.env.NEXT_PUBLIC_FACEBOOK),
 };
 
+/** Public website WhatsApp CTAs. Off by default; set NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED=true to re-enable. */
+export function isPublicWhatsAppEnabled() {
+  return process.env.NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true";
+}
+
 export function phoneHref() {
   if (!contact.phone.isConfigured) return null;
   return `tel:${contact.phone.value.replace(/[^\d+]/g, "")}`;
@@ -42,6 +47,7 @@ export function emailHref() {
 }
 
 export function whatsappHref(message?: string) {
+  if (!isPublicWhatsAppEnabled()) return null;
   if (!contact.whatsapp.isConfigured) return null;
   const number = contact.whatsapp.value.replace(/\D/g, "");
   if (!number) return null;
@@ -77,11 +83,14 @@ export type SocialPlatform = {
 };
 
 export function getSocialPlatforms(): SocialPlatform[] {
-  return [
+  const platforms: SocialPlatform[] = [
     { id: "instagram", label: "Instagram", href: instagramHref() },
     { id: "facebook", label: "Facebook", href: facebookHref() },
-    { id: "whatsapp", label: "WhatsApp", href: whatsappHref() },
   ];
+  if (isPublicWhatsAppEnabled()) {
+    platforms.push({ id: "whatsapp", label: "WhatsApp", href: whatsappHref() });
+  }
+  return platforms;
 }
 
 export const serviceSlugs = [
