@@ -1,4 +1,5 @@
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
+import { BOOKING_INTEGRITY_OFFER } from "@/lib/concierge/calendar-action";
 
 const PRICE_CLAIM = /\$\s*\d|\b\d+\s*(usd|balboas?|d[oó]lares?)\b|\b(desde|cuesta|cobramos)\s+\d+/i;
 const BOOKED_CLAIM =
@@ -14,10 +15,11 @@ export function stripHallucinatedPrices(reply: string) {
 }
 
 export function enforceBookingIntegrity(reply: string, booked: boolean) {
-  if (booked || !BOOKED_CLAIM.test(reply)) return { text: reply, stripped: false };
+  if (booked || !BOOKED_CLAIM.test(reply)) return { text: reply, stripped: false, offeredPendingAction: false };
   return {
-    text: "Todavía no confirmé esa visita en el calendario. Si te parece, reviso horarios reales y te los ofrezco para que elijas.",
+    text: BOOKING_INTEGRITY_OFFER,
     stripped: true,
+    offeredPendingAction: true,
   };
 }
 

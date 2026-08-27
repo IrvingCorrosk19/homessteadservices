@@ -87,6 +87,17 @@ import {
   switchAckPrefix,
 } from "@/lib/concierge/service-transition";
 import {
+  askDateForAvailability,
+  calendarFailureReply,
+  consumePendingAvailabilityAction,
+  decideCalendarExecution,
+  formatAvailabilityResults,
+  isAvailabilityOfferText,
+  markCalendarQueryResult,
+  setPendingAvailabilityAction,
+  shouldBlockAvailabilityOfferLoop,
+} from "@/lib/concierge/calendar-action";
+import {
   activateDigitalLockFlow,
   analyzeDigitalLockPhoto,
   applyDigitalLockVision,
@@ -596,34 +607,128 @@ export async function conciergeTurn(input: {
     }
 
     let availabilityHint = "";
+    let calendarQueriedThisTurn = false;
+    const lastAssistantBody =
+      recentMessages(input.conversationId, 8)
+        .filter((item) => item.role === "assistant")
+        .pop()?.body || "";
+    const calendarDecision = decideCalendarExecution(state, text, {
+      bookingSuspended: state.bookingSuspended,
+      interruption: route.isInterruption && !route.slotSelectionIntent,
+      lastAssistantOffer: isAvailabilityOfferText(lastAssistantBody),
+    });
+
+    // Affirmation / direct request with no date → ask once, keep pending action.
+    if (calendarDecision.needDate) {
+      state = setPendingAvailabilityAction(state);
+      const dateAsk = askDateForAvailability();
+      addMessage(input.conversationId, "assistant", dateAsk);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+      return {
+        ok: true as const,
+        reply: dateAsk,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: session.serviceContext,
+        showResumeBooking: false,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
     const bookingSignal =
       state.bookingIntent ||
       route.slotSelectionIntent ||
       hasRequestedExactWhen(state) ||
-      /\b(disponib|agend|cita|visita|horario|mañana|manana|pasado)\b/i.test(text);
+      calendarDecision.execute ||
+      /\b(disponib|agend|cita|visita|horarios?|mañana|manana|pasado)\b/i.test(text);
     const needsExactSlotQuery =
       hasRequestedExactWhen(state) && !isSlotConfirmed(state) && !state.pendingSlot;
     const shouldQueryCalendar =
-      bookingSignal &&
-      !route.isInterruption &&
+      (calendarDecision.execute ||
+        (bookingSignal &&
+          (!isSlotConfirmed(state) || hasRescheduleSignal(text)) &&
+          (needsExactSlotQuery ||
+            !areOfferedSlotsActive(state) ||
+            hasRescheduleSignal(text) ||
+            /\b(disponib|qu[eé] tienen|horarios?|mañana|manana|el \d+|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i.test(
+              text,
+            )))) &&
       !state.bookingSuspended &&
-      (!isSlotConfirmed(state) || hasRescheduleSignal(text)) &&
-      (needsExactSlotQuery ||
-        !areOfferedSlotsActive(state) ||
-        hasRescheduleSignal(text) ||
-        /\b(disponib|qu[eé] tienen|horario|mañana|manana|el \d+|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i.test(
-          text,
-        ));
+      !(route.isInterruption && !calendarDecision.execute && !route.slotSelectionIntent);
+
     if (shouldQueryCalendar) {
+      if (calendarDecision.affirmedPending || calendarDecision.directRequest) {
+        state = consumePendingAvailabilityAction(state);
+      }
+      logInfo("CALENDAR_QUERY_STARTED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: calendarDecision.reason || "booking_signal",
+      });
       const whenText =
         needsExactSlotQuery && state.preferredDate && state.preferredTime
           ? `${state.preferredDate} ${state.preferredTime}`
-          : text || `${state.preferredDate} ${state.preferredTime}`.trim();
-      const availability = checkAvailability({
-        dateText: whenText,
-        timeText: whenText,
-        logId: input.conversationId,
-      });
+          : state.preferredDate && state.preferredTime && (calendarDecision.execute || !/\d{1,2}/.test(text))
+            ? `${state.preferredDate} ${state.preferredTime}`
+            : state.preferredDate && (calendarDecision.execute || calendarDecision.directRequest)
+              ? state.preferredDate
+              : text || `${state.preferredDate} ${state.preferredTime}`.trim();
+      let availability;
+      try {
+        availability = checkAvailability({
+          dateText: whenText,
+          timeText: whenText,
+          logId: input.conversationId,
+        });
+        calendarQueriedThisTurn = true;
+        logInfo("CALENDAR_QUERY_SUCCEEDED", {
+          contentJobId: input.conversationId.slice(0, 8),
+          stage: String(availability.slots.length),
+        });
+      } catch {
+        logInfo("CALENDAR_QUERY_FAILED", {
+          contentJobId: input.conversationId.slice(0, 8),
+          stage: "exception",
+        });
+        state = markCalendarQueryResult(state, false);
+        const failReply = calendarFailureReply(state.activeLeadId || conversation.leadPublicId || "");
+        addMessage(input.conversationId, "assistant", failReply);
+        touchConversation(input.conversationId, { state });
+        const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+        return {
+          ok: true as const,
+          reply: failReply,
+          chips: session.chips,
+          historicalChips: session.historicalChips,
+          leadBanner: null,
+          nextAction: "CONTINUE",
+          leadId: state.activeLeadId || null,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: false,
+          bookingPending: false,
+          slotGroups: [],
+          serviceContext: session.serviceContext,
+          showResumeBooking: false,
+          showPhotoCta: session.showPhotoCta,
+          photosRemaining: session.photosRemaining,
+        };
+      }
       addEvent(input.conversationId, "AVAILABILITY_QUERY_EXECUTED");
       recordFunnelEvent(input.conversationId, "AvailabilityChecked", {
         date: availability.requested.date,
@@ -634,6 +739,9 @@ export async function conciergeTurn(input: {
         state = activateOfferedSlots(state, availability.slots as OfferedSlot[]);
         if (availability.requested.date) state.preferredDate = availability.requested.date;
         if (availability.requested.time) state.preferredTime = availability.requested.time;
+        state = markCalendarQueryResult(state, true);
+      } else {
+        state = markCalendarQueryResult(state, true);
       }
       // Exact requested slot free → lock selection (do not re-offer as open choice)
       if (
@@ -658,11 +766,48 @@ export async function conciergeTurn(input: {
       if (availability.message) availabilityHint = availability.message;
       else if (availability.requestedAvailable && availability.requested.time) {
         availabilityHint = `Sí, ${formatPanamaSlot(availability.requested.date, availability.requested.time)} está disponible.`;
+      } else if (availability.slots.length) {
+        availabilityHint = formatAvailabilityResults(
+          availability.slots as OfferedSlot[],
+          availability.requested.date || state.preferredDate,
+        );
       }
       state.facts = {
         ...(state.facts || {}),
         lastAvailabilityQuery: `${availability.requested.date}|${availability.requested.time || ""}`,
       };
+
+      // After affirmation/direct request: respond with real results immediately (no LLM permission loop).
+      if (
+        (calendarDecision.affirmedPending || calendarDecision.directRequest) &&
+        availabilityHint &&
+        !isSlotConfirmed(state)
+      ) {
+        addMessage(input.conversationId, "assistant", availabilityHint);
+        touchConversation(input.conversationId, { state });
+        const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+        return {
+          ok: true as const,
+          reply: availabilityHint,
+          chips: session.chips,
+          historicalChips: session.historicalChips,
+          leadBanner: null,
+          nextAction: "CONTINUE",
+          leadId: state.activeLeadId || null,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: session.awaitingSlotSelection,
+          bookingPending: session.bookingPending,
+          slotGroups: session.slotGroups,
+          serviceContext: session.serviceContext,
+          showResumeBooking: session.showResumeBooking,
+          showPhotoCta: session.showPhotoCta,
+          photosRemaining: session.photosRemaining,
+        };
+      }
     }
 
     if (INJECTION_RE.test(text)) {
@@ -1037,7 +1182,23 @@ export async function conciergeTurn(input: {
       });
       reply = availability.text;
       const booked = enforceBookingIntegrity(reply, false);
-      reply = booked.text;
+      if (booked.stripped || booked.offeredPendingAction) {
+        if (state.offeredSlots?.length && areOfferedSlotsActive(state)) {
+          reply = formatAvailabilityResults(state.offeredSlots, state.preferredDate);
+        } else if (availabilityHint) {
+          reply = availabilityHint;
+        } else if (shouldBlockAvailabilityOfferLoop(booked.text, calendarDecision, calendarQueriedThisTurn)) {
+          reply = state.preferredDate
+            ? formatAvailabilityResults(state.offeredSlots || [], state.preferredDate)
+            : askDateForAvailability();
+          if (!state.preferredDate) state = setPendingAvailabilityAction(state);
+        } else {
+          reply = booked.text;
+          state = setPendingAvailabilityAction(state);
+        }
+      } else if (shouldBlockAvailabilityOfferLoop(reply, calendarDecision, calendarQueriedThisTurn)) {
+        reply = availabilityHint || formatAvailabilityResults(state.offeredSlots || [], state.preferredDate);
+      }
     }
 
     if (HUMAN_RE.test(text)) {
@@ -1062,6 +1223,10 @@ export async function conciergeTurn(input: {
       unsupported: false,
     });
     if (ended || state.appointmentId) setConversationOutcome(input.conversationId, outcome);
+
+    if (isAvailabilityOfferText(reply) && !calendarQueriedThisTurn) {
+      state = setPendingAvailabilityAction(state);
+    }
 
     touchConversation(input.conversationId, {
       state,
