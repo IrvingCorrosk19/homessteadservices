@@ -48,6 +48,10 @@ const CHAT_OPEN_KEY = "hs_concierge_open_v1";
 const CHAT_MINIMIZED_KEY = "hs_concierge_minimized_v1";
 const STICK_THRESHOLD_PX = 80;
 const PHOTO_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
+const OPENING_GREETING: ChatMessage = {
+  role: "assistant",
+  body: "Hola. Cuéntame qué está pasando en tu hogar o propiedad: una reparación, un mantenimiento o algo que quieras instalar.",
+};
 
 function photoSrc(photoId?: string, previewUrl?: string) {
   if (previewUrl) return previewUrl;
@@ -97,12 +101,7 @@ export function ConciergeWidget() {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [imageContext, setImageContext] = useState<WebsiteImageChatContext | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<WebsiteImageChatContext | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      body: "Hola. Cuéntame qué está pasando en tu hogar o propiedad: una reparación, un mantenimiento o algo que quieras instalar.",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([OPENING_GREETING]);
   const imageContextRef = useRef<WebsiteImageChatContext | null>(null);
   const openRef = useRef(false);
   const inputDraftRef = useRef("");
@@ -118,10 +117,17 @@ export function ConciergeWidget() {
   const [sendError, setSendError] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [historicalExpanded, setHistoricalExpanded] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [conversationId, setConversationId] = useState("");
+  const conversationIdRef = useRef("");
   const isMobile = useIsMobile();
   const scrollPositionRef = useRef(0);
   const prevContentSigRef = useRef("");
   const minimizeChatRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   useEffect(() => {
     pendingPhotosRef.current = pendingPhotos;
@@ -154,6 +160,10 @@ export function ConciergeWidget() {
     if (pending) setBookingExpanded(false);
     else if (Array.isArray(data.chips) && data.chips.length) setBookingExpanded(true);
     setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
+    if (typeof data.conversationId === "string" && data.conversationId) {
+      setConversationId(data.conversationId);
+      conversationIdRef.current = data.conversationId;
+    }
     setEnded(Boolean(data.ended));
     const card = data.requestCard;
     if (card && typeof card === "object" && typeof (card as RequestCard).publicId === "string") {
@@ -169,6 +179,10 @@ export function ConciergeWidget() {
     void fetch("/api/concierge/chat")
       .then((res) => res.json())
       .then((data) => {
+        if (typeof data.conversationId === "string" && data.conversationId) {
+          setConversationId(data.conversationId);
+          conversationIdRef.current = data.conversationId;
+        }
         if (Array.isArray(data.messages) && data.messages.length) {
           setMessages(
             data.messages.map((item: { role: string; body: string; photoId?: string }) => ({
@@ -184,7 +198,8 @@ export function ConciergeWidget() {
           imageContextRef.current = data.imageContext;
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setSessionReady(true));
   }, [applySessionState]);
 
   const scrollToBottom = useCallback((smooth = false) => {
@@ -313,6 +328,7 @@ export function ConciergeWidget() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
+        conversationId: conversationIdRef.current || undefined,
         utm: {
           utm_source: utm.utm_source || "",
           utm_campaign: utm.utm_campaign || "",
@@ -324,12 +340,16 @@ export function ConciergeWidget() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error("send_failed");
+    if (typeof data.conversationId === "string" && data.conversationId) {
+      setConversationId(data.conversationId);
+      conversationIdRef.current = data.conversationId;
+    }
     applyTurnResponse(data);
   }, [applyTurnResponse]);
 
   const sendMessage = useCallback(async (text: string) => {
     const message = text.trim();
-    if (!message || pendingRef.current || ended) return;
+    if (!message || pendingRef.current || ended || !sessionReady) return;
     pendingRef.current = true;
     setPending(true);
     setSendError(false);
@@ -351,7 +371,7 @@ export function ConciergeWidget() {
       setPending(false);
       window.setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [ended, sendChatTurn]);
+  }, [ended, sendChatTurn, sessionReady]);
 
   const clearPendingPhotos = useCallback(() => {
     setPendingPhotos((current) => {
@@ -432,7 +452,7 @@ export function ConciergeWidget() {
   const submitComposer = useCallback(async () => {
     const caption = input.trim();
     const photos = pendingPhotos.filter((photo) => !photo.preparing && photo.previewUrl);
-    if ((!caption && !photos.length) || pendingRef.current || ended) return;
+    if ((!caption && !photos.length) || pendingRef.current || ended || !sessionReady) return;
 
     if (photos.length) {
       pendingRef.current = true;
@@ -476,7 +496,7 @@ export function ConciergeWidget() {
     }
 
     await sendMessage(caption);
-  }, [clearPendingPhotos, ended, input, pendingPhotos, sendMessage, uploadPhotoTurn]);
+  }, [clearPendingPhotos, ended, input, pendingPhotos, sendMessage, uploadPhotoTurn, sessionReady]);
 
   const onFileSelected = useCallback(async (file: File, replaceId: string | null) => {
     setPhotoError(null);
@@ -647,9 +667,58 @@ export function ConciergeWidget() {
     sessionStorage.setItem(CHAT_MINIMIZED_KEY, "1");
   }
 
+  async function startNewConversation() {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    try {
+      const response = await fetch("/api/concierge/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "NEW_CONVERSATION" }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error("new_conversation_failed");
+      clearPendingPhotos();
+      setMessages([OPENING_GREETING]);
+      setInput("");
+      setChips([]);
+      setSlotGroups([]);
+      setHistoricalChips([]);
+      setWhatsapp(null);
+      setServiceContext(null);
+      setBookingPending(false);
+      setShowResumeBooking(false);
+      setShowPhotoCta(false);
+      setPhotosRemaining(4);
+      setRequestCard(null);
+      setImageContext(null);
+      imageContextRef.current = null;
+      setPendingSwitch(null);
+      setEnded(false);
+      setSendError(false);
+      setPhotoError(null);
+      const nextId = typeof data.conversationId === "string" ? data.conversationId : "";
+      setConversationId(nextId);
+      conversationIdRef.current = nextId;
+      stick.current = true;
+    } catch {
+      setSendError(true);
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }
+
   minimizeChatRef.current = minimizeChat;
 
-  const canSend = Boolean((input.trim() || pendingPhotos.some((p) => p.previewUrl && !p.preparing)) && !pending && !ended && !pendingPreparing);
+  const canSend = Boolean(
+    (input.trim() || pendingPhotos.some((p) => p.previewUrl && !p.preparing)) &&
+      !pending &&
+      !ended &&
+      !pendingPreparing &&
+      sessionReady,
+  );
 
   return (
     <div
@@ -697,6 +766,15 @@ export function ConciergeWidget() {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                className="mr-1 min-h-11 rounded-lg px-2 text-[0.65rem] tracking-[0.08em] uppercase text-cream/85 hover:bg-cream/10 hover:text-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"
+                aria-label="Nueva solicitud"
+                title="Nueva solicitud"
+                onClick={() => void startNewConversation()}
+              >
+                Nueva
+              </button>
               <button
                 type="button"
                 className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-lg leading-none text-cream/85 hover:bg-cream/10 hover:text-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream"

@@ -33,7 +33,7 @@ export type ConversationTransition = {
 };
 
 const ABANDON_RE =
-  /\b(olvidemos|olvidalo|olv[ií]dalo|dejemos\s+(eso|la|el|lo)|dejalo|ya\s+no\s+quiero(\s+eso)?|no\s+quiero\s+(eso|la\s+cerradura|el\s+aire)|cambiemos(\s+de\s+tema)?|mejor\s+no|eso\s+no|olvida\s+(lo\s+)?anterior|cancel(a|ar|emos)|no\s+sigamos\s+con)\b/i;
+  /\b(olvid[ae]mos|olvidalo|olv[ií]dalo|alvidemos|dejemos\s+(eso|la|el|lo|todo)|dejalo|ya\s+no\s+quiero(\s+eso)?|no\s+quiero\s+(eso|la\s+cerradura|el\s+aire)|cambiemos(\s+de\s+tema)?|mejor\s+no|eso\s+no|olvida\s+(lo\s+)?anterior|cancel(a|ar|emos)(\s+todo)?|no\s+sigamos\s+con)\b/i;
 
 const SWITCH_TO_RE =
   /\b(mejor\s+(ayudame|ayuda|quiero|necesito|vamos|pint|plomer|aire|gypsum|repar)|ahora\s+(quiero|necesito|mejor)|vamos\s+con|quiero\s+otra\s+cosa|mejor\s+ayudame\s+con)\b/i;
@@ -69,11 +69,12 @@ const SERVICE_SCOPED_FACT_KEYS = [
   "selectedDate",
   "selectedTime",
   "selectedSlotLabel",
+  "pendingAction",
+  "pendingActionService",
+  "pendingActionServiceContextId",
+  "pendingQuestion",
+  "pendingPhotoRequirement",
 ];
-
-function fold(value: string) {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
 
 function isRefinement(from: string, to: string): boolean {
   if (!from || !to || from === to) return false;
@@ -114,7 +115,6 @@ export function detectConversationTransition(
   const addSignal = ADD_RE.test(text) && !abandonSignal;
   const switchPhrase = SWITCH_TO_RE.test(text);
   const lockActive = getDigitalLockChecklist(state).active;
-  const blob = fold(text);
 
   // Explicit cancel without replacement
   if (abandonSignal && !nextFromMessage && !switchPhrase) {
@@ -142,9 +142,10 @@ export function detectConversationTransition(
     };
   }
 
+  const effectivePrev = previousService || (lockActive ? "locksmith" : "");
+
   // Explicit abandon + new service (even if previous was only digital-lock flow)
   if (abandonSignal && nextFromMessage) {
-    const effectivePrev = previousService || (lockActive ? "locksmith" : "");
     if (effectivePrev && nextFromMessage !== effectivePrev && !isRefinement(effectivePrev, nextFromMessage)) {
       return {
         kind: "SWITCH_SERVICE",
@@ -157,23 +158,22 @@ export function detectConversationTransition(
     }
   }
 
-  // True SWITCH: switch phrase / better-help-with + unrelated services
+  // Explicit new service in the current message outranks stale pending actions.
+  // Phrase-based "olvidemos/mejor" is sufficient but NOT required.
   if (
     nextFromMessage &&
-    previousService &&
-    nextFromMessage !== previousService &&
-    !isRefinement(previousService, nextFromMessage) &&
-    (switchPhrase ||
-      (lockActive && /\b(mejor|olvid|deja|cambi|pint|plomer|aire|gypsum)\b/i.test(blob)) ||
-      (isUnrelatedSwitch(previousService, nextFromMessage) && /\bmejor\b/i.test(text)))
+    effectivePrev &&
+    nextFromMessage !== effectivePrev &&
+    !isRefinement(effectivePrev, nextFromMessage) &&
+    (isUnrelatedSwitch(effectivePrev, nextFromMessage) || switchPhrase)
   ) {
     return {
       kind: "SWITCH_SERVICE",
-      previousService,
+      previousService: effectivePrev,
       nextService: nextFromMessage,
       abandonSignal: true,
       addSignal: false,
-      ack: `Claro, dejamos lo de ${serviceLabel(previousService)}. Te ayudo con ${serviceLabel(nextFromMessage).toLowerCase()}.`,
+      ack: `Claro, dejamos lo de ${serviceLabel(effectivePrev)}. Te ayudo con ${serviceLabel(nextFromMessage).toLowerCase()}.`,
     };
   }
 
@@ -374,10 +374,15 @@ export function applyConversationTransition(
 export function isPendingActionStillValid(pendingAction: string, state: ConversationState): boolean {
   const service = state.primaryService || state.service || "";
   const lock = getDigitalLockChecklist(state);
+  const pendingService = state.facts?.pendingActionService || "";
+  const pendingCtx = state.facts?.pendingActionServiceContextId || "";
+  const currentCtx = state.facts?.serviceContextId || "";
+  if (pendingService && service && pendingService !== service) return false;
+  if (pendingCtx && currentCtx && pendingCtx !== currentCtx) return false;
   if (/LOCK|DIGITAL_LOCK|EDGE|CANTO|PESTILLO|FRENTE|INTERIOR/i.test(pendingAction)) {
-    return lock.active && (service === "locksmith" || !service);
+    return lock.active && service === "locksmith";
   }
-  if (/PHOTO/i.test(pendingAction) && !lock.active && state.facts?.digitalLockAbandoned === "1") {
+  if (/PHOTO/i.test(pendingAction) && !lock.active) {
     return false;
   }
   if (
@@ -392,10 +397,15 @@ export function isPendingActionStillValid(pendingAction: string, state: Conversa
 export function responseReferencesStaleService(reply: string, state: ConversationState): boolean {
   if (!reply.trim()) return false;
   const service = state.primaryService || state.service || "";
+  const lockSpeech =
+    /esta imagen no muestra|canto|pestillo|frente|interior|cerradura digital|foto del canto|me sirve como|solo me falta/i.test(
+      reply,
+    );
   if (state.facts?.digitalLockAbandoned === "1" || (service && service !== "locksmith")) {
-    if (/canto|pestillo|frente|interior|cerradura digital|foto del canto/i.test(reply)) {
-      return true;
-    }
+    if (lockSpeech) return true;
+  }
+  if (!getDigitalLockChecklist(state).active && lockSpeech && service !== "locksmith") {
+    return true;
   }
   if (service === "painting" && /cerradura|canto|pestillo|aire acondicionado|fuga|plomer/i.test(reply)) {
     if (/falta.*(foto|canto|pestillo|frente|interior)|me sirve como|solo me falta/i.test(reply)) {

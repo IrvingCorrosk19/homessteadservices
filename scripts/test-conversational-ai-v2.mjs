@@ -11,6 +11,7 @@ const integrity = readFileSync(join(root, "src/lib/concierge-integrity.ts"), "ut
 const datetimeSrc = readFileSync(join(root, "src/lib/concierge-datetime.ts"), "utf8");
 const availability = readFileSync(join(root, "src/lib/concierge-availability.ts"), "utf8");
 const calendar = readFileSync(join(root, "src/components/admin/AppointmentCalendar.tsx"), "utf8");
+const calendarDetail = readFileSync(join(root, "src/components/admin/calendar/AppointmentDetailContent.tsx"), "utf8");
 const widget = readFileSync(join(root, "src/components/concierge/ConciergeWidget.tsx"), "utf8");
 const handoff = readFileSync(join(root, "src/lib/concierge-handoff.ts"), "utf8");
 const contact = readFileSync(join(root, "src/app/api/contact/route.ts"), "utf8");
@@ -32,7 +33,7 @@ ok("createAppointment from tools", /createAppointment\(/.test(tools));
 ok("availability from sqlite", /listAppointments/.test(availability));
 ok("integrity booking", /enforceBookingIntegrity/.test(integrity) && /enforceBookingIntegrity/.test(engine));
 ok("unified request service", /dispatchServiceRequest/.test(service) && /dispatchServiceRequest/.test(contact) && /dispatchServiceRequest/.test(handoff));
-ok("calendar origin", /originLabel/.test(calendar) && /WhatsApp/.test(calendar));
+ok("calendar origin", /originLabel/.test(calendar) && /WhatsApp/.test(calendarDetail));
 ok("no openai in widget", !/api\.openai\.com|OPENAI_API_KEY/.test(widget));
 ok("enter sends", /Shift\+Enter|shiftKey/.test(widget));
 

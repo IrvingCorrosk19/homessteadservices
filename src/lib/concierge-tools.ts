@@ -35,6 +35,10 @@ import {
   validateActiveSlotBooking,
 } from "@/lib/concierge-transaction";
 import { clearSlotSelection } from "@/lib/concierge/canonical-state";
+import {
+  rehydrateRequestFromAppointment,
+  resolveAuthoritativeRequestId,
+} from "@/lib/concierge/appointment-reprogram";
 
 export const CONCIERGE_TOOLS = [
   {
@@ -478,7 +482,10 @@ export async function executeConciergeTool(
         leadId,
       };
     }
-    const bookingLeadId = state.activeLeadId || leadId;
+    const bookingLeadId =
+      resolveAuthoritativeRequestId(state, leadId) ||
+      state.activeLeadId ||
+      leadId;
     if (!bookingLeadId) {
       const created = await createLeadFromConcierge({
         conversationId: ctx.conversationId,
@@ -491,6 +498,7 @@ export async function executeConciergeTool(
       if (created) state.activeLeadId = created;
     } else {
       leadId = bookingLeadId;
+      state = rehydrateRequestFromAppointment({ ...state, activeLeadId: bookingLeadId });
     }
     if (!leadId) {
       recordFunnelEvent(ctx.conversationId, "AppointmentFailed", { reason: "no_lead" });

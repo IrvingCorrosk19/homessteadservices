@@ -593,12 +593,14 @@ function formatAppointmentTelegram(
     return [
       "🔄 CITA REPROGRAMADA",
       "",
+      appointment.leadId,
+      "",
       `Cliente: ${appointment.customerName}`,
       `Servicio: ${appointment.serviceLabel}`,
       extra?.previousDate
-        ? `Anterior: ${formatAppointmentDay(extra.previousDate)} ${formatAppointmentClock(extra.previousTime || "")}`
+        ? `Antes: ${formatAppointmentDay(extra.previousDate)} ${formatAppointmentClock(extra.previousTime || "")}`
         : "",
-      `Nueva: ${formatAppointmentDay(appointment.date)} ${formatAppointmentClock(appointment.startTime)}`,
+      `Ahora: ${formatAppointmentDay(appointment.date)} ${formatAppointmentClock(appointment.startTime)}`,
       `Estado: ${statusLabel(appointment.status).toUpperCase()}`,
     ]
       .filter((line) => line !== "")

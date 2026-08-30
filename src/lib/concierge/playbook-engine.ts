@@ -1,4 +1,8 @@
 import {
+  isScheduleOrTimeOnlyMessage,
+  looksLikeScheduleLocationCandidate,
+} from "@/lib/concierge/schedule-phrases";
+import {
   getPlaybook,
   playbookById,
   SERVICE_PLAYBOOKS,
@@ -98,10 +102,15 @@ export function applyFactPatch(facts: Record<string, string>, patch: Record<stri
 }
 
 export function applyLocationCorrection(text: string, current: string) {
+  if (isScheduleOrTimeOnlyMessage(text)) return current;
   const match = text.match(
     /(?:perd[oó]n[,.]?|mejor dicho|me equivoqu[eé][,.]?|no[,.]?\s*estoy en|no[,.]?\s*es|disculpa[,.]?)\s*(?:es\s+|estoy en\s+)?([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );
-  if (match) return match[1].trim();
+  if (match) {
+    const candidate = match[1].trim();
+    if (looksLikeScheduleLocationCandidate(candidate)) return current;
+    return candidate;
+  }
   return current;
 }
 

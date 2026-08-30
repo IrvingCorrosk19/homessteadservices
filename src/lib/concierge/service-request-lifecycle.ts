@@ -15,6 +15,11 @@ import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/conci
 import { getHomesteadDb } from "@/lib/service-requests";
 import { ingestCanonicalLead, saveLeadPreference } from "@/lib/revenue-store";
 import { isTestHandoff, shouldCreateCanonicalLead } from "@/lib/concierge-handoff";
+import {
+  hasActiveBookedAppointment,
+  rehydrateRequestFromAppointment,
+  resolveAuthoritativeRequestId,
+} from "@/lib/concierge/appointment-reprogram";
 
 export type EnsureRequestResult = {
   publicId: string;
@@ -205,20 +210,41 @@ export async function ensureActiveServiceRequest(input: {
   utm?: Record<string, string>;
 }): Promise<EnsureRequestResult | null> {
   if (!shouldCreateCanonicalLead()) return null;
-  if (!hasValidServiceIntent(input.state)) return null;
 
-  const existing = input.state.activeLeadId || input.conversationLeadId || "";
-  const announceAlready = input.state.facts?.requestFolioShown === "1";
-
-  // Full handoff path when phone+need gates pass (reuse proven path)
-  if (existing && !existing.startsWith("DRY-")) {
-    // Service refinement (e.g. repairs → painting) updates the SAME HS — never a new folio.
-    syncServiceRequestFromState(existing, input.state, input.summary, input.conversationId);
-    copyConciergePhotosToRequest(input.conversationId, existing);
-    return { publicId: existing, created: false, updated: true, announce: false };
+  let state = rehydrateRequestFromAppointment(input.state);
+  const authoritative = resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
+  if (authoritative) {
+    state = { ...state, activeLeadId: authoritative };
   }
 
-  const created = await createEarlyRequest(input);
+  if (!hasValidServiceIntent(state) && !hasActiveBookedAppointment(state)) return null;
+
+  const existing = state.activeLeadId || authoritative || "";
+
+  // Never create a new HS while an active appointment exists for this conversation.
+  if (!existing && hasActiveBookedAppointment(state)) {
+    state = rehydrateRequestFromAppointment(state);
+  }
+
+  const finalExisting = state.activeLeadId || resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
+
+  if (finalExisting && !finalExisting.startsWith("DRY-")) {
+    syncServiceRequestFromState(finalExisting, state, input.summary, input.conversationId);
+    copyConciergePhotosToRequest(input.conversationId, finalExisting);
+    return { publicId: finalExisting, created: false, updated: true, announce: false };
+  }
+
+  if (hasActiveBookedAppointment(state)) {
+    const fromAppt = resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
+    if (fromAppt) {
+      syncServiceRequestFromState(fromAppt, state, input.summary, input.conversationId);
+      return { publicId: fromAppt, created: false, updated: true, announce: false };
+    }
+  }
+
+  if (!hasValidServiceIntent(state)) return null;
+
+  const created = await createEarlyRequest({ ...input, state });
   return { publicId: created, created: true, updated: false, announce: true };
 }
 

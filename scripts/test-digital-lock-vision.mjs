@@ -12,17 +12,19 @@ function ok(name, value) {
 }
 
 const visionSrc = readFileSync(join(root, "src/lib/concierge/digital-lock-vision.ts"), "utf8");
+const intentSrc = readFileSync(join(root, "src/lib/concierge/digital-lock-intent.ts"), "utf8");
 const engineSrc = readFileSync(join(root, "src/lib/concierge-engine.ts"), "utf8");
 const adminPhotos = readFileSync(join(root, "src/components/admin/AdminPhotos.tsx"), "utf8");
 const widget = readFileSync(join(root, "src/components/concierge/ConciergeWidget.tsx"), "utf8");
 const playbook = readFileSync(join(root, "src/lib/concierge/playbook-engine.ts"), "utf8");
+const guardsSrc = readFileSync(join(root, "src/lib/concierge/turn-context-guards.ts"), "utf8");
 
-ok("RCA-01 fuzzy typo intent", /normalizeDigitalLockText/.test(visionSrc) && /cer\\w\{2,8\}ura/.test(visionSrc));
+ok("RCA-01 fuzzy typo intent", /normalizeDigitalLockText/.test(intentSrc) && /cer\\w\{2,8\}ura/.test(intentSrc));
 ok("RCA-02 enforce reply truth", /enforceDigitalLockReplyTruth/.test(visionSrc) && engineSrc.includes("enforceDigitalLockReplyTruth"));
 ok("RCA-03 containsDoor hard gate", /containsDoor/.test(visionSrc) && /passesDoorGate/.test(visionSrc));
 ok("RCA-04 never PASS without usable", /usableForDigitalLockAssessment/.test(visionSrc));
 ok("RCA-05 vision failure != PASS", /VISION_ANALYSIS_FAILED/.test(engineSrc) && /visionFailedResult/.test(visionSrc));
-ok("RCA-06 batch pending photos", /pendingPhotoIds/.test(engineSrc));
+ok("RCA-06 current-turn photo batch", /lockTurnPolicy\.photoIds/.test(engineSrc) && /currentTurnPhotoIds/.test(guardsSrc));
 ok("RCA-07 history activation", /historySuggestsDigitalLockFlow/.test(engineSrc));
 ok("RCA-08 hash cache cost control", /analysisByHash/.test(visionSrc) && /PHOTO_VISION_CACHED/.test(visionSrc));
 ok("RCA-09 admin evidence badges", /evidenceByFile/.test(adminPhotos) && /No v[aá]lida/.test(visionSrc));

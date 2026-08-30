@@ -135,6 +135,15 @@ ok("offer text integrity", isAvailabilityOfferText(BOOKING_INTEGRITY_OFFER));
 }
 
 {
+  const booked = enforceBookingIntegrity(
+    "Tu visita quedó agendada para las 4:00 p. m.",
+    true,
+  );
+  ok("integrity keeps real booked reply", !booked.stripped);
+  ok("integrity booked text preserved", /4:00/.test(booked.text));
+}
+
+{
   const slots = [
     { date: "2026-08-28", time: "08:00", label: "vie 8:00 a. m." },
     { date: "2026-08-28", time: "10:00", label: "vie 10:00 a. m." },

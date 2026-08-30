@@ -76,14 +76,22 @@ function lockState(): ConversationState {
   checklist.front = {
     photoId: "p1",
     status: "PASS",
+    imageType: "front",
+    quality: "good",
     confidence: 0.9,
+    observations: [],
+    missingVisualInformation: [],
     reasonIfRejected: "",
     sha256: "a",
   };
   checklist.inside = {
     photoId: "p2",
     status: "PASS",
+    imageType: "inside",
+    quality: "good",
     confidence: 0.9,
+    observations: [],
+    missingVisualInformation: [],
     reasonIfRejected: "",
     sha256: "b",
   };
@@ -186,18 +194,26 @@ function ok(name: string, value: boolean) {
     containsDoor: true,
     containsLock: true,
     containsLatchOrBolt: false,
+    doorVisible: true,
+    lockVisible: true,
     usableForDigitalLockAssessment: true,
     relevantAreaVisible: true,
     blurred: false,
     tooDark: false,
+    tooBright: false,
     tooClose: false,
     tooFar: false,
     criticalAreaCropped: false,
     duplicateSuspected: false,
     quality: "good",
     confidence: 0.9,
+    observations: [],
     missingVisualInformation: [],
-    notes: "",
+    reasonIfRejected: "",
+    doorTypeGuess: "",
+    lockFeaturesObserved: [],
+    measurementNeeded: false,
+    measurementSafeToInfer: false,
   };
   const zombie = digitalLockHumanReply(getDigitalLockChecklist(before), vision, "inside");
   ok("ASYNC zombie would ask edge", /canto|pestillo/i.test(zombie));
@@ -212,6 +228,17 @@ function ok(name: string, value: boolean) {
   ok("RESET no units", !cleared.facts?.units);
   ok("RESET no symptom", !cleared.facts?.symptom);
   ok("RESET name kept", cleared.name === "Irving");
+}
+
+{
+  const msg = `Hola, necesito mantenimiento de 2 aires acondicionados
+mañana a las 2:00 p. m.
+Estoy en Edison Park, PH El Mare, apartamento 3A.
+Mi nombre es Irving Corro y mi teléfono es 65656565.`;
+  const t = detectConversationTransition(lockState(), msg);
+  ok("EXACT AC SWITCH from lock pending", t.kind === "SWITCH_SERVICE" && t.nextService === "ac");
+  const after = applyConversationTransition(lockState(), t, { cancelExistingHs: false });
+  ok("EXACT AC lock inactive", getDigitalLockChecklist(after).active === false);
 }
 
 console.log(failed ? `\nFAILED: ${failed}` : "\nALL PASS");

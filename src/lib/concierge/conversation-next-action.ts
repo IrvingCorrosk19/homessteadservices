@@ -11,6 +11,7 @@ import {
   type AppointmentReadiness,
 } from "@/lib/concierge/appointment-readiness";
 import { isSlotConfirmed, shouldBlockDuplicateAsk } from "@/lib/concierge/canonical-state";
+import { detectReprogramAppointmentIntent } from "@/lib/concierge/appointment-reprogram";
 import { classifyPhone } from "@/lib/phone";
 import { logInfo } from "@/lib/log";
 import type { ConversationState } from "@/lib/concierge-store";
@@ -29,6 +30,7 @@ export type ConciergeNextAction =
   | "CONFIRM_OR_BOOK"
   | "ANSWER_USER_QUESTION"
   | "UPDATE_SLOT"
+  | "REPROGRAM_APPOINTMENT"
   | "COMPLETE"
   | "HANDOFF"
   | "CONTINUE";
@@ -135,6 +137,20 @@ export function determineNextAction(
       reason: "user_interruption",
       cannedQuestion: "",
       readiness: { ...readiness, missingFields: missing, ready: missing.length === 0 },
+      locationSufficient,
+      blockInventedAsks: true,
+    };
+  }
+
+  if (state.appointmentId && opts.userText && detectReprogramAppointmentIntent(opts.userText, state)) {
+    return {
+      action: "REPROGRAM_APPOINTMENT",
+      missingFields: [],
+      requiredMissing: [],
+      askField: "",
+      reason: "active_appointment_reprogram",
+      cannedQuestion: "",
+      readiness: { ...readiness, missingFields: [], ready: true },
       locationSufficient,
       blockInventedAsks: true,
     };

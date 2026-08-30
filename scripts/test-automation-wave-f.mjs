@@ -35,7 +35,7 @@ check("analytics service", analytics.includes("getExecutiveSummary") && analytic
 check("attention center", analytics.includes("getAttentionItems"));
 check("customer list", c360.includes("listCustomers") && list.includes("Customer 360"));
 check("timeline", c360.includes("buildTimeline") || c360.includes("TimelineEvent"));
-check("admin dashboard", admin.includes("Embudo") && admin.includes("Needs attention"));
+check("admin dashboard", admin.includes("Embudo") && (admin.includes("NeedsAttentionBlock") || admin.includes("necesita tu atención")));
 check("telegram brief", ops.includes("HOMESTEAD HOY") && ops.includes("cc:cu"));
 check("rbac customers", perms.includes("customers.read") && perms.includes("analytics.read"));
 check("repeat deterministic", c360.includes("jobsCompleted >= 2"));

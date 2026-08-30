@@ -14,6 +14,11 @@ import {
   detectUnknownOpportunity,
   mergeDetectedServices,
 } from "@/lib/concierge/playbook-engine";
+import {
+  isLocationExplicitCorrection,
+  isScheduleOrTimeOnlyMessage,
+  looksLikeScheduleLocationCandidate,
+} from "@/lib/concierge/schedule-phrases";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 
@@ -187,6 +192,9 @@ function extractLocation(text: string, state?: ConversationState) {
   }
   if (zonesFound.length) return zonesFound.join(", ");
 
+  const betterIn = trimmed.match(/\bmejor\s+en\s+([^\n,.;]{3,80})/i);
+  if (betterIn?.[1]) return titleCasePhrase(betterIn[1].trim());
+
   const patterns = [
     /\b(?:estoy en|vivo en|me encuentro en|ubicad[oa] en)\s+([^\n,.;]{3,80})/i,
     /\ben\s+([^\n,.;]{3,60})\b/i,
@@ -195,6 +203,7 @@ function extractLocation(text: string, state?: ConversationState) {
     const match = trimmed.match(pattern);
     const candidate = match?.[1]?.trim() || "";
     if (candidate && !/\d{4}/.test(candidate) && !/^\d+$/.test(candidate)) {
+      if (looksLikeScheduleLocationCandidate(candidate)) continue;
       if (!/^\bph\b|apartamento|apto$/i.test(candidate)) {
         return titleCasePhrase(candidate);
       }
@@ -417,20 +426,26 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
   const explicitCorrection = detectExplicitCorrection(text);
   let next: ConversationState = mergeConfirmedFacts(state, {}, { explicitCorrection });
 
-  const locCandidate = packed.location || extractLocation(text, state);
-  if (locCandidate && (explicitCorrection || !(state.location || state.facts?.location))) {
+  const rawLoc = packed.location || extractLocation(text, state);
+  const locCandidate =
+    rawLoc && !looksLikeScheduleLocationCandidate(rawLoc) && !isScheduleOrTimeOnlyMessage(text)
+      ? rawLoc
+      : "";
+  const hasConfirmedLocation = Boolean(state.location || state.facts?.location);
+  const shouldUpdateLocation =
+    Boolean(locCandidate) &&
+    !isScheduleOrTimeOnlyMessage(text) &&
+    (!hasConfirmedLocation || isLocationExplicitCorrection(text));
+
+  if (shouldUpdateLocation && locCandidate) {
     const location = applyLocationCorrection(text, locCandidate);
-    next = mergeConfirmedFacts(next, {
-      location,
-      facts: { ...(next.facts || {}), location },
-    });
-    next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
-  } else if (locCandidate && explicitCorrection) {
-    next = mergeConfirmedFacts(next, {
-      location: applyLocationCorrection(text, locCandidate),
-      facts: { ...(next.facts || {}), location: applyLocationCorrection(text, locCandidate) },
-    });
-    next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
+    if (!looksLikeScheduleLocationCandidate(location)) {
+      next = mergeConfirmedFacts(next, {
+        location,
+        facts: { ...(next.facts || {}), location },
+      });
+      next.factConfidence = setConfidence(next.factConfidence || {}, "location", "EXPLICIT");
+    }
   }
 
   if (packed.name) {

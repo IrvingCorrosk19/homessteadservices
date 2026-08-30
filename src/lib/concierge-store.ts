@@ -5,7 +5,7 @@ import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import type { SniffedImage } from "@/lib/photos";
 import type { FactConfidence } from "@/lib/concierge/packed-extraction";
 
-export type OfferedSlot = { date: string; time: string; label: string };
+export type OfferedSlot = { date: string; time: string; label: string; slotId?: string };
 
 export type ConversationState = {
   service: string;

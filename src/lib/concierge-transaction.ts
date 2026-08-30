@@ -13,6 +13,7 @@ import {
   getDigitalLockChecklist,
   setDigitalLockChecklist,
 } from "@/lib/concierge/digital-lock-vision";
+import { detectReprogramAppointmentIntent, REPROGRAM_APPOINTMENT_RE } from "@/lib/concierge/appointment-reprogram";
 import {
   isSlotConfirmed,
   lockSelectedSlot,
@@ -135,8 +136,20 @@ export function consumeOfferedSlots(state: ConversationState, slot: OfferedSlot)
   };
 }
 
+function isTimeRescheduleMessage(text: string, state: ConversationState) {
+  if (REPROGRAM_APPOINTMENT_RE.test(text)) return true;
+  if (hasRescheduleSignal(text) && /\d/.test(text)) return true;
+  if (detectReprogramAppointmentIntent(text, state)) return true;
+  return false;
+}
+
 export function detectNewTransactionSignal(state: ConversationState, text: string, nextPrimary = "") {
-  if (RESCHEDULE.test(text) && state.appointmentId) return false;
+  if (state.appointmentId && isTimeRescheduleMessage(text, state)) {
+    return false;
+  }
+  if (state.activeLeadId && isTimeRescheduleMessage(text, state)) {
+    return false;
+  }
   const latest = nextPrimary || resolvePrimaryFromMessage(text);
   if (latest && state.primaryService && latest !== state.primaryService) return true;
   if (nextPrimary && state.primaryService && nextPrimary !== state.primaryService) return true;
@@ -154,9 +167,7 @@ export function reconcileTransactionState(
     activeLeadId: state.activeLeadId || "",
   };
 
-  if (!next.activeLeadId && conversationLeadId && next.funnelStage !== "BOOKED") {
-    next.activeLeadId = conversationLeadId;
-  }
+  // lead_public_id column mirrors state at end of turn — never rehydrate (prevents zombie HS).
 
   if (!areOfferedSlotsActive(next) && next.offeredSlots.length && !isSlotConfirmed(next)) {
     next = clearActiveTransactionState(next);
@@ -285,11 +296,11 @@ export function buildSessionSnapshot(
   const digitalLock = getDigitalLockChecklist(state);
   const maxPhotos = digitalLock.active ? 8 : 4;
   const photosRemaining = photosRemainingFromCount(state.photoCount || 0, maxPhotos);
-  const hsId = requestPublicId || state.activeLeadId || "";
+  const hsId = state.activeLeadId || "";
   return {
     chips,
     historicalChips: state.historicalSlotLabels || [],
-    leadBanner: hsId && !hsId.startsWith("DRY-") ? hsId : null,
+    leadBanner: null,
     requestCard: buildRequestCard(state, hsId),
     awaitingSlotSelection: active,
     bookingPending: active && Boolean(state.bookingSuspended),

@@ -21,7 +21,10 @@ const txSrc = readFileSync(join(root, "src/lib/concierge-transaction.ts"), "utf8
 ok("SDI-01 resolvePrimaryFromMessage exists", intentSrc.includes("resolvePrimaryFromMessage"));
 ok("SDI-02 choosePrimary uses latest text", playbookSrc.includes("latestText") && playbookSrc.includes("resolvePrimaryFromMessage"));
 ok("SDI-03 packed clears activeLeadId on service change", packedSrc.includes('activeLeadId = ""') && packedSrc.includes("previousPrimary"));
-ok("SDI-04 handoff rejects service mismatch reuse", handoffSrc.includes("lead_service_mismatch_new_request"));
+ok(
+  "SDI-04 handoff syncs same request on service change",
+  handoffSrc.includes("lead_service_refined_same_request") && handoffSrc.includes("syncServiceRequestFromState"),
+);
 ok("SDI-05 transaction detects intent change", txSrc.includes("resolvePrimaryFromMessage(text)"));
 ok("SDI-06 cielo razo typo tolerance", intentSrc.includes("cielo\\s*razo"));
 ok("SDI-07 repair vs paint disambiguation", intentSrc.includes("REPAIR_VERB") && intentSrc.includes("PAINT_VERB"));

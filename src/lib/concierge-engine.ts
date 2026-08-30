@@ -34,7 +34,7 @@ import {
   redactForModel,
 } from "@/lib/concierge/playbook-engine";
 import { copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
-import { formatConciergePhotoMessage, parseConciergePhotoMessage } from "@/lib/concierge-photo-message";
+import { formatConciergePhotoMessage } from "@/lib/concierge-photo-message";
 import { applyPackedExtraction } from "@/lib/concierge/packed-extraction";
 import {
   detectRepeatedQuestion,
@@ -50,20 +50,18 @@ import {
 } from "@/lib/concierge/conversation-next-action";
 import { answerMemoryQuestion, stripFalseThankYou } from "@/lib/concierge/memory-truth";
 import {
-  activateOfferedSlots,
   areOfferedSlotsActive,
   buildSessionSnapshot,
   clearActiveTransactionState,
   hasRescheduleSignal,
   isReturningGreeting,
   isSlotConfirmed,
-  lockSelectedSlot,
   reconcileTransactionState,
   resolveSlotFromMessage,
   shouldShowLeadBanner,
 } from "@/lib/concierge-transaction";
 import { hasRequestedExactWhen } from "@/lib/concierge/appointment-readiness";
-import { logStateTransition } from "@/lib/concierge/canonical-state";
+import { logStateTransition, lockSelectedSlot } from "@/lib/concierge/canonical-state";
 import { checkAvailability } from "@/lib/concierge-availability";
 import type { OfferedSlot } from "@/lib/concierge-store";
 import {
@@ -71,6 +69,11 @@ import {
   requestFolioBookingConfirm,
   requestFolioIntro,
 } from "@/lib/concierge/service-request-lifecycle";
+import {
+  hasActiveBookedAppointment,
+  rehydrateRequestFromAppointment,
+  tryReprogramAppointment,
+} from "@/lib/concierge/appointment-reprogram";
 import {
   bookingPauseReply,
   interpretTurnRoute,
@@ -82,10 +85,19 @@ import {
 import {
   applyConversationTransition,
   detectConversationTransition,
+  isPendingActionStillValid,
   paintingFollowUpQuestion,
   responseReferencesStaleService,
   switchAckPrefix,
 } from "@/lib/concierge/service-transition";
+import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
+import {
+  bumpStateVersion,
+  isStaleVisionResult,
+  lockPhotoReplyIncompatibleWithState,
+  resolveDigitalLockTurnPolicy,
+  type VisionJobIdentity,
+} from "@/lib/concierge/turn-context-guards";
 import {
   askDateForAvailability,
   calendarFailureReply,
@@ -114,6 +126,23 @@ import {
   setDigitalLockChecklist,
   visionFailedResult,
 } from "@/lib/concierge/digital-lock-vision";
+import {
+  applyFullConversationReset,
+  detectFullConversationReset,
+  markActiveRequest,
+} from "@/lib/concierge/conversation-reset";
+import { logTurnStateTrace } from "@/lib/concierge/conversation-state-log";
+import {
+  logIncompatibleResponse,
+  validateResponseCompatibility,
+} from "@/lib/concierge/response-compatibility";
+import {
+  activateOfferedSlotsWithState,
+  formatSlotSelectionConfirmation,
+  logStaleNextActionBlocked,
+  selectOfferedSlot,
+  shouldBlockStaleSlotOffer,
+} from "@/lib/concierge/slot-state";
 import {
   detectLockoutIntent,
   getServiceRequirements,
@@ -221,36 +250,76 @@ export async function conciergeTurn(input: {
     }
     addEvent(input.conversationId, "CHAT_MESSAGE");
     let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
+    const stateBeforeTurn = { ...state, facts: { ...(state.facts || {}) } };
+    let clearedLeadPublicId: string | undefined;
+
+    if (detectFullConversationReset(text)) {
+      const reset = applyFullConversationReset(state, { conversationId: input.conversationId });
+      state = reset.state;
+      clearedLeadPublicId = "";
+      logTurnStateTrace({
+        conversationId: input.conversationId,
+        stage: "RESET_CONVERSATION",
+        before: stateBeforeTurn,
+        after: state,
+        transition: "RESET_CONVERSATION",
+        attachmentCount: 0,
+        responseSource: "reset",
+      });
+      const resetReply =
+        "Entendido, empezamos de cero. Cuando quieras, cuéntame qué servicio necesitas y te ayudo.";
+      addMessage(input.conversationId, "assistant", resetReply);
+      touchConversation(input.conversationId, { state, leadPublicId: "" });
+      return {
+        ok: true as const,
+        reply: resetReply,
+        chips: [],
+        historicalChips: [],
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: null,
+        showResumeBooking: false,
+        showPhotoCta: false,
+        photosRemaining: 4,
+      };
+    }
+
     touchConversation(input.conversationId, { state });
 
-    // USER MESSAGE → INTENT TRANSITION before any pending playbook / photo reply.
-    const transition = detectConversationTransition(state, text);
+    const historyForLock = recentMessages(input.conversationId, 14);
+    logInfo("USER_MESSAGE_RECEIVED", {
+      contentJobId: input.conversationId.slice(0, 8),
+      stage: input.skipUserMessage ? "photo_turn" : "text_turn",
+    });
+
+    // RAW MESSAGE → detect transition BEFORE merge, vision, or pending playbook replies.
+    let transition = detectConversationTransition(state, text);
+    logInfo("INTENT_DETECTED", {
+      contentJobId: input.conversationId.slice(0, 8),
+      stage: `${transition.kind}:${transition.nextService || "none"}`,
+    });
     const serviceContextAtTurnStart = state.facts?.serviceContextId || "";
-    state = extractCasualFacts(state, text);
     if (
       transition.kind === "SWITCH_SERVICE" ||
       transition.kind === "CANCEL_CURRENT_SERVICE" ||
       transition.kind === "REFINE_CURRENT_SERVICE" ||
       transition.kind === "ADD_ANOTHER_SERVICE"
     ) {
-      // Re-bind previous service identity for cancel/switch (packed extract may have already moved primaryService).
-      const priorLead = conversation.state.activeLeadId || state.activeLeadId || "";
-      const priorService = conversation.state.primaryService || conversation.state.service || "";
-      state = applyConversationTransition(
-        {
-          ...state,
-          activeLeadId: priorLead,
-          primaryService:
-            transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE"
-              ? priorService || state.primaryService
-              : state.primaryService,
-          service:
-            transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE"
-              ? priorService || state.service
-              : state.service,
-        },
-        transition,
-      );
+      state = applyConversationTransition(state, transition);
+      state = bumpStateVersion(state);
+      logInfo("SERVICE_CONTEXT_SWITCHED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: `${transition.previousService}->${transition.nextService || "none"}`,
+      });
       logStateTransition(input.conversationId, {
         stage: `TRANSITION_${transition.kind}`,
         service: state.primaryService || state.service || "",
@@ -258,6 +327,115 @@ export async function conciergeTurn(input: {
         nextService: transition.nextService,
         requestId: state.activeLeadId || "",
       });
+    }
+
+    // Current message facts land on the (possibly cleaned) context. Never extract then wipe.
+    state = extractCasualFacts(state, text);
+    state = bumpStateVersion(state);
+    state = rehydrateRequestFromAppointment(state);
+
+    const reprogramAttempt = await tryReprogramAppointment({
+      conversationId: input.conversationId,
+      state,
+      text,
+      leadId: conversation.leadPublicId || state.activeLeadId || "",
+    });
+    if (reprogramAttempt) {
+      state = reprogramAttempt.state;
+      const reprogramReply = reprogramAttempt.reply;
+      addMessage(input.conversationId, "assistant", reprogramReply);
+      touchConversation(input.conversationId, {
+        state,
+        leadPublicId: reprogramAttempt.leadId || state.activeLeadId || "",
+      });
+      const session = buildSessionSnapshot(state, Date.now(), reprogramAttempt.leadId || state.activeLeadId || "");
+      return {
+        ok: true as const,
+        reply: reprogramReply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        nextAction: reprogramAttempt.ok ? "CLOSE" : "CONTINUE",
+        leadId: reprogramAttempt.leadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    const messageService = resolvePrimaryFromMessage(text);
+    if (
+      getDigitalLockChecklist(state).active &&
+      messageService &&
+      messageService !== "locksmith" &&
+      transition.kind !== "SWITCH_SERVICE" &&
+      transition.kind !== "CANCEL_CURRENT_SERVICE" &&
+      transition.kind !== "ADD_ANOTHER_SERVICE"
+    ) {
+      const forced = detectConversationTransition(
+        {
+          ...state,
+          primaryService: conversation.state.primaryService || "locksmith",
+          service: conversation.state.service || "locksmith",
+        },
+        text,
+      );
+      const switchTransition =
+        forced.kind === "SWITCH_SERVICE"
+          ? forced
+          : {
+              kind: "SWITCH_SERVICE" as const,
+              previousService: conversation.state.primaryService || "locksmith",
+              nextService: messageService,
+              abandonSignal: true,
+              addSignal: false,
+              ack: "",
+            };
+      state = applyConversationTransition(
+        {
+          ...state,
+          activeLeadId: conversation.state.activeLeadId || state.activeLeadId,
+          primaryService: conversation.state.primaryService || "locksmith",
+          service: conversation.state.service || "locksmith",
+        },
+        switchTransition,
+      );
+      state = extractCasualFacts(state, text);
+      state = bumpStateVersion(state);
+      transition = switchTransition;
+      logInfo("PENDING_ACTION_INVALIDATED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: `${switchTransition.previousService}->${switchTransition.nextService}`,
+      });
+      logInfo("SERVICE_CONTEXT_SWITCHED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: `${switchTransition.previousService}->${switchTransition.nextService}`,
+      });
+    }
+
+    const pendingAction = state.facts?.pendingAction || state.facts?.pendingQuestion || "";
+    if (pendingAction && !isPendingActionStillValid(pendingAction, state)) {
+      logInfo("PENDING_ACTION_INVALIDATED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: pendingAction.slice(0, 40),
+      });
+      const facts = { ...(state.facts || {}) };
+      delete facts.pendingAction;
+      delete facts.pendingQuestion;
+      delete facts.pendingPhotoRequirement;
+      delete facts.pendingActionService;
+      delete facts.pendingActionServiceContextId;
+      state = { ...state, facts };
     }
 
     logStateTransition(input.conversationId, {
@@ -309,7 +487,7 @@ export async function conciergeTurn(input: {
     if (transition.kind === "CANCEL_CURRENT_SERVICE") {
       const cancelReply = transitionAck || "Claro, lo dejamos por ahora. Cuando quieras, aquí estamos.";
       addMessage(input.conversationId, "assistant", cancelReply);
-      touchConversation(input.conversationId, { state });
+      touchConversation(input.conversationId, { state, leadPublicId: clearedLeadPublicId ?? "" });
       const session = buildSessionSnapshot(state);
       return {
         ok: true as const,
@@ -386,14 +564,16 @@ export async function conciergeTurn(input: {
 
     const digitalLockAbandoned = state.facts?.digitalLockAbandoned === "1";
     const digitalLockIntent = detectDigitalLockPurchaseIntent(text) && !digitalLockAbandoned;
-    const historyForLock = recentMessages(input.conversationId, 14);
+    const incompatibleWithLock = Boolean(messageService && messageService !== "locksmith");
     const historyDigital =
       !digitalLockAbandoned &&
+      !incompatibleWithLock &&
       transition.kind !== "SWITCH_SERVICE" &&
+      state.facts?.activeRequestCleared !== "1" &&
       historySuggestsDigitalLockFlow(historyForLock);
     const lockoutNow = detectLockoutIntent(text) && !digitalLockIntent;
     const policy = getServiceRequirements({
-      service: state.primaryService || state.service || "locksmith",
+      service: state.primaryService || state.service || "",
       message: text,
       intent: state.facts?.serviceIntent || "",
     });
@@ -413,10 +593,11 @@ export async function conciergeTurn(input: {
       };
     } else if (
       !digitalLockAbandoned &&
+      !incompatibleWithLock &&
       transition.kind !== "SWITCH_SERVICE" &&
       (isDigitalLockEvidenceIntent(policy.intentId) ||
         digitalLockIntent ||
-        (!lockoutNow && historyDigital))
+        (historyDigital && (state.primaryService === "locksmith" || getDigitalLockChecklist(state).active)))
     ) {
       state = activateDigitalLockFlow(state);
       state = {
@@ -431,75 +612,114 @@ export async function conciergeTurn(input: {
 
     let digitalLockReply = "";
     let digitalLockChecklist = getDigitalLockChecklist(state);
-    // Never chase lock photos after an explicit service switch / abandon.
-    if (digitalLockChecklist.active && !digitalLockAbandoned && transition.kind !== "SWITCH_SERVICE") {
-      const pendingPhotoIds: string[] = [];
-      for (const item of historyForLock) {
-        if (item.role !== "user") continue;
-        const parsed = parseConciergePhotoMessage(item.body);
-        if (!parsed) continue;
-        if (digitalLockChecklist.analyzedPhotoIds.includes(parsed.photoId)) continue;
-        pendingPhotoIds.push(parsed.photoId);
-      }
-      const latestPhoto = [...historyForLock]
-        .reverse()
-        .map((item) => (item.role === "user" ? parseConciergePhotoMessage(item.body) : null))
-        .find((item) => item)?.photoId;
-      if (
-        latestPhoto &&
-        !pendingPhotoIds.includes(latestPhoto) &&
-        latestPhoto !== digitalLockChecklist.lastPhotoId &&
-        !digitalLockChecklist.analyzedPhotoIds.includes(latestPhoto)
-      ) {
-        pendingPhotoIds.push(latestPhoto);
-      }
-
-      if (pendingPhotoIds.length) {
-        const contextBeforeVision = state.facts?.serviceContextId || serviceContextAtTurnStart;
-        const replies: string[] = [];
-        for (const photoId of pendingPhotoIds) {
-          const analyzed = await analyzeDigitalLockPhoto({
+    const lockTurnPolicy = resolveDigitalLockTurnPolicy({
+      text,
+      history: historyForLock,
+      skipUserMessage: input.skipUserMessage,
+      state,
+      transitionKind: transition.kind,
+    });
+    if (lockTurnPolicy.runVision) {
+      logInfo("PHOTO_ANALYSIS_STARTED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: String(lockTurnPolicy.attachmentCount),
+      });
+      const contextBeforeVision = state.facts?.serviceContextId || serviceContextAtTurnStart;
+      const versionBeforeVision = state.facts?.stateVersion || "";
+      const replies: string[] = [];
+      for (const photoId of lockTurnPolicy.photoIds) {
+        if (digitalLockChecklist.analyzedPhotoIds.includes(photoId)) continue;
+        const visionJob: VisionJobIdentity = {
+          conversationId: input.conversationId,
+          photoId,
+          serviceContextId: contextBeforeVision,
+          stateVersion: versionBeforeVision,
+          requestId: state.activeLeadId || "",
+        };
+        const analyzed = await analyzeDigitalLockPhoto({
+          conversationId: input.conversationId,
+          photoId,
+          knownViews: knownDigitalLockViews(digitalLockChecklist),
+          cachedByHash: digitalLockChecklist.analysisByHash,
+        });
+        const fresh = getConversation(input.conversationId);
+        const currentCtx = fresh?.state?.facts?.serviceContextId || state.facts?.serviceContextId || "";
+        const abandonedNow = fresh?.state?.facts?.digitalLockAbandoned === "1";
+        const freshService = fresh?.state?.primaryService || fresh?.state?.service || state.primaryService || "";
+        if (
+          isStaleVisionResult(visionJob, {
             conversationId: input.conversationId,
-            photoId,
-            knownViews: knownDigitalLockViews(digitalLockChecklist),
-            cachedByHash: digitalLockChecklist.analysisByHash,
+            serviceContextId: currentCtx,
+            stateVersion: fresh?.state?.facts?.stateVersion || state.facts?.stateVersion,
+            digitalLockAbandoned: abandonedNow,
+            primaryService: freshService,
+            lockActive: fresh ? getDigitalLockChecklist(fresh.state).active : digitalLockChecklist.active,
+          })
+        ) {
+          logInfo("STALE_VISION_RESULT_DISCARDED", {
+            contentJobId: input.conversationId.slice(0, 8),
+            stage: photoId.slice(0, 12),
           });
-          // Stale async guard: if context switched while vision ran, discard.
-          const fresh = getConversation(input.conversationId);
-          const currentCtx = fresh?.state?.facts?.serviceContextId || state.facts?.serviceContextId || "";
-          const abandonedNow = fresh?.state?.facts?.digitalLockAbandoned === "1";
-          if (
-            abandonedNow ||
-            (contextBeforeVision && currentCtx && contextBeforeVision !== currentCtx) ||
-            (fresh?.state && (fresh.state.primaryService || fresh.state.service) !== "locksmith" && getDigitalLockChecklist(fresh.state).active === false)
-          ) {
-            logInfo("STALE_ASYNC_RESULT_DISCARDED", {
-              contentJobId: input.conversationId.slice(0, 8),
-              stage: photoId.slice(0, 12),
-            });
-            continue;
-          }
-          const vision = analyzed?.vision || visionFailedResult("VISION_ANALYSIS_FAILED");
-          const applied = applyDigitalLockVision(state, photoId, vision, analyzed?.sha256);
-          state = applied.state;
-          digitalLockChecklist = getDigitalLockChecklist(state);
-          replies.push(applied.reply);
+          logInfo("STALE_ASYNC_RESULT_DISCARDED", {
+            contentJobId: input.conversationId.slice(0, 8),
+            stage: photoId.slice(0, 12),
+          });
+          continue;
         }
-        digitalLockReply = replies[replies.length - 1] || "";
-      } else if (
-        (digitalLockIntent || historyDigital) &&
-        !digitalLockPhotosComplete(digitalLockChecklist) &&
-        !digitalLockChecklist.front &&
-        !digitalLockChecklist.inside &&
-        !digitalLockChecklist.edge &&
-        digitalLockChecklist.rejected.length === 0 &&
-        digitalLockChecklist.analyzedPhotoIds.length === 0
+        const vision = analyzed?.vision || visionFailedResult("VISION_ANALYSIS_FAILED");
+        const applied = applyDigitalLockVision(state, photoId, vision, analyzed?.sha256);
+        state = applied.state;
+        digitalLockChecklist = getDigitalLockChecklist(state);
+        replies.push(applied.reply);
+        logInfo("PHOTO_ANALYSIS_COMPLETED", {
+          contentJobId: input.conversationId.slice(0, 8),
+          stage: photoId.slice(0, 12),
+        });
+      }
+      digitalLockReply = replies[replies.length - 1] || "";
+    } else if (
+      lockTurnPolicy.reason === "NO_CURRENT_IMAGE" &&
+      digitalLockChecklist.active &&
+      !digitalLockAbandoned &&
+      (digitalLockIntent || historyDigital) &&
+      !digitalLockPhotosComplete(digitalLockChecklist) &&
+      !digitalLockChecklist.front &&
+      !digitalLockChecklist.inside &&
+      !digitalLockChecklist.edge &&
+      digitalLockChecklist.rejected.length === 0 &&
+      digitalLockChecklist.analyzedPhotoIds.length === 0 &&
+      !incompatibleWithLock &&
+      transition.kind !== "SWITCH_SERVICE"
+    ) {
+      digitalLockReply = digitalLockIntroReply();
+    }
+
+    if (digitalLockReply) {
+      const mayEmit = lockTurnPolicy.emitPhotoReply || (!lockTurnPolicy.currentTurnHasImage && digitalLockReply === digitalLockIntroReply());
+      if (
+        !mayEmit ||
+        lockPhotoReplyIncompatibleWithState(digitalLockReply, state) ||
+        responseReferencesStaleService(digitalLockReply, state)
       ) {
-        digitalLockReply = digitalLockIntroReply();
+        logInfo("STALE_RESPONSE_BLOCKED", {
+          contentJobId: input.conversationId.slice(0, 8),
+          stage: state.primaryService || state.service || lockTurnPolicy.reason,
+        });
+        digitalLockReply = "";
       }
     }
 
     if (digitalLockReply && getDigitalLockChecklist(state).active && state.facts?.digitalLockAbandoned !== "1") {
+      state = {
+        ...state,
+        facts: {
+          ...(state.facts || {}),
+          pendingAction: lockTurnPolicy.currentTurnHasImage ? "ASK_LOCK_PHOTO" : "ASK_LOCK_INTRO_PHOTOS",
+          pendingActionService: "locksmith",
+          pendingActionServiceContextId: state.facts?.serviceContextId || serviceContextAtTurnStart,
+          pendingPhotoRequirement: lockTurnPolicy.currentTurnHasImage ? "1" : "",
+        },
+      };
       addMessage(input.conversationId, "assistant", digitalLockReply);
       touchConversation(input.conversationId, { state });
       const session = buildSessionSnapshot(state);
@@ -537,12 +757,14 @@ export async function conciergeTurn(input: {
       state = { ...state, bookingSuspended: false };
     }
 
+    let slotSelectedThisTurn = false;
     const matchedSlot =
       route.slotSelectionIntent && state.offeredSlots?.length
         ? resolveSlotFromMessage(text, state.offeredSlots, state.preferredDate)
         : null;
     if (matchedSlot) {
-      state = lockSelectedSlot(state, matchedSlot as OfferedSlot);
+      state = selectOfferedSlot(state, matchedSlot as OfferedSlot);
+      slotSelectedThisTurn = true;
       logStateTransition(input.conversationId, {
         stage: "SLOT_SELECTED",
         selectedDate: matchedSlot.date,
@@ -584,11 +806,11 @@ export async function conciergeTurn(input: {
         conversationId: input.conversationId,
         state,
         summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
-        conversationLeadId: conversation.leadPublicId,
+        conversationLeadId: state.activeLeadId || "",
         utm: input.utm,
       });
       if (ensured) {
-        state.activeLeadId = ensured.publicId;
+        state = markActiveRequest(state, ensured.publicId);
         if (!state.appointmentId && state.funnelStage !== "BOOKED") {
           state.funnelStage = "HANDOFF";
         }
@@ -604,6 +826,47 @@ export async function conciergeTurn(input: {
       }
     } catch {
       addEvent(input.conversationId, "REQUEST_CREATE_FAILED");
+    }
+
+    if (slotSelectedThisTurn && isSlotConfirmed(state)) {
+      const slotReply = formatSlotSelectionConfirmation(state);
+      const slotReplyBody = requestAnnounce ? `${requestAnnounce}\n\n${slotReply}` : slotReply;
+      addMessage(input.conversationId, "assistant", slotReplyBody);
+      touchConversation(input.conversationId, {
+        state,
+        leadPublicId: state.activeLeadId || clearedLeadPublicId,
+      });
+      logTurnStateTrace({
+        conversationId: input.conversationId,
+        stage: "SLOT_SELECTED_EARLY_RETURN",
+        before: stateBeforeTurn,
+        after: state,
+        attachmentCount: lockTurnPolicy.attachmentCount,
+        nextAction: "CONFIRM_OR_BOOK",
+        responseSource: "slot_selection",
+      });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+      return {
+        ok: true as const,
+        reply: slotReplyBody,
+        chips: [],
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        nextAction: "CONFIRM_OR_BOOK",
+        leadId: state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: session.serviceContext,
+        showResumeBooking: false,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
     }
 
     let availabilityHint = "";
@@ -657,6 +920,7 @@ export async function conciergeTurn(input: {
     const needsExactSlotQuery =
       hasRequestedExactWhen(state) && !isSlotConfirmed(state) && !state.pendingSlot;
     const shouldQueryCalendar =
+      !slotSelectedThisTurn &&
       (calendarDecision.execute ||
         (bookingSignal &&
           (!isSlotConfirmed(state) || hasRescheduleSignal(text)) &&
@@ -736,7 +1000,7 @@ export async function conciergeTurn(input: {
         busy: availability.requestedSlotBusy ? "1" : "0",
       });
       if (availability.slots.length) {
-        state = activateOfferedSlots(state, availability.slots as OfferedSlot[]);
+        state = activateOfferedSlotsWithState(state, availability.slots as OfferedSlot[]);
         if (availability.requested.date) state.preferredDate = availability.requested.date;
         if (availability.requested.time) state.preferredTime = availability.requested.time;
         state = markCalendarQueryResult(state, true);
@@ -777,9 +1041,11 @@ export async function conciergeTurn(input: {
         lastAvailabilityQuery: `${availability.requested.date}|${availability.requested.time || ""}`,
       };
 
-      // After affirmation/direct request: respond with real results immediately (no LLM permission loop).
+      // After affirmation/direct request/busy slot: respond with real results immediately (no LLM permission loop).
       if (
-        (calendarDecision.affirmedPending || calendarDecision.directRequest) &&
+        (calendarDecision.affirmedPending ||
+          calendarDecision.directRequest ||
+          availability.requestedSlotBusy) &&
         availabilityHint &&
         !isSlotConfirmed(state)
       ) {
@@ -1093,7 +1359,7 @@ export async function conciergeTurn(input: {
       }
     }
 
-    if (!ctx.leadId && canCreateLead(state) && !returningGreeting) {
+    if (!ctx.leadId && canCreateLead(state) && !returningGreeting && !state.appointmentId) {
       const created = await createLeadFromConcierge({
         conversationId: input.conversationId,
         state,
@@ -1145,8 +1411,25 @@ export async function conciergeTurn(input: {
     }
     reply = stripFalseThankYou(reply, text);
     reply = enforceDigitalLockReplyTruth(reply, getDigitalLockChecklist(state));
-    if (responseReferencesStaleService(reply, state)) {
+
+    const responseCompat = validateResponseCompatibility(reply, state, {
+      attachmentCount: lockTurnPolicy.attachmentCount,
+    });
+    if (!responseCompat.compatible) {
+      logIncompatibleResponse(input.conversationId, responseCompat, "final_reply");
+      reply =
+        transitionAck ||
+        (state.primaryService === "painting"
+          ? paintingFollowUpQuestion(state)
+          : slotSelectedThisTurn && isSlotConfirmed(state)
+            ? formatSlotSelectionConfirmation(state)
+            : "Claro, sigamos con lo que me acabas de pedir. ¿Qué más necesitas contarme?");
+    } else if (responseReferencesStaleService(reply, state) || lockPhotoReplyIncompatibleWithState(reply, state)) {
       logInfo("STALE_ASSISTANT_RESPONSE_BLOCKED", {
+        contentJobId: input.conversationId.slice(0, 8),
+        stage: state.primaryService || state.service || "",
+      });
+      logInfo("STALE_RESPONSE_BLOCKED", {
         contentJobId: input.conversationId.slice(0, 8),
         stage: state.primaryService || state.service || "",
       });
@@ -1181,7 +1464,7 @@ export async function conciergeTurn(input: {
         skipRewrite: route.isInterruption || route.priceIntent || route.bookingPauseIntent || route.newNeedIntent,
       });
       reply = availability.text;
-      const booked = enforceBookingIntegrity(reply, false);
+      const booked = enforceBookingIntegrity(reply, Boolean(state.appointmentId || hasActiveBookedAppointment(state)));
       if (booked.stripped || booked.offeredPendingAction) {
         if (state.offeredSlots?.length && areOfferedSlotsActive(state)) {
           reply = formatAvailabilityResults(state.offeredSlots, state.preferredDate);
@@ -1197,8 +1480,21 @@ export async function conciergeTurn(input: {
           state = setPendingAvailabilityAction(state);
         }
       } else if (shouldBlockAvailabilityOfferLoop(reply, calendarDecision, calendarQueriedThisTurn)) {
-        reply = availabilityHint || formatAvailabilityResults(state.offeredSlots || [], state.preferredDate);
+        if (slotSelectedThisTurn && isSlotConfirmed(state)) {
+          logStaleNextActionBlocked(input.conversationId, "OFFER_SLOTS_AFTER_SELECT");
+          reply = formatSlotSelectionConfirmation(state);
+        } else {
+          reply = availabilityHint || formatAvailabilityResults(state.offeredSlots || [], state.preferredDate);
+        }
       }
+    }
+
+    if (
+      shouldBlockStaleSlotOffer(state, "OFFER_SLOTS", slotSelectedThisTurn) &&
+      /estos horarios|cu[aá]l te queda mejor/i.test(reply)
+    ) {
+      logStaleNextActionBlocked(input.conversationId, "OFFER_SLOTS");
+      reply = formatSlotSelectionConfirmation(state);
     }
 
     if (HUMAN_RE.test(text)) {
@@ -1231,12 +1527,12 @@ export async function conciergeTurn(input: {
     touchConversation(input.conversationId, {
       state,
       summary: ctx.summary || conversation.summary,
-      leadPublicId: ctx.leadId || conversation.leadPublicId,
+      leadPublicId: state.activeLeadId || "",
     });
     addMessage(input.conversationId, "assistant", reply);
 
-    const leadBanner = shouldShowLeadBanner(state, ctx.leadId || state.activeLeadId);
-    const session = buildSessionSnapshot(state, Date.now(), ctx.leadId || state.activeLeadId || "");
+    const leadBanner = shouldShowLeadBanner(state, state.activeLeadId);
+    const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
 
     const wa =
       knowledge.whatsappConfigured && leadBanner
@@ -1298,5 +1594,9 @@ export function startConcierge(ip: string, utm: Record<string, string>) {
   const id = createConversation(ip, utm, isConciergeDryRun());
   addEvent(id, "CHAT_OPENED");
   recordFunnelEvent(id, "ConversationStarted", {});
+  logInfo("CONVERSATION_CREATED", {
+    contentJobId: id.slice(0, 8),
+    stage: "new",
+  });
   return id;
 }

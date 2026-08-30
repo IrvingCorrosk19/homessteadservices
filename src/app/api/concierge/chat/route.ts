@@ -15,7 +15,7 @@ import {
 } from "@/lib/concierge-store";
 import { areOfferedSlotsActive, buildSessionSnapshot, clearActiveTransactionState } from "@/lib/concierge-transaction";
 import { parseConciergePhotoMessage } from "@/lib/concierge-photo-message";
-import { logError } from "@/lib/log";
+import { logError, logInfo } from "@/lib/log";
 import { CONCIERGE_BUILD_MARKER, CONCIERGE_PROMPT_VERSION } from "@/lib/concierge-knowledge";
 import { isWebsiteImageChatContext } from "@/lib/concierge-entry-context";
 import { startChatFromWebsiteImage } from "@/lib/concierge/website-image-context";
@@ -67,8 +67,12 @@ export async function GET(request: Request) {
   }
   const conversationId = cookieId(request);
   if (!conversationId || !getConversation(conversationId)) {
-    return NextResponse.json({ ok: true, messages: [] });
+    return NextResponse.json({ ok: true, messages: [], conversationId: null });
   }
+  logInfo("CONVERSATION_HYDRATED", {
+    contentJobId: conversationId.slice(0, 8),
+    stage: "get",
+  });
   const messages = recentMessages(conversationId, 30).map((item) => {
     const photo = parseConciergePhotoMessage(item.body);
     if (photo) {
@@ -88,7 +92,7 @@ export async function GET(request: Request) {
       touchConversation(conversationId, { state });
     }
   }
-  const session = state ? buildSessionSnapshot(state, Date.now(), conversation?.leadPublicId || state.activeLeadId || "") : {
+  const session = state ? buildSessionSnapshot(state, Date.now(), state.activeLeadId || "") : {
     chips: [],
     historicalChips: [],
     leadBanner: null,
@@ -103,6 +107,7 @@ export async function GET(request: Request) {
   };
   return NextResponse.json({
     ok: true,
+    conversationId,
     messages,
     chips: session.chips,
     historicalChips: session.historicalChips,
@@ -128,7 +133,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false }, { status: 403 });
   }
   const payload = (await request.json().catch(() => null)) as
-    | { message?: string; utm?: Record<string, string>; event?: string; context?: unknown }
+    | {
+        message?: string;
+        utm?: Record<string, string>;
+        event?: string;
+        context?: unknown;
+        conversationId?: string;
+      }
     | null;
   if (!payload) return NextResponse.json({ ok: false }, { status: 400 });
   const ip = clientIp(request);
@@ -137,8 +148,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "rate" }, { status: 429 });
   }
 
+  if (payload.event === "NEW_CONVERSATION") {
+    const previousId = cookieId(request);
+    if (previousId && getConversation(previousId)) {
+      logInfo("CONVERSATION_ENDED", {
+        contentJobId: previousId.slice(0, 8),
+        stage: "new_conversation",
+      });
+    }
+    const utm = payload.utm && typeof payload.utm === "object" ? payload.utm : {};
+    const conversationId = startConcierge(ip, utm);
+    const res = NextResponse.json({
+      ok: true,
+      conversationId,
+      messages: [],
+      chips: [],
+      historicalChips: [],
+      leadBanner: null,
+      requestCard: null,
+      awaitingSlotSelection: false,
+      bookingPending: false,
+      slotGroups: [],
+      serviceContext: null,
+      showResumeBooking: false,
+      showPhotoCta: false,
+      photosRemaining: 4,
+      imageContext: null,
+      ended: false,
+    });
+    res.cookies.set(COOKIE, conversationId, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+      secure: process.env.NODE_ENV === "production",
+    });
+    return res;
+  }
+
   let conversationId = cookieId(request);
-  if (!conversationId || !getConversation(conversationId)) {
+  const clientConversationId = typeof payload.conversationId === "string" ? payload.conversationId.trim() : "";
+  if (clientConversationId && getConversation(clientConversationId)) {
+    conversationId = clientConversationId;
+  } else if (!conversationId || !getConversation(conversationId)) {
     conversationId = startConcierge(ip, payload.utm && typeof payload.utm === "object" ? payload.utm : {});
   }
   if (countRecentMessages(conversationId, since) >= 24) {
@@ -205,7 +257,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await conciergeTurn({ conversationId, message, utm: payload.utm });
-    const res = NextResponse.json(result);
+    const res = NextResponse.json({ ...result, conversationId });
     res.cookies.set(COOKIE, conversationId, {
       httpOnly: true,
       sameSite: "lax",
