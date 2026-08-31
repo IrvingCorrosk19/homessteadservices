@@ -17,9 +17,10 @@ import {
 } from "@/lib/revenue-store";
 import { clearSlotSelection, lockSelectedSlot } from "@/lib/concierge/canonical-state";
 import type { OfferedSlot } from "@/lib/concierge-store";
+import { isQualityFeedbackNotSchedule } from "@/lib/concierge/schedule-phrases";
 
 export const REPROGRAM_APPOINTMENT_RE =
-  /\b(perd[oó]n|disculp|mejor\s+(a\s+las|el|ma[ñn]ana|pasado|este|la\s+de)|prefiero\s+(las|el|a\s+las|ma[ñn]ana)|puede\s+ser\s+el|quiero\s+cambiar|cambiar\s+la\s+hora|c[aá]mbiala|reprogram|mover\s+la\s+cita)\b/i;
+  /\b(perd[oó]n|disculp|mejor\s+(a\s+las|el|ma[ñn]ana|pasado|este|la\s+de)|prefiero\s+(las|el|a\s+las|ma[ñn]ana|las\s+cuatro|las\s+\d)|puede\s+ser\s+(?:a\s+las|el)|quiero\s+cambiar|cambiar\s+la\s+hora|cambi[eé]mosla|c[aá]mbial[ao]|reprogram|mover\s+la\s+cita|ponla\s+a\s+las)\b/i;
 
 const TIME_CHANGE_ONLY =
   /\b(mejor\s+a\s+las|a\s+las\s+\d|las\s+\d|:\d{2}\s*(a\.?\s*m|p\.?\s*m)|\d{1,2}\s*(a\.?\s*m|p\.?\s*m|am|pm))\b/i;
@@ -68,10 +69,14 @@ export function detectReprogramAppointmentIntent(
   state: ConversationState,
   apptOverride?: AppointmentRecord | null,
 ): boolean {
-  const appt = apptOverride !== undefined ? apptOverride : getActiveAppointment(state);
-  if (!appt) return false;
+  const hasAppointmentContext =
+    apptOverride !== undefined
+      ? Boolean(apptOverride)
+      : Boolean(getActiveAppointment(state)) || Boolean(state.appointmentId?.trim());
+  if (!hasAppointmentContext) return false;
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (isQualityFeedbackNotSchedule(trimmed)) return false;
   if (REPROGRAM_APPOINTMENT_RE.test(trimmed)) return true;
   if (hasRescheduleSignal(trimmed)) return true;
   if (TIME_CHANGE_ONLY.test(trimmed) && /\d/.test(trimmed)) return true;

@@ -25,6 +25,7 @@ export type CopilotReply = {
   keyboard?: TelegramButton[][];
   openaiUsed: boolean;
   deterministic: boolean;
+  confirmation?: { token: string; summary: string };
 };
 
 function navKeyboard(extra?: TelegramButton[][]): TelegramButton[][] {
@@ -74,6 +75,7 @@ export async function handleCopilotTurn(input: {
   operator: TelegramOperator;
   telegramUserId: string;
   text: string;
+  conversationId?: string;
 }): Promise<CopilotReply> {
   ensureCopilotSchema();
   incrementCopilotMetric("copilot_requests");
@@ -112,12 +114,12 @@ export async function handleCopilotTurn(input: {
       mass_pii: "No puedo volcar listados masivos de clientes o teléfonos por chat.",
     };
     const text = messages[unsafe];
-    touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, text, { active: true });
+    touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, text, { active: true }, input.conversationId);
     incrementCopilotMetric("copilot_success");
     return { text, keyboard: navKeyboard(), openaiUsed: false, deterministic: true };
   }
 
-  const ctx = getCopilotSession(input.operator.id);
+  const ctx = getCopilotSession(input.operator.id, input.conversationId);
   const plan = matchDeterministicIntent(input.text, ctx);
 
   if (plan.kind !== "none") {
@@ -126,7 +128,9 @@ export async function handleCopilotTurn(input: {
     touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, text, {
       active: true,
       ...result.sessionPatch,
-    });
+      ...(result.toolName ? { lastToolName: result.toolName } : {}),
+      ...(result.confirmation ? { pendingConfirmationToken: result.confirmation.token } : {}),
+    }, input.conversationId);
     incrementCopilotMetric("copilot_success");
     return {
       text,
@@ -135,6 +139,7 @@ export async function handleCopilotTurn(input: {
         : navKeyboard(),
       openaiUsed: false,
       deterministic: true,
+      confirmation: result.confirmation,
     };
   }
 
@@ -148,13 +153,15 @@ export async function handleCopilotTurn(input: {
       touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, ai.text, {
         active: true,
         ...ai.sessionPatch,
-      });
+        ...(ai.confirmation ? { pendingConfirmationToken: ai.confirmation.token } : {}),
+      }, input.conversationId);
       incrementCopilotMetric("copilot_success");
       return {
         text: ai.text.slice(0, 3500),
         keyboard: ai.confirmation ? confirmKeyboard(ai.confirmation.token) : navKeyboard(),
         openaiUsed: true,
         deterministic: false,
+        confirmation: ai.confirmation,
       };
     }
   }
@@ -162,7 +169,7 @@ export async function handleCopilotTurn(input: {
   // OpenAI down or unclear: still offer deterministic brief
   const fallback =
     "No pude interpretar esa pregunta con IA ahora. Prueba:\n• ¿Cómo vamos hoy?\n• ¿Qué necesita atención?\n• ¿Citas mañana?\n• Busca a <nombre>\n\nEl brief determinista sigue disponible.";
-  touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, fallback, { active: true });
+  touchCopilotTurn(input.operator.id, input.telegramUserId, input.text, fallback, { active: true }, input.conversationId);
   incrementCopilotMetric("copilot_failure");
   return {
     text: fallback,

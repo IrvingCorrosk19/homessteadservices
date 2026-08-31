@@ -39,7 +39,7 @@ const SWITCH_TO_RE =
   /\b(mejor\s+(ayudame|ayuda|quiero|necesito|vamos|pint|plomer|aire|gypsum|repar)|ahora\s+(quiero|necesito|mejor)|vamos\s+con|quiero\s+otra\s+cosa|mejor\s+ayudame\s+con)\b/i;
 
 const ADD_RE =
-  /\b(tambi[eé]n\s+(necesito|quiero|ayudame)|adem[aá]s\s+(necesito|quiero)|y\s+tambi[eé]n)\b/i;
+  /\b(tambi[eé]n\s+(?:necesito|quiero|ayudame|que\s+revisen)|adem[aá]s\s+(?:necesito|quiero)|y\s+tambi[eé]n)\b/i;
 
 const GENERIC_SERVICES = new Set(["repairs", "other", "unknown", "multiple", ""]);
 
@@ -115,6 +115,22 @@ export function detectConversationTransition(
   const addSignal = ADD_RE.test(text) && !abandonSignal;
   const switchPhrase = SWITCH_TO_RE.test(text);
   const lockActive = getDigitalLockChecklist(state).active;
+
+  const capabilityQuestion =
+    /\?/.test(text) &&
+    /\b(arreglan|hacen|ofrecen|instalan|reparan)\b/i.test(text) &&
+    !/\b(trabajan|domingo|s[aá]bado|horario|atienden)\b/i.test(text) &&
+    !/\b(tambi[eé]n\s+necesito|tambi[eé]n\s+quiero)\b/i.test(text);
+  if (capabilityQuestion) {
+    return {
+      kind: "GENERAL_QUESTION",
+      previousService,
+      nextService: previousService,
+      abandonSignal: false,
+      addSignal: false,
+      ack: "",
+    };
+  }
 
   // Explicit cancel without replacement
   if (abandonSignal && !nextFromMessage && !switchPhrase) {

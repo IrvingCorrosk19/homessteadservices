@@ -7,10 +7,11 @@ import {
   recordCopilotAudit,
 } from "@/lib/copilot/schema";
 import { markEntityContacted, snoozeEntity } from "@/lib/ops-store";
+import { getAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/revenue-store";
 import type { TelegramOperator } from "@/lib/telegram-operators";
 import { hasTelegramPermission } from "@/lib/telegram-operators";
 
-export type CopilotAction = "mark_contacted" | "snooze_lead";
+export type CopilotAction = "mark_contacted" | "snooze_lead" | "reschedule_appointment" | "cancel_appointment";
 
 export function proposeCopilotAction(input: {
   operator: TelegramOperator;
@@ -24,6 +25,20 @@ export function proposeCopilotAction(input: {
   ensureCopilotSchema();
   if (input.action === "mark_contacted" || input.action === "snooze_lead") {
     if (!hasTelegramPermission(input.operator, "leads.manage") && !hasTelegramPermission(input.operator, "requests.manage")) {
+      incrementCopilotMetric("copilot_unauthorized_query");
+      recordCopilotAudit({
+        operatorId: input.operator.id,
+        telegramUserId: input.operator.telegramUserId,
+        event: "COPILOT_ACTION_DENIED",
+        entityType: input.entityType,
+        entityId: input.entityId,
+        result: "forbidden",
+      });
+      return { ok: false as const, reason: "forbidden" as const };
+    }
+  }
+  if (input.action === "reschedule_appointment" || input.action === "cancel_appointment") {
+    if (!hasTelegramPermission(input.operator, "appointments.manage")) {
       incrementCopilotMetric("copilot_unauthorized_query");
       recordCopilotAudit({
         operatorId: input.operator.id,
@@ -111,6 +126,21 @@ function currentEntityState(entityId: string): Record<string, unknown> {
   };
 }
 
+export function snapshotAppointmentForConfirm(appointmentId: string): Record<string, unknown> {
+  const ap = getAppointment(appointmentId);
+  if (!ap) return {};
+  return {
+    status: ap.status,
+    date: ap.date,
+    startTime: ap.startTime,
+    version: ap.version,
+  };
+}
+
+function currentAppointmentState(appointmentId: string): Record<string, unknown> {
+  return snapshotAppointmentForConfirm(appointmentId);
+}
+
 function stateMatches(expected: Record<string, unknown>, current: Record<string, unknown>) {
   for (const key of Object.keys(expected)) {
     if (String(expected[key] ?? "") !== String(current[key] ?? "")) return false;
@@ -151,7 +181,10 @@ export function confirmCopilotAction(input: {
   }
 
   const expected = JSON.parse(row.expected_state_json || "{}") as Record<string, unknown>;
-  const current = currentEntityState(row.entity_id);
+  const current =
+    row.entity_type === "appointment"
+      ? currentAppointmentState(row.entity_id)
+      : currentEntityState(row.entity_id);
   if (!stateMatches(expected, current)) {
     getHomesteadDb().prepare("UPDATE copilot_confirmations SET status = 'STALE' WHERE token = ?").run(input.token);
     incrementCopilotMetric("copilot_action_denied");
@@ -178,7 +211,12 @@ export function confirmCopilotAction(input: {
   }
 
   const actor = `copilot:${input.operator.id}:${input.operator.role}`;
-  const payload = JSON.parse(row.payload_json || "{}") as { minutes?: number };
+  const payload = JSON.parse(row.payload_json || "{}") as {
+    minutes?: number;
+    date?: string;
+    time?: string;
+    version?: number;
+  };
   let message = "Listo.";
   try {
     if (row.action === "mark_contacted") {
@@ -194,6 +232,33 @@ export function confirmCopilotAction(input: {
       const minutes = Number(payload.minutes || 30);
       const until = snoozeEntity(row.entity_id, minutes, actor);
       message = `Pospuesta ${minutes} min hasta ${until}.\n${row.entity_id}`;
+    } else if (row.action === "reschedule_appointment") {
+      const date = String(payload.date || "");
+      const time = String(payload.time || "");
+      const expectedVersion = Number(payload.version);
+      const moved = rescheduleAppointment(row.entity_id, date, time, {
+        expectedVersion: Number.isFinite(expectedVersion) ? expectedVersion : undefined,
+        actor,
+      });
+      if (!moved.ok) {
+        getHomesteadDb().prepare("UPDATE copilot_confirmations SET status = 'FAILED' WHERE token = ?").run(input.token);
+        return {
+          ok: false,
+          reason: moved.reason,
+          message: `No pude reprogramar: ${moved.reason}. El estado pudo haber cambiado.`,
+        };
+      }
+      const verified = getAppointment(row.entity_id);
+      message = verified
+        ? `Listo, quedó reprogramada para ${verified.date} ${verified.startTime}.`
+        : "Reprogramación completada.";
+    } else if (row.action === "cancel_appointment") {
+      setAppointmentStatus(row.entity_id, "CANCELLED");
+      const verified = getAppointment(row.entity_id);
+      message =
+        verified?.status === "CANCELLED"
+          ? `Listo, la cita ${row.entity_id} quedó cancelada.`
+          : "No pude verificar la cancelación.";
     } else {
       getHomesteadDb().prepare("UPDATE copilot_confirmations SET status = 'DENIED' WHERE token = ?").run(input.token);
       return { ok: false, reason: "unsupported", message: "Acción no soportada." };

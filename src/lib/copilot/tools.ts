@@ -27,15 +27,37 @@ import {
 import {
   proposeCopilotAction,
   snapshotEntityForConfirm,
+  snapshotAppointmentForConfirm,
 } from "@/lib/copilot/confirmations";
 import type { CopilotContext } from "@/lib/copilot/session";
+import {
+  buildOperationsSummary,
+  buildWorkloadSummary,
+  explainRequestStuck,
+  listCalendarRange,
+  listOverdueRequests,
+  listRequestsByLocation,
+  listRequestsByService,
+  readAppointmentDetail,
+  readOutboxStatus,
+} from "@/lib/operations/ops-read-tools";
+import { checkAvailability } from "@/lib/concierge-availability";
+import { getAppointment } from "@/lib/revenue-store";
 
 const TOOL_PERMS: Record<string, TelegramPermission[]> = {
   get_business_summary: ["analytics.read", "dashboard.read"],
+  get_operations_summary: ["analytics.read", "dashboard.read"],
+  get_workload_summary: ["analytics.read", "dashboard.read"],
   get_attention_items: ["analytics.read", "dashboard.read"],
   get_appointments: ["appointments.read"],
+  get_calendar_range: ["appointments.read"],
+  get_appointment: ["appointments.read"],
   get_pending_requests: ["requests.read", "leads.read", "dashboard.read"],
+  get_overdue_requests: ["requests.read", "leads.read"],
+  get_requests_by_location: ["requests.read"],
+  get_requests_by_service: ["requests.read", "analytics.read"],
   get_request_detail: ["requests.read", "leads.read"],
+  explain_request_stuck: ["requests.read", "leads.read"],
   search_customers: ["customers.read"],
   get_customer: ["customers.read"],
   get_service_performance: ["analytics.read"],
@@ -43,8 +65,11 @@ const TOOL_PERMS: Record<string, TelegramPermission[]> = {
   get_retention_metrics: ["retention.read", "analytics.read"],
   get_recovery_cases: ["recovery.read"],
   get_content_pending: ["content.read"],
+  get_outbox_status: ["dashboard.read", "analytics.read"],
   propose_mark_contacted: ["leads.manage", "requests.manage"],
   propose_snooze: ["leads.manage", "requests.manage"],
+  propose_reschedule_appointment: ["appointments.manage"],
+  propose_cancel_appointment: ["appointments.manage"],
 };
 
 function anyPerm(operator: TelegramOperator, perms: TelegramPermission[]) {
@@ -70,6 +95,134 @@ function maskPhone(phone: string) {
 }
 
 export const COPILOT_OPENAI_TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "get_operations_summary",
+      description: "Resumen operativo: abiertas, citas, atrasadas, alertas, outbox fallido.",
+      parameters: {
+        type: "object",
+        properties: { range: { type: "string", enum: ["today", "7d", "30d", "month"] } },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_workload_summary",
+      description: "Carga de trabajo: pendientes, citas mañana, rescue.",
+      parameters: {
+        type: "object",
+        properties: { range: { type: "string", enum: ["today", "week", "7d", "30d"] } },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_overdue_requests",
+      description: "Solicitudes abiertas con más de 24h sin atender.",
+      parameters: { type: "object", properties: { limit: { type: "number" } } },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_requests_by_location",
+      description: "Solicitudes filtradas por zona/ubicación (texto).",
+      parameters: {
+        type: "object",
+        properties: { location: { type: "string" }, limit: { type: "number" } },
+        required: ["location"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_requests_by_service",
+      description: "Solicitudes por tipo de servicio en los últimos 30 días.",
+      parameters: {
+        type: "object",
+        properties: { service: { type: "string" }, range: { type: "string" } },
+        required: ["service"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_outbox_status",
+      description: "Estado de automation outbox (pendiente/fallido).",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_appointment",
+      description: "Detalle de cita HA por appointmentId.",
+      parameters: {
+        type: "object",
+        properties: { appointmentId: { type: "string" } },
+        required: ["appointmentId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_calendar_range",
+      description: "Citas en rango de días relativos (fromOffsetDays, toOffsetDays).",
+      parameters: {
+        type: "object",
+        properties: {
+          fromOffsetDays: { type: "number" },
+          toOffsetDays: { type: "number" },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "explain_request_stuck",
+      description: "Por qué una solicitud HS no avanza (solo evidencia soportada).",
+      parameters: {
+        type: "object",
+        properties: { publicId: { type: "string" } },
+        required: ["publicId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "propose_reschedule_appointment",
+      description: "Propone reprogramar cita. NO ejecuta hasta confirmación.",
+      parameters: {
+        type: "object",
+        properties: {
+          appointmentId: { type: "string" },
+          date: { type: "string" },
+          time: { type: "string" },
+        },
+        required: ["appointmentId", "date", "time"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "propose_cancel_appointment",
+      description: "Propone cancelar cita. NO ejecuta hasta confirmación.",
+      parameters: {
+        type: "object",
+        properties: { appointmentId: { type: "string" } },
+        required: ["appointmentId"],
+      },
+    },
+  },
   {
     type: "function" as const,
     function: {
@@ -321,6 +474,141 @@ export function executeCopilotTool(input: {
         }));
         return {
           data: { day: label, ymd, count: rows.length, appointments: rows },
+          sessionPatch: {
+            lastResultSet: {
+              kind: "appointments" as const,
+              items: rows.map((r) => ({ ...r })),
+            },
+            lastEntityType: "appointments",
+            lastEntityId: ymd,
+          },
+        };
+      }
+      case "get_operations_summary": {
+        const key = rangeKey(String(input.args.range || "today"));
+        const summaryKey = key === "custom" ? "today" : key;
+        return { data: buildOperationsSummary(summaryKey) };
+      }
+      case "get_workload_summary": {
+        const range = String(input.args.range || "week") as "today" | "week" | "7d" | "30d";
+        return { data: buildWorkloadSummary(range) };
+      }
+      case "get_overdue_requests": {
+        const limit = Math.min(20, Math.max(1, Number(input.args.limit || 10)));
+        const items = listOverdueRequests(limit);
+        return {
+          data: { count: items.length, items },
+          sessionPatch: {
+            lastResultSet: { kind: "requests", items: items.map((i) => ({ ...i })) },
+          },
+        };
+      }
+      case "get_requests_by_location": {
+        const location = String(input.args.location || "").trim();
+        const items = listRequestsByLocation(location, Number(input.args.limit || 15));
+        return { data: { location, count: items.length, items } };
+      }
+      case "get_requests_by_service": {
+        const service = String(input.args.service || "").trim();
+        const items = listRequestsByService(service, 30, 20);
+        return { data: { service, count: items.length, items } };
+      }
+      case "get_outbox_status": {
+        return { data: readOutboxStatus() };
+      }
+      case "get_appointment": {
+        const appointmentId = String(input.args.appointmentId || "").trim();
+        const ap = readAppointmentDetail(appointmentId);
+        if (!ap) return { data: { error: "not_found", message: "Cita no encontrada." } };
+        let customerId: number | undefined;
+        if (ap.leadId) {
+          const lead = getHomesteadDb()
+            .prepare("SELECT customer_id FROM revenue_leads WHERE lead_id = ?")
+            .get(ap.leadId) as { customer_id: number | null } | undefined;
+          if (lead?.customer_id) customerId = lead.customer_id;
+        }
+        return {
+          data: ap,
+          sessionPatch: {
+            lastEntityType: "appointment",
+            lastEntityId: appointmentId,
+            ...(customerId ? { customerId, customerLabel: ap.customerName || "" } : {}),
+          },
+        };
+      }
+      case "get_calendar_range": {
+        const from = Number(input.args.fromOffsetDays ?? 0);
+        const to = Number(input.args.toOffsetDays ?? 6);
+        return { data: { days: listCalendarRange(from, to) } };
+      }
+      case "explain_request_stuck": {
+        const publicId = String(input.args.publicId || "").trim().toUpperCase();
+        return { data: explainRequestStuck(publicId) };
+      }
+      case "propose_reschedule_appointment": {
+        if (!hasTelegramPermission(input.operator, "appointments.manage")) {
+          return { data: deny(input.operator, input.name), denied: true };
+        }
+        const appointmentId = String(input.args.appointmentId || "").trim();
+        const date = String(input.args.date || "").trim();
+        const time = String(input.args.time || "").trim();
+        const current = getAppointment(appointmentId);
+        if (!current) return { data: { error: "not_found", message: "Cita no encontrada." } };
+        const availability = checkAvailability({ dateText: date, timeText: time });
+        if (availability.requestedSlotBusy) {
+          return {
+            data: {
+              error: "slot_busy",
+              message: "Ese horario no está disponible.",
+              alternatives: availability.slots.slice(0, 4).map((s) => `${s.date} ${s.time}`),
+            },
+          };
+        }
+        const proposed = proposeCopilotAction({
+          operator: input.operator,
+          action: "reschedule_appointment",
+          entityType: "appointment",
+          entityId: appointmentId,
+          expectedState: snapshotAppointmentForConfirm(appointmentId),
+          payload: { date, time, version: current.version },
+          summary: `Reprogramar cita ${appointmentId} de ${current.date} ${current.startTime} → ${date} ${time}`,
+        });
+        if (!proposed.ok) return { data: deny(input.operator, input.name), denied: true };
+        return {
+          data: {
+            needsConfirmation: true,
+            preview: {
+              action: "RESCHEDULE_APPOINTMENT",
+              appointmentId,
+              current: `${current.date} ${current.startTime}`,
+              proposed: `${date} ${time}`,
+              availability: "AVAILABLE",
+            },
+            summary: proposed.summary,
+            token: proposed.token,
+          },
+          confirmation: { token: proposed.token, summary: proposed.summary },
+        };
+      }
+      case "propose_cancel_appointment": {
+        if (!hasTelegramPermission(input.operator, "appointments.manage")) {
+          return { data: deny(input.operator, input.name), denied: true };
+        }
+        const appointmentId = String(input.args.appointmentId || "").trim();
+        const current = getAppointment(appointmentId);
+        if (!current) return { data: { error: "not_found", message: "Cita no encontrada." } };
+        const proposed = proposeCopilotAction({
+          operator: input.operator,
+          action: "cancel_appointment",
+          entityType: "appointment",
+          entityId: appointmentId,
+          expectedState: snapshotAppointmentForConfirm(appointmentId),
+          summary: `Cancelar cita ${appointmentId} (${current.date} ${current.startTime})`,
+        });
+        if (!proposed.ok) return { data: deny(input.operator, input.name), denied: true };
+        return {
+          data: { needsConfirmation: true, summary: proposed.summary, token: proposed.token },
+          confirmation: { token: proposed.token, summary: proposed.summary },
         };
       }
       case "get_pending_requests": {
@@ -339,11 +627,14 @@ export function executeCopilotTool(input: {
             rescueCount: snap.rescue,
             items: rows,
           },
+          sessionPatch: {
+            lastResultSet: { kind: "requests", items: rows.map((r) => ({ ...r })) },
+          },
         };
       }
       case "get_request_detail": {
         const publicId = String(input.args.publicId || "").trim().toUpperCase();
-        if (!/^HS-\d{4}-\d{6}$/i.test(publicId) && !/^HS-/i.test(publicId)) {
+        if (!/^HS-\d{4}-\d{6}$/i.test(publicId)) {
           return { data: { error: "invalid_id", message: "Indica un folio HS válido." } };
         }
         const req = getRequestByPublicId(publicId);

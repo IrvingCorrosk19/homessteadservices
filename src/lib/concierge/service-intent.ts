@@ -49,6 +49,9 @@ export function resolvePrimaryFromMessage(text: string): PlaybookServiceId | "" 
   if (detected.includes("locksmith") && /\b(cerradur|cerrajer|llave)\b/.test(blob)) {
     return "locksmith";
   }
+  if (/\b(revisen|revisar|revisi[oó]n|mantenim(?:iento|ento))\b/.test(blob) && /\b(uno|equipo|aires?|ac|split)\b/.test(blob)) {
+    return "ac";
+  }
 
   const hasRepair = REPAIR_VERB.test(blob);
   const hasPaint = PAINT_VERB.test(blob);

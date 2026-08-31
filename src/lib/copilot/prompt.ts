@@ -45,7 +45,7 @@ export function isUnsafeOperatorQuery(text: string): "sql" | "shell" | "secret" 
   if (/\b(cat\s+\/etc|rm\s+-rf|powershell|bash\s+-c|cmd\.exe)\b/.test(t) || /ejecuta\s+cat/.test(t)) {
     return "shell";
   }
-  if (/api[_ ]?key|openai.*key|bot.?token|\.env\b|smtp.?password|meta.?token/.test(t)) {
+  if (/api[_ ]?key|openai.*key|bot.?token|token de telegram|telegram.*token|\.env\b|smtp.?password|meta.?token|contrase[nñ]a|password/.test(t)) {
     return "secret";
   }
   if (/ahora soy (el )?owner|soy el dueño.*muéstrame todo|ignore (all |previous )?instructions/.test(t)) {

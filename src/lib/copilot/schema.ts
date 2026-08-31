@@ -57,6 +57,15 @@ export function migrateCopilotWaveG(database: import("better-sqlite3").Database)
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_copilot_audit_op ON copilot_audit (operator_id, created_at);
+    CREATE TABLE IF NOT EXISTS copilot_sessions_scoped (
+      session_scope TEXT PRIMARY KEY,
+      operator_id INTEGER NOT NULL,
+      telegram_user_id TEXT NOT NULL DEFAULT '',
+      context_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_copilot_sessions_scoped_op ON copilot_sessions_scoped (operator_id);
     CREATE TABLE IF NOT EXISTS copilot_metrics (
       key TEXT PRIMARY KEY,
       value INTEGER NOT NULL DEFAULT 0,

@@ -7,6 +7,7 @@ import {
   getAppointmentReadiness,
   hasRequestedExactWhen,
   isLocationSufficient,
+  rotatingSlotQuestion,
   type AppointmentMissingField,
   type AppointmentReadiness,
 } from "@/lib/concierge/appointment-readiness";
@@ -285,7 +286,7 @@ export function determineNextAction(
     requiredMissing,
     askField,
     reason: askField ? `missing_${askField}` : "continue",
-    cannedQuestion: askField ? firstMissingQuestion(synthetic, askField) : "",
+    cannedQuestion: askField ? firstMissingQuestion(synthetic, askField, state.questionsAsked || 0) : "",
     readiness: synthetic,
     locationSufficient,
     blockInventedAsks: true,
@@ -317,6 +318,12 @@ export function enforceDeterministicAsk(
   if ((inventingLocation || inventingVague) && decision.action === "CONFIRM_OR_BOOK") {
     text =
       "Perfecto, con eso ya puedo confirmar la visita. Dame un segundo para dejarla agendada.";
+    rewritten = true;
+  } else if ((inventingLocation || inventingVague) && decision.askField) {
+    text =
+      decision.askField === "slot"
+        ? rotatingSlotQuestion(String(state.facts?.lastBotQuestion || ""))
+        : firstMissingQuestion(decision.readiness, decision.askField, state.questionsAsked || 0);
     rewritten = true;
   } else if ((inventingLocation || inventingVague) && decision.cannedQuestion) {
     text = decision.cannedQuestion;

@@ -39,6 +39,8 @@ import {
   rehydrateRequestFromAppointment,
   resolveAuthoritativeRequestId,
 } from "@/lib/concierge/appointment-reprogram";
+import { retrieveCustomerMemory } from "@/lib/concierge/customer-memory";
+import { isTestInjectionActive } from "@/lib/concierge/test-injection";
 
 export const CONCIERGE_TOOLS = [
   {
@@ -164,6 +166,20 @@ export const CONCIERGE_TOOLS = [
         type: "object",
         properties: { customerConfirmed: { type: "boolean" } },
         required: ["customerConfirmed"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_customer_context",
+      description:
+        "Lee historial previo del cliente por teléfono validado. Solo lectura; no activa solicitudes históricas.",
+      parameters: {
+        type: "object",
+        properties: {
+          phone: { type: "string", description: "Teléfono validado del cliente actual" },
+        },
       },
     },
   },
@@ -349,6 +365,20 @@ export async function executeConciergeTool(
   }
 
   if (name === "check_availability") {
+    if (isTestInjectionActive("CALENDAR_READ_FAILURE")) {
+      logInfo("TEST_INJECT_CALENDAR_READ_FAILURE", { contentJobId: ctx.conversationId.slice(0, 8) });
+      return {
+        result: {
+          ok: false,
+          reason: "calendar_unavailable",
+          queryExecuted: false,
+          instruction:
+            "El calendario no pudo consultarse ahora. NO inventes horarios. Explica con naturalidad que la solicitud sigue y que puedes reintentar revisar disponibilidad.",
+        },
+        state,
+        leadId,
+      };
+    }
     const playbook = getPlaybook(state.primaryService || state.service);
     if (!shouldOfferAvailability(playbook, state) && !state.bookingIntent) {
       return {
@@ -504,6 +534,20 @@ export async function executeConciergeTool(
       recordFunnelEvent(ctx.conversationId, "AppointmentFailed", { reason: "no_lead" });
       return { result: { ok: false, reason: "need_valid_phone_and_problem" }, state, leadId };
     }
+    if (isTestInjectionActive("APPOINTMENT_WRITE_FAILURE")) {
+      logInfo("TEST_INJECT_APPOINTMENT_WRITE_FAILURE", { contentJobId: ctx.conversationId.slice(0, 8) });
+      recordFunnelEvent(ctx.conversationId, "AppointmentFailed", { reason: "write_injected" });
+      return {
+        result: {
+          ok: false,
+          reason: "write_failed",
+          instruction:
+            "La disponibilidad pudo revisarse, pero la cita NO quedó guardada. NO digas que quedó confirmada. Explica el fallo y ofrece reintentar.",
+        },
+        state,
+        leadId,
+      };
+    }
     const existing = latestAppointment(leadId);
     if (existing && ["REQUESTED", "PROPOSED", "CONFIRMED", "RESCHEDULED"].includes(existing.status)) {
       const moved = rescheduleAppointment(existing.appointment_id, date, time);
@@ -566,6 +610,53 @@ export async function executeConciergeTool(
     setAppointmentStatus(state.appointmentId, "CANCELLED");
     if (!isConciergeDryRun()) await notifyAppointmentEvent(state.appointmentId, "CANCELLED");
     return { result: { ok: true, appointmentId: state.appointmentId, status: "CANCELLED" }, state, leadId };
+  }
+
+  if (name === "get_customer_context") {
+    const requestedPhone = asString(args.phone) || state.phone;
+    const assessed = classifyPhone(requestedPhone);
+    if (assessed.status !== "VALID") {
+      return { result: { ok: false, reason: "need_valid_phone" }, state, leadId };
+    }
+    if (state.contactStatus === "VALID" && state.phone) {
+      const stateDigits = classifyPhone(state.phone).digits;
+      if (stateDigits && assessed.digits && stateDigits !== assessed.digits) {
+        logInfo("CUSTOMER_CONTEXT_BLOCKED_CROSS_PHONE", {
+          contentJobId: ctx.conversationId.slice(0, 8),
+          stage: "isolation",
+        });
+        return { result: { ok: false, reason: "phone_mismatch_isolation" }, state, leadId };
+      }
+    }
+    const memory = retrieveCustomerMemory({ ...state, phone: requestedPhone, contactStatus: "VALID" });
+    if (!memory) {
+      return { result: { ok: true, found: false, priorRequests: [] }, state, leadId };
+    }
+    state = {
+      ...state,
+      facts: {
+        ...(state.facts || {}),
+        retrievedCustomerContext: JSON.stringify(memory.snapshot),
+        historicalRequestIds: memory.historicalRequestIds.filter((id) => id !== state.activeLeadId).join("|"),
+      },
+    };
+    logInfo("CUSTOMER_CONTEXT_RETRIEVED", {
+      contentJobId: ctx.conversationId.slice(0, 8),
+      stage: String(memory.snapshot.customerId),
+    });
+    return {
+      result: {
+        ok: true,
+        found: true,
+        customerId: memory.snapshot.customerId,
+        generalLocation: memory.snapshot.generalLocation,
+        priorRequests: memory.snapshot.priorRequests,
+        historicalOnly: true,
+        activeRequestId: state.activeLeadId || null,
+      },
+      state,
+      leadId,
+    };
   }
 
   if (name === "escalate_human") {

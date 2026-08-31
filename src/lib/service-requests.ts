@@ -520,6 +520,12 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateRetentionWaveETable(database);
   migrateCustomerIdentityWaveFTable(database);
   migrateCopilotWaveGTable(database);
+  migrateAutonomousOperationsTable(database);
+}
+
+function migrateAutonomousOperationsTable(database: Database.Database) {
+  const { migrateAutonomousOperations } = require("@/lib/autonomous/schema") as typeof import("@/lib/autonomous/schema");
+  migrateAutonomousOperations(database);
 }
 
 function migrateCopilotWaveGTable(database: Database.Database) {

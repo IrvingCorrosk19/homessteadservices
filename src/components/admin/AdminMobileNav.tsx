@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const PRIMARY = [
   { href: "/admin", label: "Inicio", match: (path: string) => path === "/admin" },
@@ -23,11 +24,23 @@ const MORE = [
 
 export function AdminMobileNav() {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const onMore =
-    pathname.startsWith("/admin/trabajos") ||
-    pathname.startsWith("/admin/retencion") ||
-    pathname.startsWith("/admin/copilot") ||
-    pathname.startsWith("/admin/configuracion");
+    mounted &&
+    (pathname.startsWith("/admin/trabajos") ||
+      pathname.startsWith("/admin/retencion") ||
+      pathname.startsWith("/admin/copilot") ||
+      pathname.startsWith("/admin/configuracion"));
+
+  if (!mounted) {
+    return (
+      <nav
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-navy/10 bg-cream/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden"
+        aria-label="Navegación operativa móvil"
+      />
+    );
+  }
 
   return (
     <nav

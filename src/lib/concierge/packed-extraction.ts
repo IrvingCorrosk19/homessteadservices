@@ -31,6 +31,7 @@ export type PackedExtraction = {
   contactPreference?: string;
   propertyType?: string;
   units?: string;
+  affectedUnits?: string;
   symptom?: string;
   duration?: string;
   activeLeak?: string;
@@ -178,6 +179,13 @@ const KNOWN_ZONES: Array<{ re: RegExp; label: string }> = [
   { re: /\barraij[aá]n\b/i, label: "Arraiján" },
 ];
 
+const GREETING_WORD = /^(hola|buenas|buenos|hey|saludos|buen\s+d[ií]a)$/i;
+
+function isGreetingLocationCandidate(candidate: string) {
+  const trimmed = candidate.trim();
+  return !trimmed || GREETING_WORD.test(trimmed);
+}
+
 function extractLocation(text: string, state?: ConversationState) {
   const trimmed = text.trim();
   const blob = fold(trimmed);
@@ -196,7 +204,7 @@ function extractLocation(text: string, state?: ConversationState) {
   if (betterIn?.[1]) return titleCasePhrase(betterIn[1].trim());
 
   const patterns = [
-    /\b(?:estoy en|vivo en|me encuentro en|ubicad[oa] en)\s+([^\n,.;]{3,80})/i,
+    /\b(?:estoy en|vivo en|vivo por|me encuentro en|ubicad[oa] en)\s+([^\n,.;]{3,80})/i,
     /\ben\s+([^\n,.;]{3,60})\b/i,
   ];
   for (const pattern of patterns) {
@@ -204,6 +212,7 @@ function extractLocation(text: string, state?: ConversationState) {
     const candidate = match?.[1]?.trim() || "";
     if (candidate && !/\d{4}/.test(candidate) && !/^\d+$/.test(candidate)) {
       if (looksLikeScheduleLocationCandidate(candidate)) continue;
+      if (isGreetingLocationCandidate(candidate)) continue;
       if (!/^\bph\b|apartamento|apto$/i.test(candidate)) {
         return titleCasePhrase(candidate);
       }
@@ -213,7 +222,7 @@ function extractLocation(text: string, state?: ConversationState) {
   const leading = trimmed.match(
     /^\s*([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,3})\s*,\s*(?:ph|edificio|apartamento|apto)\b/i,
   );
-  if (leading?.[1]) return titleCasePhrase(leading[1]);
+  if (leading?.[1] && !isGreetingLocationCandidate(leading[1])) return titleCasePhrase(leading[1]);
 
   const awaitingLocation =
     state?.facts?.lastAskedField === "location" ||
@@ -263,8 +272,22 @@ function extractUnits(text: string) {
     /\b(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?:aires?|equipos?|splits?|minisplits?)\b/,
   );
   if (word) return WORD_NUM[word[1]] || "";
+  const tengo = blob.match(/\btengo\s+(dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\b/);
+  if (tengo && /\b(aire|equipo|split|minisplit|ac)\b/.test(blob)) {
+    return WORD_NUM[tengo[1]] || tengo[1];
+  }
   const de = blob.match(/\b(?:mantenimiento\s+)?(?:de|para)\s+(dos|tres|cuatro|cinco|\d+)\s+(?:aires?|equipos?)\b/);
   if (de) return WORD_NUM[de[1]] || de[1];
+  return "";
+}
+
+function extractAffectedUnits(text: string): string {
+  const blob = fold(text);
+  if (/\b(?:es\s+)?uno\s+solo\b|\bsolo\s+uno\b|\bun[oa]?\s+(?:est[aá]|falla|mal)\b/.test(blob)) return "1";
+  if (/\b(?:solo|solamente)\s+(\d+)\b/.test(blob)) {
+    const m = blob.match(/\b(?:solo|solamente)\s+(\d+)\b/);
+    return m?.[1] || "";
+  }
   return "";
 }
 
@@ -298,7 +321,7 @@ function extractSymptoms(text: string): { symptom: string; negated: string[] } {
   const blob = fold(text);
   const negated: string[] = [];
   const rules: Array<{ key: string; re: RegExp; label: string }> = [
-    { key: "waterLeak", re: /bota(?:ndo)?\s+agua|gotea|goteo|fuga de agua/, label: "bota agua" },
+    { key: "waterLeak", re: /bota(?:ndo)?\s+agua|gotea|goteo|fuga de agua|ca[eé]\s+agua/, label: "agua / goteo" },
     { key: "notCooling", re: /no\s+enfr[ií]a|no\s+enfria|no\s+enfria nada/, label: "no enfría" },
     { key: "notStarting", re: /no\s+enciende/, label: "no enciende" },
     { key: "noise", re: /ruido|ruidos/, label: "ruido" },
@@ -363,6 +386,13 @@ function extractBuildingFacts(text: string): {
       inferredUnitCandidate: phTrailing[2],
     };
   }
+  const elBuilding = text.match(/\ben\s+el\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,30}?)\s+(\d+[a-zA-Z]?)\b/i);
+  if (elBuilding) {
+    return {
+      building: elBuilding[1].trim(),
+      unit: elBuilding[2].replace(/\s+/g, "").toUpperCase(),
+    };
+  }
   const building =
     text.match(/\b(?:ph|edificio|residencial)\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40}?)(?:\s*,|\s*$|\s+(?:apto|apartamento|unidad))/i)?.[1]?.trim() ||
     text.match(/\ben\s+(?:el\s+)?ph\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40})/i)?.[1]?.trim() ||
@@ -401,6 +431,7 @@ export function extractPackedMessage(text: string): PackedExtraction {
     contactPreference: extractContactPreference(text),
     propertyType: extractPropertyType(text),
     units: extractUnits(text),
+    affectedUnits: extractAffectedUnits(text),
     symptom,
     duration: extractDuration(text),
     activeLeak: plumbing.activeLeak,
@@ -538,6 +569,10 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
   if (unitsVal) {
     next.facts.units = unitsVal;
     next.factConfidence = setConfidence(next.factConfidence || {}, "units", "EXPLICIT");
+  }
+  if (packed.affectedUnits) {
+    next.facts.affectedUnits = packed.affectedUnits;
+    next.factConfidence = setConfidence(next.factConfidence || {}, "affectedUnits", "EXPLICIT");
   }
   if (packed.symptom && !packed.negated.includes("notCooling") && !packed.negated.includes("waterLeak")) {
     next.facts.symptom = packed.symptom;

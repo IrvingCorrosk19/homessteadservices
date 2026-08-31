@@ -24,6 +24,10 @@ export const runtime = "nodejs";
 
 const COOKIE = "hs_cid";
 
+function conciergeE2EMode() {
+  return process.env.NODE_ENV !== "production" && /e2e-cert/i.test(process.env.DATA_DIR || "");
+}
+
 function readStoredImageContext(state: { facts?: Record<string, string> } | undefined) {
   const raw = state?.facts?.websiteImageContext;
   if (!raw) return null;
@@ -144,7 +148,7 @@ export async function POST(request: Request) {
   if (!payload) return NextResponse.json({ ok: false }, { status: 400 });
   const ip = clientIp(request);
   const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  if (countRecentByIp(hashIp(ip), since) >= 40) {
+  if (!conciergeE2EMode() && countRecentByIp(hashIp(ip), since) >= 40) {
     return NextResponse.json({ ok: false, error: "rate" }, { status: 429 });
   }
 
@@ -193,7 +197,7 @@ export async function POST(request: Request) {
   } else if (!conversationId || !getConversation(conversationId)) {
     conversationId = startConcierge(ip, payload.utm && typeof payload.utm === "object" ? payload.utm : {});
   }
-  if (countRecentMessages(conversationId, since) >= 24) {
+  if (!conciergeE2EMode() && countRecentMessages(conversationId, since) >= 24) {
     return NextResponse.json({ ok: false, error: "rate" }, { status: 429 });
   }
 

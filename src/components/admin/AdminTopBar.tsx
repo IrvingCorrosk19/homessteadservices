@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { Suspense } from "react";
 import { AdminGlobalSearch } from "@/components/admin/AdminGlobalSearch";
 import { AdminMobileNav } from "@/components/admin/AdminMobileNav";
+import { OperationsAiPanel } from "@/components/admin/OperationsAiPanel";
 
 const DESKTOP_NAV = [
   { href: "/admin", label: "Dashboard", match: (path: string) => path === "/admin" },
@@ -77,6 +79,9 @@ export function AdminTopBar() {
         </div>
       </header>
       <AdminMobileNav />
+      <Suspense fallback={null}>
+        <OperationsAiPanel />
+      </Suspense>
     </>
   );
 }

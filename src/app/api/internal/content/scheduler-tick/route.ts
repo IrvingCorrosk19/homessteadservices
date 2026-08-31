@@ -45,6 +45,17 @@ export async function POST(request: Request) {
       });
     }
     try {
+      const { runAutonomousOpsScan } = await import("@/lib/autonomous/engine");
+      const autonomous = await runAutonomousOpsScan();
+      setEngineState("last_autonomous_scan_at", new Date().toISOString());
+      void autonomous;
+    } catch (error) {
+      logError("AutomationDispatchFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+        stage: "autonomous_ops",
+      });
+    }
+    try {
       await drainAutomationOutbox(24);
     } catch (error) {
       logError("AutomationDispatchFailed", {

@@ -7,6 +7,7 @@ import {
 } from "@/lib/concierge/digital-lock-intent";
 import { homesteadDataDir } from "@/lib/service-requests";
 import { conciergeApiKey, conciergeModel } from "@/lib/concierge-flags";
+import { readVisionAnalysisDelayMs } from "@/lib/concierge/test-injection";
 import { logError, logInfo } from "@/lib/log";
 import type { ConversationState } from "@/lib/concierge-store";
 
@@ -418,6 +419,15 @@ export async function analyzeDigitalLockPhotoFromBytes(input: {
   const known = input.knownViews
     .map((item) => `${item.view}:${item.photoId}${item.sha256 ? `:${item.sha256.slice(0, 12)}` : ""}`)
     .join(", ");
+
+  const visionDelayMs = readVisionAnalysisDelayMs();
+  if (visionDelayMs > 0) {
+    logInfo("PHOTO_VISION_DELAY_INJECT", {
+      contentJobId: corr,
+      stage: String(visionDelayMs),
+    });
+    await new Promise((resolve) => setTimeout(resolve, visionDelayMs));
+  }
 
   const prompt = `Eres un inspector visual de Homestead Services (Panamá) para COMPRA/INSTALACIÓN de cerradura digital.
 Analiza UNA imagen. Primero decide si es evidencia de puerta/cerradura REAL.

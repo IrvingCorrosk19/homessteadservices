@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AdminTopBar } from "@/components/admin/AdminTopBar";
 import { NeedsAttentionBlock } from "@/components/admin/NeedsAttentionBlock";
+import { AutonomousAlertsPanel } from "@/components/admin/AutonomousAlertsPanel";
 import {
   getExecutiveSummary,
   resolveAnalyticsRange,
@@ -35,6 +36,8 @@ export default async function AdminDashboardPage({
         <section className="mt-8">
           <NeedsAttentionBlock items={attentionTop} />
         </section>
+
+        <AutonomousAlertsPanel />
 
         <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
           {[

@@ -19,6 +19,7 @@ import {
   lockSelectedSlot,
   hasRescheduleSignal,
 } from "@/lib/concierge/canonical-state";
+import { resolveOfferedSlotReference } from "@/lib/concierge/referential-resolver";
 
 /** Business TTL: offered horarios dejan de ser accionables. */
 export const OFFERED_SLOTS_TTL_MS = 45 * 60 * 1000;
@@ -205,28 +206,12 @@ export function matchOfferedSlotLabel(text: string, slots: OfferedSlot[]) {
 }
 
 export function resolveSlotFromMessage(text: string, slots: AvailabilitySlot[], preferredDate = "") {
+  const ref = resolveOfferedSlotReference(text, slots as OfferedSlot[], preferredDate);
+  if (ref.resolved) return ref.resolved;
+  if (ref.needsClarification) return null;
   const direct = matchOfferedSlotLabel(text, slots as OfferedSlot[]);
   if (direct) return direct;
   const lower = text.toLowerCase();
-  const deLas = lower.match(/la de las (\d{1,2})/);
-  if (deLas) {
-    const hour = Number(deLas[1]);
-    const match = slots.find((slot) => {
-      const h = Number(slot.time.split(":")[0]);
-      return h === hour || h === hour + 12;
-    });
-    if (match) return match;
-  }
-  const parsedTime = parseClock(text);
-  if (parsedTime) {
-    const sameDate = preferredDate
-      ? slots.filter((s) => s.date === preferredDate && s.time === parsedTime)
-      : slots.filter((s) => s.time === parsedTime);
-    if (sameDate.length === 1) return sameDate[0];
-    if (sameDate.length > 1) return sameDate[0];
-    const any = slots.find((s) => s.time === parsedTime);
-    if (any) return any;
-  }
   const meSirve = lower.match(/(?:me sirve|prefiero|el de|a las|confirmo)\s+(\d{1,2})(?:\s*(?:a\.?\s*m|p\.?\s*m|am|pm))?/);
   if (meSirve) {
     let hour = Number(meSirve[1]);

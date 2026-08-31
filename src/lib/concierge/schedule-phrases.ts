@@ -10,7 +10,14 @@ const LOCATION_CUE =
 export function isScheduleOrTimeOnlyMessage(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  if (LOCATION_CUE.test(trimmed) && !TIME_OR_DATE_SIGNAL.test(trimmed)) return false;
+  if (trimmed.length > 100) return false;
+  if (/\b\d{7,8}\b/.test(trimmed)) return false;
+  if (/\b(soy|me llamo|mi nombre es|vivo en|vivo por|estoy en)\b/i.test(trimmed)) return false;
+  if (/\b(edison\s+park|betania|el\s+dorado|san\s+francisco|bella\s+vista)\b/i.test(trimmed)) return false;
+  if (/\b(aire|fuga|gotea|pintura|plomer[ií]a|cerradura)\b/i.test(trimmed) && TIME_OR_DATE_SIGNAL.test(trimmed)) {
+    return false;
+  }
+  if (LOCATION_CUE.test(trimmed) && TIME_OR_DATE_SIGNAL.test(trimmed)) return false;
   if (REPROGRAM_APPOINTMENT_RE.test(trimmed)) {
     if (/\b(perd[oó]n|disculp)\b/i.test(trimmed) && !TIME_OR_DATE_SIGNAL.test(trimmed)) {
       return /\b(mejor|cambiar|reprogram|c[aá]mbial|mover\s+la\s+cita)\b/i.test(trimmed);
@@ -18,6 +25,7 @@ export function isScheduleOrTimeOnlyMessage(text: string): boolean {
     return true;
   }
   if (TIME_OR_DATE_SIGNAL.test(trimmed) && /\d|ma[ñn]ana|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo/i.test(trimmed)) {
+    if (LOCATION_CUE.test(trimmed)) return false;
     return true;
   }
   return false;
@@ -36,11 +44,21 @@ export function isBetterInLocationPhrase(text: string): boolean {
   return /\bmejor\s+en\s+/i.test(text) && !TIME_OR_DATE_SIGNAL.test(text);
 }
 
+/** Quality/result feedback — "quedó mejor", not a schedule change. */
+export function isQualityFeedbackNotSchedule(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/\b(qued[oó]|sal[ií]o|est[aá]|result[oó]|arregl[oó]|pint[oó])\s+mejor\b/i.test(trimmed)) return true;
+  if (/\bmejor\s+(ahora|que\s+antes|as[ií])\b/i.test(trimmed)) return true;
+  if (/\bmejor\s+a\s+las\s+(?:cuatro|tres|dos|cinco|seis|siete|ocho|nueve|diez)\s+horas?\b/i.test(trimmed)) return true;
+  return false;
+}
+
 /** True when user explicitly corrects location (not time-only "perdón, mejor a las…"). */
 export function isLocationExplicitCorrection(text: string): boolean {
   if (isScheduleOrTimeOnlyMessage(text)) return false;
   if (isBetterInLocationPhrase(text)) return true;
-  return /\b(no estoy en|me equivoqu[eé]|mejor dicho|en realidad es|realmente es|c[aá]mbialo a|c[aá]mbia a|disculpa,?\s*es|perd[oó]n,?\s*(?:es|estoy en|la zona|ubicad))/i.test(
+  return /\b(no estoy en|no\s+es\s+[^,]+,?\s*es|me equivoqu[eé]|mejor dicho|en realidad es|realmente es|c[aá]mbialo a|c[aá]mbia a|disculpa,?\s*es|perd[oó]n,?\s*(?:es|estoy en|la zona|ubicad))/i.test(
     text,
   );
 }

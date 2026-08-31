@@ -39,6 +39,46 @@ export function matchDeterministicIntent(
     return { kind: "brief" };
   }
 
+  if (/que paso hoy|que pas[oó] hoy|resumen de hoy/.test(t)) {
+    return { kind: "tool", name: "get_operations_summary", args: { range: "today" } };
+  }
+
+  if (
+    /que (tenemos|tengo|hay) (pendiente|para manana|manana)|cuantas solicitudes.*(abiert|pendiente)/.test(
+      t,
+    )
+  ) {
+    if (/manana/.test(t)) {
+      return { kind: "tool", name: "get_appointments", args: { day: "tomorrow" } };
+    }
+    return { kind: "tool", name: "get_pending_requests", args: { limit: 10 } };
+  }
+
+  if (/atrasad|sin atender.*(tiempo|horas)|mas tiempo sin/.test(t)) {
+    return { kind: "tool", name: "get_overdue_requests", args: { limit: 10 } };
+  }
+
+  if (
+    (/(la|el)\s+(primera|segunda|1)\b|cual es la primera/.test(t) || /^(esa|ese)\b/.test(t)) &&
+    ctx.lastResultSet?.items?.length
+  ) {
+    const first = ctx.lastResultSet.items[0] as { appointmentId?: string; publicId?: string };
+    if (ctx.lastResultSet.kind === "appointments" && first.appointmentId) {
+      return { kind: "tool", name: "get_appointment", args: { appointmentId: first.appointmentId } };
+    }
+    if (ctx.lastResultSet.kind === "requests" && first.publicId) {
+      return { kind: "tool", name: "get_request_detail", args: { publicId: first.publicId } };
+    }
+    if (ctx.customerId && /cliente|cuentame|historial/.test(t)) {
+      return { kind: "tool", name: "get_customer", args: { customerId: ctx.customerId } };
+    }
+  }
+
+  if (/por que.*(no avanza|atasc|stuck)/.test(t)) {
+    const id = text.match(/\b(HS-\d{4}-\d{6})\b/i)?.[1];
+    if (id) return { kind: "tool", name: "explain_request_stuck", args: { publicId: id.toUpperCase() } };
+  }
+
   if (
     /que necesita (mi )?atencion|que tengo pendiente|prioridades|atencion primero|que debo (hacer|atender)/.test(
       t,
@@ -94,7 +134,9 @@ export function matchDeterministicIntent(
 
   if (
     ctx.customerId &&
-    /(ultima cita|cu[aá]ndo.*(cita|vino)|historial|que pas[oó]|muestra(me)? (ese|el) cliente)/.test(t)
+    /(ultima cita|cu[aá]ndo.*(cita|vino)|historial|que pas[oó]|muestra(me)? (ese|el) cliente|cuentame|mas del cliente|del cliente)/.test(
+      t,
+    )
   ) {
     return { kind: "tool", name: "get_customer", args: { customerId: ctx.customerId } };
   }
@@ -270,6 +312,57 @@ export function formatToolResultForTelegram(
       `Pendientes: ${d.pendingCount} · Rescue: ${d.rescueCount}`,
       ...items.slice(0, 10).map((i) => `• ${i.publicId} ${i.name} — ${i.service}`),
     ].join("\n");
+  }
+  if (toolName === "get_operations_summary") {
+    const brief = d.brief as { pendingRequests?: number; appointmentsToday?: number } | undefined;
+    const alerts = (d.importantAlerts as Array<{ title: string; kind: string }>) || [];
+    return [
+      `Resumen operativo (${(d.range as { label?: string })?.label || "hoy"}):`,
+      `• ${d.openRequests ?? brief?.pendingRequests ?? 0} solicitudes abiertas/pendientes`,
+      `• ${d.scheduledVisits ?? brief?.appointmentsToday ?? 0} citas hoy`,
+      `• ${d.overdue ?? 0} alertas SLA/atraso`,
+      `• ${d.failedAutomations ?? 0} automatizaciones fallidas`,
+      alerts.length
+        ? `\nAtención:\n${alerts.slice(0, 5).map((a) => `• [${a.kind}] ${a.title}`).join("\n")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (toolName === "get_overdue_requests") {
+    const items = (d.items as Array<{ publicId: string; name: string; ageHours?: number }>) || [];
+    if (!items.length) return "No hay solicitudes abiertas con más de 24h.";
+    return [
+      `Solicitudes atrasadas (${d.count}):`,
+      ...items.map((i) => `• ${i.publicId} ${i.name} — ${i.ageHours ?? "?"}h`),
+    ].join("\n");
+  }
+  if (toolName === "explain_request_stuck") {
+    if (d.error === "not_found") return "No encontré esa solicitud.";
+    if (d.insufficientEvidence) return `${d.publicId}: no hay evidencia clara de bloqueo. Estado: ${d.status}.`;
+    const reasons = (d.supportedReasons as string[]) || [];
+    return [`${d.publicId} (${d.status}):`, ...reasons.map((r) => `• ${r}`)].join("\n");
+  }
+  if (toolName === "get_request_detail") {
+    if ((d as { error?: string }).error === "not_found") return "No encontré esa solicitud.";
+    return [
+      `${d.publicId} · ${d.name}`,
+      `Servicio: ${d.service} · Estado: ${d.status}`,
+      d.zone ? `Zona: ${d.zone}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (toolName === "get_appointment") {
+    if (d.error === "not_found") return "Cita no encontrada.";
+    return [
+      `Cita ${d.appointmentId}`,
+      `${d.date} ${d.startTime} · ${d.customerName || ""}`,
+      `Servicio: ${d.service || "—"} · Estado: ${d.status || "—"}`,
+      d.leadId ? `Solicitud: ${d.leadId}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
   if (d.needsConfirmation) {
     return `${d.summary}\n\n¿Confirmas?`;

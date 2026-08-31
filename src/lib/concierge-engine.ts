@@ -50,6 +50,18 @@ import {
 } from "@/lib/concierge/conversation-next-action";
 import { answerMemoryQuestion, stripFalseThankYou } from "@/lib/concierge/memory-truth";
 import {
+  answerAppointmentTimeQuestion,
+  repairSummaryAppointmentTime,
+} from "@/lib/concierge/appointment-authority";
+import { answerBookingNudge, answerOperationsQuestion } from "@/lib/concierge/operations-qa";
+import { resolveCancelReferent } from "@/lib/concierge/referential-resolver";
+import {
+  applyRetrievedMemory,
+  formatPriorServiceAcknowledgment,
+  retrieveCustomerMemory,
+} from "@/lib/concierge/customer-memory";
+import { isTestInjectionActive } from "@/lib/concierge/test-injection";
+import {
   areOfferedSlotsActive,
   buildSessionSnapshot,
   clearActiveTransactionState,
@@ -69,6 +81,11 @@ import {
   requestFolioBookingConfirm,
   requestFolioIntro,
 } from "@/lib/concierge/service-request-lifecycle";
+import { runCognitiveTurn } from "@/lib/concierge/cognitive-turn";
+import { plannerPromptBlock } from "@/lib/concierge/homestead-planner";
+import { ToolLoopGuard } from "@/lib/concierge/tool-loop-guard";
+import { isToolAllowed } from "@/lib/concierge/tool-registry";
+import { logToolRequested, logToolResult } from "@/lib/concierge/ai-observability";
 import {
   hasActiveBookedAppointment,
   rehydrateRequestFromAppointment,
@@ -159,7 +176,7 @@ const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 
 type ChatMessage = { role: string; content: string | unknown; tool_calls?: unknown; tool_call_id?: string; name?: string };
 
-function fallbackReply(message: string, state?: ConversationState) {
+function fallbackReply(message: string, state?: ConversationState, lastAssistant = "") {
   if (SAFETY_RE.test(message)) {
     return "Si hay chispas, humo, olor a gas o riesgo inmediato, aléjate y usa los servicios de emergencia. Cuando estés en un lugar seguro, dime qué ocurrió y en qué zona estás.";
   }
@@ -167,16 +184,49 @@ function fallbackReply(message: string, state?: ConversationState) {
   if (EXIT_RE.test(message)) return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
   const service = state?.primaryService || state?.service;
   const playbook = service ? getPlaybook(service) : null;
+  const hasPhone = state?.contactStatus === "VALID";
+  const hasLocation = Boolean(state?.location?.trim());
+  const hasSchedule = Boolean(state?.preferredDate && state?.preferredTime);
   if (playbook?.bookingStrategy === "PHOTO_REVIEW_FIRST") {
+    if (state?.facts?.digitalLockAbandoned === "1" || (service && service !== "locksmith")) {
+      return "Perfecto, seguimos con lo que necesitas ahora. Cuéntame un poco más para coordinar.";
+    }
     return "Sigo contigo. Si puedes, envíame una foto de la puerta y la cerradura; con eso avanzamos más rápido.";
   }
   if (playbook?.serviceId === "ac") {
+    if (hasPhone && hasLocation && hasSchedule) {
+      return "Con lo que tengo anotado puedo coordinar la visita del aire. ¿Confirmamos ese horario?";
+    }
+    if (hasPhone && hasLocation) {
+      const primary = "Gracias, ya tengo tu contacto y zona. ¿Qué día y hora te conviene para la visita?";
+      const alternate = "Si tienes un día y hora en mente, dímelo y reviso el calendario.";
+      if (lastAssistant.trim() === primary) return alternate;
+      if (lastAssistant.trim() === alternate) return primary;
+      return primary;
+    }
+    if (hasLocation) {
+      return "Entiendo. ¿Me compartes un número de teléfono para coordinar la visita del aire?";
+    }
     return "Sigo contigo con lo del aire. Cuéntame qué está pasando o, si ya lo mencionaste, dime en qué zona estás para coordinar.";
   }
   if (playbook) {
+    if (hasPhone && hasLocation) {
+      const primary = "Gracias, ya tengo lo esencial. ¿Qué día y hora te conviene para la visita?";
+      const alternate = "Para revisar el calendario, ¿qué día y hora te funcionan mejor?";
+      const tertiary = "Dime qué día y hora te convienen y reviso disponibilidad real en el calendario.";
+      if (lastAssistant.trim() === primary) return alternate;
+      if (lastAssistant.trim() === alternate) return tertiary;
+      if (lastAssistant.trim() === tertiary) return primary;
+      return primary;
+    }
     return "Sigo contigo. Lo que ya me contaste queda anotado; si me dejas tu teléfono y zona, el equipo puede darle seguimiento.";
   }
-  return "Estoy teniendo un inconveniente para continuar por aquí. Lo que ya me contaste queda anotado. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
+  const inconvenience =
+    "Estoy teniendo un inconveniente para continuar por aquí. Lo que ya me contaste queda anotado. Si me dejas tu teléfono y qué hay que revisar, nuestro equipo le da seguimiento.";
+  if (lastAssistant.trim() === inconvenience) {
+    return "Sigo aquí contigo. Cuéntame el servicio, la zona y un teléfono de contacto para ayudarte.";
+  }
+  return inconvenience;
 }
 
 function extractCasualFacts(state: ConversationState, text: string) {
@@ -191,35 +241,45 @@ function extractCasualFacts(state: ConversationState, text: string) {
 }
 
 async function completeTurn(messages: ChatMessage[]) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 28_000);
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${conciergeApiKey()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: conciergeModel(),
-        temperature: 0.5,
-        tools: CONCIERGE_TOOLS,
-        messages,
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`openai_${response.status}`);
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ id: string; function?: { name?: string; arguments?: string } }> } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    return {
-      message: data.choices?.[0]?.message || { content: "" },
-      usage: data.usage,
-    };
-  } finally {
-    clearTimeout(timer);
+  if (isTestInjectionActive("AI_PROVIDER_FAILURE") || isTestInjectionActive("TOOL_TIMEOUT")) {
+    throw new Error("openai_injected_failure");
   }
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 28_000);
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${conciergeApiKey()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: conciergeModel(),
+          temperature: 0.5,
+          tools: CONCIERGE_TOOLS,
+          messages,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`openai_${response.status}`);
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ id: string; function?: { name?: string; arguments?: string } }> } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      return {
+        message: data.choices?.[0]?.message || { content: "" },
+        usage: data.usage,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("openai_failed");
 }
 
 function chipsFrom(state: ConversationState, booked: boolean, human: boolean) {
@@ -333,6 +393,12 @@ export async function conciergeTurn(input: {
     state = extractCasualFacts(state, text);
     state = bumpStateVersion(state);
     state = rehydrateRequestFromAppointment(state);
+    let priorServiceAck = "";
+    const customerMemory = retrieveCustomerMemory(state);
+    if (customerMemory) {
+      state = applyRetrievedMemory(state, customerMemory);
+      priorServiceAck = formatPriorServiceAcknowledgment(text, state, customerMemory);
+    }
 
     const reprogramAttempt = await tryReprogramAppointment({
       conversationId: input.conversationId,
@@ -1104,6 +1170,125 @@ export async function conciergeTurn(input: {
     }
 
     const memory = answerMemoryQuestion(text, state, state.activeLeadId || conversation.leadPublicId);
+    const apptTime = answerAppointmentTimeQuestion(text, repairSummaryAppointmentTime(state));
+    const opsQa = answerOperationsQuestion(text);
+    const bookingNudge = answerBookingNudge(text, state);
+    if (/\bcancel/i.test(text)) {
+      const cancelRef = resolveCancelReferent(text, {
+        appointmentId: state.appointmentId,
+        activeLeadId: state.activeLeadId,
+      });
+      if (cancelRef.needsClarification) {
+        const cancelClarify =
+          "¿Quieres cancelar la cita programada o dejar pendiente toda la solicitud? Así lo hago correctamente.";
+        addMessage(input.conversationId, "assistant", cancelClarify);
+        touchConversation(input.conversationId, { state });
+        const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+        return {
+          ok: true as const,
+          reply: cancelClarify,
+          chips: session.chips,
+          historicalChips: session.historicalChips,
+          leadBanner: session.leadBanner,
+          requestCard: session.requestCard,
+          leadId: state.activeLeadId || conversation.leadPublicId || null,
+          nextAction: "CONTINUE",
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: session.awaitingSlotSelection,
+          bookingPending: session.bookingPending,
+          slotGroups: session.slotGroups,
+          serviceContext: session.serviceContext,
+          showResumeBooking: session.showResumeBooking,
+          showPhotoCta: session.showPhotoCta,
+          photosRemaining: session.photosRemaining,
+        };
+      }
+    }
+    if (apptTime.handled) {
+      addMessage(input.conversationId, "assistant", apptTime.reply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+      return {
+        ok: true as const,
+        reply: apptTime.reply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
+        nextAction: "CONTINUE",
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+    if (opsQa.handled) {
+      addMessage(input.conversationId, "assistant", opsQa.reply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+      return {
+        ok: true as const,
+        reply: opsQa.reply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
+        nextAction: "CONTINUE",
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+    if (bookingNudge.handled) {
+      addMessage(input.conversationId, "assistant", bookingNudge.reply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+      return {
+        ok: true as const,
+        reply: bookingNudge.reply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
+        nextAction: "CONTINUE",
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
     if (memory.handled) {
       addMessage(input.conversationId, "assistant", memory.reply);
       touchConversation(input.conversationId, { state });
@@ -1191,6 +1376,18 @@ export async function conciergeTurn(input: {
           bookingIntent: state.bookingIntent,
           offered: state.offeredSlots?.length || 0,
         });
+        const cognitive = runCognitiveTurn({
+          conversationId: input.conversationId,
+          text,
+          state,
+          transition,
+          nextDecision,
+          hasCalendarResult: Boolean(availabilityHint),
+          bookedThisTurn: ctx.bookedThisTurn,
+        });
+        state = cognitive.state;
+        const plannerBlock = plannerPromptBlock(cognitive.plan);
+        const toolGuard = new ToolLoopGuard();
         const history = recentMessages(input.conversationId, 10);
         const interruptionBlock = route.isInterruption
           ? [{
@@ -1244,7 +1441,7 @@ export async function conciergeTurn(input: {
               nextAction: nextDecision.action,
               requiredMissing: nextDecision.requiredMissing,
               locationSufficient: nextDecision.locationSufficient,
-            })}\n${readinessPromptHint(nextDecision.readiness)}\nNEXT_ACTION_ENGINE: action=${nextDecision.action}; reason=${nextDecision.reason}; askField=${nextDecision.askField || "none"}; requiredMissing=[${nextDecision.requiredMissing.join(", ") || "none"}]. Solo puedes solicitar campos en requiredMissing. Si action=CONFIRM_OR_BOOK debes llamar create_appointment ahora. PROHIBIDO inventar referencia/dirección/detalle adicional.`,
+            })}\n${readinessPromptHint(nextDecision.readiness)}\n${plannerBlock}\nNEXT_ACTION_ENGINE: action=${nextDecision.action}; reason=${nextDecision.reason}; askField=${nextDecision.askField || "none"}; requiredMissing=[${nextDecision.requiredMissing.join(", ") || "none"}]. Solo puedes solicitar campos en requiredMissing. Si action=CONFIRM_OR_BOOK debes llamar create_appointment ahora. PROHIBIDO inventar referencia/dirección/detalle adicional.`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
@@ -1267,13 +1464,47 @@ export async function conciergeTurn(input: {
             tool_calls: toolCalls,
           });
           for (const call of toolCalls) {
+            const toolName = call.function?.name || "";
+            const loopCheck = toolGuard.canCall(toolName);
+            if (!loopCheck.ok) {
+              logToolRequested(input.conversationId, toolName, false);
+              messages.push({
+                role: "tool",
+                tool_call_id: call.id,
+                name: toolName,
+                content: JSON.stringify({ ok: false, error: loopCheck.reason }),
+              });
+              continue;
+            }
+            const explicitIntent =
+              cognitive.perception.userIntent === "REPROGRAM_APPOINTMENT" ||
+              cognitive.perception.userIntent === "CANCEL_VISIT" ||
+              cognitive.perception.userIntent === "SELECT_SLOT" ||
+              nextDecision.action === "CONFIRM_OR_BOOK";
+            if (!isToolAllowed(toolName, { explicitUserIntent: explicitIntent })) {
+              logToolRequested(input.conversationId, toolName, false);
+              messages.push({
+                role: "tool",
+                tool_call_id: call.id,
+                name: toolName,
+                content: JSON.stringify({ ok: false, error: "tool_not_allowed_without_explicit_intent" }),
+              });
+              continue;
+            }
             let args: Record<string, unknown> = {};
             try {
               args = JSON.parse(call.function?.arguments || "{}") as Record<string, unknown>;
             } catch {
               args = {};
             }
-            const executed = await executeConciergeTool(call.function?.name || "", args, ctx);
+            logToolRequested(input.conversationId, toolName, true);
+            toolGuard.record(toolName);
+            const executed = await executeConciergeTool(toolName, args, ctx);
+            logToolResult(
+              input.conversationId,
+              toolName,
+              Boolean(executed.result && typeof executed.result === "object" && (executed.result as { ok?: boolean }).ok !== false),
+            );
             ctx.state = executed.state;
             ctx.leadId = executed.leadId;
             state = executed.state;
@@ -1299,7 +1530,12 @@ export async function conciergeTurn(input: {
       reply = "Ese número no me quedó claro. ¿Me lo envías con todos los dígitos?";
     }
 
-    if (!reply) reply = fallbackReply(text, state);
+    if (!reply) {
+      const recentHistory = recentMessages(input.conversationId, 10);
+      const lastAssistant =
+        [...recentHistory].reverse().find((item) => item.role === "assistant")?.body?.trim() || "";
+      reply = fallbackReply(text, state, lastAssistant);
+    }
 
     if (SAFETY_RE.test(text) && !/emergencia|aleja|911|bomberos/.test(reply.toLowerCase())) {
       reply = fallbackReply(text, state);
@@ -1522,6 +1758,12 @@ export async function conciergeTurn(input: {
 
     if (isAvailabilityOfferText(reply) && !calendarQueriedThisTurn) {
       state = setPendingAvailabilityAction(state);
+    }
+
+    if (priorServiceAck && reply && !/anteriormente/i.test(reply)) {
+      reply = `${priorServiceAck} ${reply}`.trim();
+    } else if (priorServiceAck && !reply) {
+      reply = priorServiceAck;
     }
 
     touchConversation(input.conversationId, {

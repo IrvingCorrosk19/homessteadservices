@@ -103,6 +103,20 @@ export function applyFactPatch(facts: Record<string, string>, patch: Record<stri
 
 export function applyLocationCorrection(text: string, current: string) {
   if (isScheduleOrTimeOnlyMessage(text)) return current;
+  const moved = text.match(
+    /\b(?:ya no vivo(?:\s+all[ií])?|ahora (?:estoy|vivo) en)\s*,?\s*([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
+  );
+  if (moved?.[1]) {
+    const candidate = moved[1].trim();
+    if (!looksLikeScheduleLocationCandidate(candidate)) return candidate;
+  }
+  const notIs = text.match(
+    /\bno\s+es\s+[^,;.]+,?\s*es\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
+  );
+  if (notIs?.[1]) {
+    const candidate = notIs[1].trim();
+    if (!looksLikeScheduleLocationCandidate(candidate)) return candidate;
+  }
   const match = text.match(
     /(?:perd[oó]n[,.]?|mejor dicho|me equivoqu[eé][,.]?|no[,.]?\s*estoy en|no[,.]?\s*es|disculpa[,.]?)\s*(?:es\s+|estoy en\s+)?([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );

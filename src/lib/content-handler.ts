@@ -168,6 +168,23 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     }
     const operator = gate.operator!;
     await answerCallback(callback.id);
+    if (callback.data.startsWith("auto:ack:")) {
+      const { consumeActionToken } = await import("@/lib/autonomous/action-tokens");
+      const token = callback.data.slice("auto:ack:".length);
+      const result = consumeActionToken(token, "acknowledge");
+      if (!result.ok) {
+        await sendTelegramMessage({
+          chatId,
+          text:
+            result.reason === "stale"
+              ? "Esta alerta ya cambió. Revisa el Centro de Operaciones."
+              : "Acción no disponible.",
+        });
+        return { ok: true };
+      }
+      await sendTelegramMessage({ chatId, text: "✅ Alerta marcada como vista." });
+      return { ok: true };
+    }
     if (callback.data.startsWith("cc:")) {
       const { applyCommandCenterCallback } = await import("@/lib/ops-telegram");
       await applyCommandCenterCallback(callback.data, chatId, callback.message?.message_id, operator);

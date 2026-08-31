@@ -170,7 +170,18 @@ export function readinessPromptHint(readiness: AppointmentReadiness) {
   return `APPOINTMENT_READINESS: ready=false. Falta SOLO: ${readiness.missingFields.map((f) => labels[f]).join("; ")}. PROHIBIDO preguntar campos que no estén en esa lista. PROHIBIDO pedir "referencia adicional", "dirección precisa" o "algún otro detalle" si no aparecen arriba. NO llames create_appointment. NO digas que la visita ya quedó agendada. Pregunta UNA cosa que falte.`;
 }
 
-export function firstMissingQuestion(readiness: AppointmentReadiness, preferField?: AppointmentMissingField | ""): string {
+const SLOT_QUESTIONS = [
+  "¿Qué día y hora te quedan mejor?",
+  "Si tienes un día y hora en mente, dímelo y reviso qué hay disponible en el calendario.",
+  "Dime qué día y hora te convienen y reviso el calendario enseguida.",
+];
+
+export function rotatingSlotQuestion(lastQuestion = ""): string {
+  const idx = SLOT_QUESTIONS.findIndex((q) => q === lastQuestion.trim());
+  return SLOT_QUESTIONS[(idx + 1 + SLOT_QUESTIONS.length) % SLOT_QUESTIONS.length];
+}
+
+export function firstMissingQuestion(readiness: AppointmentReadiness, preferField?: AppointmentMissingField | "", variant = 0): string {
   const first = preferField || readiness.missingFields[0];
   switch (first) {
     case "customer_name":
@@ -188,7 +199,7 @@ export function firstMissingQuestion(readiness: AppointmentReadiness, preferFiel
     case "service":
       return "Cuéntame un poco más qué hay que revisar en la visita.";
     case "slot":
-      return "¿Qué día y hora te quedan mejor?";
+      return rotatingSlotQuestion(variant > 0 ? SLOT_QUESTIONS[(variant - 1) % SLOT_QUESTIONS.length] : "");
     default:
       return "Me falta un dato para confirmar la visita. ¿Me ayudas con eso?";
   }

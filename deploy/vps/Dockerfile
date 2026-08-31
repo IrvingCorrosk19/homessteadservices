@@ -31,6 +31,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+RUN apk add --no-cache wget
 RUN addgroup -g 1001 -S homestead && adduser -S homestead -u 1001
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
@@ -43,4 +44,6 @@ COPY --from=deps /app/node_modules/@img ./node_modules/@img
 RUN mkdir -p /app/data/photos /app/data/content /app/.next/cache && chown -R homestead:homestead /app
 USER homestead
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 CMD ["node", "server.js"]
