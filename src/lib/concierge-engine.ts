@@ -20,6 +20,7 @@ import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
 import { whatsappHref } from "@/lib/site";
 import { logError, logInfo } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
+import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
 import { CONCIERGE_TOOLS, executeConciergeTool, mergeParsedWhen, type ToolContext } from "@/lib/concierge-tools";
 import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/concierge-intelligence";
 import { formatPanamaSlot } from "@/lib/concierge-datetime";
@@ -85,7 +86,17 @@ import { runCognitiveTurn } from "@/lib/concierge/cognitive-turn";
 import { plannerPromptBlock } from "@/lib/concierge/homestead-planner";
 import { ToolLoopGuard } from "@/lib/concierge/tool-loop-guard";
 import { isToolAllowed } from "@/lib/concierge/tool-registry";
-import { logToolRequested, logToolResult } from "@/lib/concierge/ai-observability";
+import { logNaturalTurn, logToolRequested, logToolResult, logResponseValidated } from "@/lib/concierge/ai-observability";
+import {
+  buildResponsePlan,
+  factsLearnedThisTurn,
+  responsePlanPromptBlock,
+  type ToolObservationSummary,
+} from "@/lib/concierge/response-plan";
+import { applyNaturalStyleGuard, recordOpening } from "@/lib/concierge/natural-style";
+import { repairNaturalResponse, validateNaturalResponse } from "@/lib/concierge/natural-response-validator";
+import { formatToolObservation, toolObservationMessage } from "@/lib/concierge/tool-observation";
+import { resumeAfterInterruption } from "@/lib/concierge/conversation-objective";
 import {
   hasActiveBookedAppointment,
   rehydrateRequestFromAppointment,
@@ -148,6 +159,19 @@ import {
   detectFullConversationReset,
   markActiveRequest,
 } from "@/lib/concierge/conversation-reset";
+import { detectCustomerCancellationIntent, formatMultiRequestClarification, resolveCancellationTarget } from "@/lib/concierge/cancellation-intent";
+import {
+  applyAppointmentOnlyCancelledState,
+  applyRequestCancelledConversationState,
+  ambiguousCancelTargetReply,
+  ambiguousTomorrowReply,
+  groundedAppointmentOnlyReply,
+  groundedRequestCancelReply,
+  markCancelClarification,
+  privacyDataRequestReply,
+  uncertainCancelReply,
+} from "@/lib/concierge/cancellation-conversation";
+import { cancelAppointmentOnly, cancelServiceRequest } from "@/lib/service-request-cancellation";
 import { logTurnStateTrace } from "@/lib/concierge/conversation-state-log";
 import {
   logIncompatibleResponse,
@@ -171,7 +195,8 @@ export { isConciergeDryRun, isConciergeEnabled };
 const SAFETY_RE = /chispa|humo|olor a quemado|electroc|incendio|gas(olina)?\s*(fug|olor)|inundaci[oó]n/i;
 const EXIT_RE = /\bno gracias\b|\bno,? gracias\b|deja as[ií]|no quiero que me contacten/i;
 const HUMAN_RE = /persona|humano|asesor|hablar con alguien|un t[eé]cnico/i;
-const INJECTION_RE = /ignore (all|previous)|olvida( tus)? instrucciones|system prompt|api key|act[úu]a como/i;
+const INJECTION_RE =
+  /ignore (all|previous)|olvida( tus)? instrucciones|ignora tus (reglas|instrucciones)|system prompt|api key|act[úu]a como|mu[eé]strame todas las solicitudes|todas las solicitudes de (otros|todos)|dump (the )?(db|database)/i;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 
 type ChatMessage = { role: string; content: string | unknown; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -309,12 +334,19 @@ export async function conciergeTurn(input: {
       addMessage(input.conversationId, "user", text);
     }
     addEvent(input.conversationId, "CHAT_MESSAGE");
+    const turnStartedAt = Date.now();
+    let llmToolCalls = 0;
+    let lastToolObservation: ToolObservationSummary | null = null;
+    let groundedCompanyAnswer = "";
     let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
     const stateBeforeTurn = { ...state, facts: { ...(state.facts || {}) } };
     let clearedLeadPublicId: string | undefined;
 
     if (detectFullConversationReset(text)) {
-      const reset = applyFullConversationReset(state, { conversationId: input.conversationId });
+      const reset = applyFullConversationReset(state, {
+        conversationId: input.conversationId,
+        cancelExistingHs: false,
+      });
       state = reset.state;
       clearedLeadPublicId = "";
       logTurnStateTrace({
@@ -360,6 +392,151 @@ export async function conciergeTurn(input: {
       contentJobId: input.conversationId.slice(0, 8),
       stage: input.skipUserMessage ? "photo_turn" : "text_turn",
     });
+
+    if (INJECTION_RE.test(text)) {
+      const denied = injectionDeniedReply();
+      addMessage(input.conversationId, "assistant", denied);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: denied,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "ASK_SERVICE_QUESTION",
+        leadId: null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    const cancelIntent = detectCustomerCancellationIntent(text, state);
+    if (
+      cancelIntent.kind === "DELETE_DATA_REQUEST" ||
+      cancelIntent.kind === "AMBIGUOUS_TOMORROW" ||
+      cancelIntent.kind === "AMBIGUOUS_CANCEL_TARGET" ||
+      cancelIntent.kind === "CANCEL_REQUEST" ||
+      cancelIntent.kind === "CANCEL_APPOINTMENT_ONLY"
+    ) {
+      let cancelReply = "";
+      let cancelLeadId: string | null = state.activeLeadId || conversation.leadPublicId || null;
+      if (cancelIntent.kind === "DELETE_DATA_REQUEST") {
+        cancelReply = privacyDataRequestReply();
+      } else if (cancelIntent.kind === "AMBIGUOUS_TOMORROW") {
+        state = markCancelClarification(state, "TOMORROW");
+        cancelReply = ambiguousTomorrowReply();
+      } else if (cancelIntent.kind === "AMBIGUOUS_CANCEL_TARGET") {
+        if (cancelIntent.confidence === "low") {
+          state = markCancelClarification(state, "UNCERTAIN");
+          cancelReply = uncertainCancelReply();
+        } else {
+          state = markCancelClarification(state, "TARGET");
+          cancelReply = ambiguousCancelTargetReply();
+        }
+      } else if (cancelIntent.kind === "CANCEL_REQUEST") {
+        const target = resolveCancellationTarget(cancelIntent, state, conversation.leadPublicId);
+        if (!target.ok && target.errorCode === "NEEDS_CLARIFICATION") {
+          cancelReply = formatMultiRequestClarification(target.options || []);
+        } else if (!target.ok) {
+          cancelReply = groundedRequestCancelReply({
+            success: false,
+            requestId: "",
+            previousStatus: "",
+            newStatus: "",
+            cancelledAppointmentIds: [],
+            calendarReleased: false,
+            alreadyCancelled: false,
+            auditEventId: "",
+            errorCode: target.errorCode,
+            reasonStored: "",
+            reasonCategory: "NOT_PROVIDED",
+          });
+        } else {
+          const cancelled = cancelServiceRequest({
+            requestId: target.requestId,
+            actor: "CUSTOMER_AI",
+            source: "CUSTOMER_AI",
+            reason: cancelIntent.reason,
+            reasonCategory: cancelIntent.reasonCategory,
+            conversationId: input.conversationId,
+            idempotencyKey: `service_request.cancelled:${target.requestId}`,
+            notify: true,
+          });
+          if (cancelled.success && !cancelled.alreadyCancelled) {
+            state = applyRequestCancelledConversationState(state, target.requestId);
+            cancelLeadId = null;
+            clearedLeadPublicId = "";
+          }
+          cancelReply = groundedRequestCancelReply(cancelled, {
+            explainedAsDelete: cancelIntent.explainedAsDelete,
+            hadReason: Boolean(cancelIntent.reason) && cancelIntent.reasonCategory !== "NOT_PROVIDED",
+          });
+        }
+      } else {
+        const appointmentId = state.appointmentId;
+        if (!appointmentId) {
+          cancelReply = "No veo una visita activa para cancelar. Si quieres, cancelo la solicitud.";
+        } else {
+          const ha = cancelAppointmentOnly({
+            appointmentId,
+            actor: "CUSTOMER_AI",
+            source: "CUSTOMER_AI",
+            reason: cancelIntent.reason,
+            requestId: state.activeLeadId,
+          });
+          if (ha.success) {
+            state = applyAppointmentOnlyCancelledState(state);
+            if (!isConciergeDryRun() && !ha.alreadyCancelled) {
+              await notifyAppointmentEvent(appointmentId, "CANCELLED");
+            }
+            cancelReply = groundedAppointmentOnlyReply(ha.requestId || state.activeLeadId, ha.alreadyCancelled);
+            cancelLeadId = ha.requestId || state.activeLeadId || cancelLeadId;
+          } else {
+            cancelReply =
+              "No pude cancelar la visita en este momento. Tu solicitud sigue activa mientras verificamos el problema.";
+          }
+        }
+      }
+      addMessage(input.conversationId, "assistant", cancelReply);
+      touchConversation(input.conversationId, {
+        state,
+        leadPublicId: cancelLeadId || "",
+      });
+      const session = buildSessionSnapshot(state, Date.now(), cancelLeadId || "");
+      return {
+        ok: true as const,
+        reply: cancelReply,
+        chips: [],
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        nextAction: "CONTINUE",
+        leadId: cancelLeadId,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: false,
+        photosRemaining: session.photosRemaining,
+      };
+    }
 
     // RAW MESSAGE → detect transition BEFORE merge, vision, or pending playbook replies.
     let transition = detectConversationTransition(state, text);
@@ -586,6 +763,7 @@ export async function conciergeTurn(input: {
           summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
           conversationLeadId: "",
           utm: input.utm,
+          userText: text,
         });
         if (ensured) {
           state.activeLeadId = ensured.publicId;
@@ -874,6 +1052,7 @@ export async function conciergeTurn(input: {
         summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
         conversationLeadId: state.activeLeadId || "",
         utm: input.utm,
+        userText: text,
       });
       if (ensured) {
         state = markActiveRequest(state, ensured.publicId);
@@ -1106,14 +1285,23 @@ export async function conciergeTurn(input: {
         ...(state.facts || {}),
         lastAvailabilityQuery: `${availability.requested.date}|${availability.requested.time || ""}`,
       };
+      lastToolObservation = {
+        tool: "check_availability",
+        requested: [availability.requested.date, availability.requested.time].filter(Boolean).join(" "),
+        requestedAvailable: availability.requestedAvailable,
+        alternatives: (availability.slots || []).slice(0, 4).map((s) => s.label || `${s.date} ${s.time}`),
+        ok: true,
+      };
 
-      // After affirmation/direct request/busy slot: respond with real results immediately (no LLM permission loop).
+      // After affirmation/direct request/busy slot: if OpenAI is down, speak with calendar text.
+      // If OpenAI is up, keep the observation for the model (think → observe → respond).
       if (
         (calendarDecision.affirmedPending ||
           calendarDecision.directRequest ||
           availability.requestedSlotBusy) &&
         availabilityHint &&
-        !isSlotConfirmed(state)
+        !isSlotConfirmed(state) &&
+        !conciergeApiKey()
       ) {
         addMessage(input.conversationId, "assistant", availabilityHint);
         touchConversation(input.conversationId, { state });
@@ -1208,6 +1396,16 @@ export async function conciergeTurn(input: {
         };
       }
     }
+    if (bookingNudge.handled && calendarQueriedThisTurn) {
+      bookingNudge.handled = false;
+      bookingNudge.reply = "";
+    }
+    const llmAvailable = Boolean(conciergeApiKey());
+    if (llmAvailable) {
+      if (apptTime.handled) groundedCompanyAnswer = apptTime.reply;
+      else if (opsQa.handled) groundedCompanyAnswer = opsQa.reply;
+      else if (memory.handled) groundedCompanyAnswer = memory.reply;
+    } else {
     if (apptTime.handled) {
       addMessage(input.conversationId, "assistant", apptTime.reply);
       touchConversation(input.conversationId, { state });
@@ -1236,12 +1434,13 @@ export async function conciergeTurn(input: {
       };
     }
     if (opsQa.handled) {
-      addMessage(input.conversationId, "assistant", opsQa.reply);
+      const opsReply = resumeAfterInterruption(opsQa.reply, state);
+      addMessage(input.conversationId, "assistant", opsReply);
       touchConversation(input.conversationId, { state });
       const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
       return {
         ok: true as const,
-        reply: opsQa.reply,
+        reply: opsReply,
         chips: session.chips,
         historicalChips: session.historicalChips,
         leadBanner: session.leadBanner,
@@ -1316,6 +1515,7 @@ export async function conciergeTurn(input: {
         photosRemaining: session.photosRemaining,
       };
     }
+    } // llmAvailable else — keep deterministic Q&A only when OpenAI is down
 
     if (shouldStopCommercial(text) || EXIT_RE.test(text)) {
       const reply = "Queda anotado: no te contactaremos. Si más adelante quieres retomar un servicio de Homestead, aquí estamos.";
@@ -1350,6 +1550,7 @@ export async function conciergeTurn(input: {
       state,
       leadId: state.activeLeadId || (conversation.leadPublicId && !conversation.leadPublicId.startsWith("DRY-") ? conversation.leadPublicId : ""),
       summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
+      userText: text,
       utm: conversation.utm,
       bookedThisTurn: false,
       lastSlots: areOfferedSlotsActive(state) ? [...(state.offeredSlots || [])] as AvailabilitySlot[] : [],
@@ -1382,11 +1583,21 @@ export async function conciergeTurn(input: {
           state,
           transition,
           nextDecision,
-          hasCalendarResult: Boolean(availabilityHint),
+          hasCalendarResult: Boolean(availabilityHint) || Boolean(lastToolObservation),
           bookedThisTurn: ctx.bookedThisTurn,
+          route,
         });
         state = cognitive.state;
         const plannerBlock = plannerPromptBlock(cognitive.plan);
+        const responsePlan = buildResponsePlan({
+          state,
+          perception: cognitive.perception,
+          plan: cognitive.plan,
+          nextDecision,
+          toolResult: lastToolObservation,
+          factsLearnedThisTurn: factsLearnedThisTurn(stateBeforeTurn, state),
+          groundedCompanyAnswer,
+        });
         const toolGuard = new ToolLoopGuard();
         const history = recentMessages(input.conversationId, 10);
         const interruptionBlock = route.isInterruption
@@ -1404,6 +1615,14 @@ export async function conciergeTurn(input: {
             ]
           : [];
         const digitalLockBlock = digitalLockPromptBlock(getDigitalLockChecklist(state));
+        const groundedBlock = groundedCompanyAnswer
+          ? [
+              {
+                role: "system" as const,
+                content: `GROUNDED_COMPANY_OR_MEMORY_TRUTH (no inventar; puedes parafrasear con naturalidad y retomar el objetivo): ${groundedCompanyAnswer}`,
+              },
+            ]
+          : [];
         const messages: ChatMessage[] = [
           {
             role: "system",
@@ -1414,34 +1633,28 @@ export async function conciergeTurn(input: {
           },
           ...interruptionBlock,
           ...calendarBlock,
+          ...groundedBlock,
           {
             role: "system",
-            content: `ESTADO ACTUAL (no lo preguntes de nuevo si ya está): ${JSON.stringify({
+            content: `ESTADO ACTUAL: ${JSON.stringify({
               name: state.name || null,
               phone: state.contactStatus === "VALID" ? "valid" : state.contactStatus,
-              email: state.email ? "present" : null,
               location: state.location || null,
               propertyType: state.propertyType || null,
               building: state.facts?.building || state.facts?.ph || null,
               unit: state.facts?.unit || state.facts?.apartment || null,
               service: state.primaryService || state.service || null,
-              detectedServices: state.detectedServices || [],
-              facts: state.facts || {},
-              problem: state.problem || null,
+              problem: state.problem || state.facts?.symptom || null,
               preferredDate: state.preferredDate || null,
               preferredTime: state.preferredTime || null,
               lead: ctx.leadId || null,
               appointmentId: state.appointmentId || null,
-              offeredSlots: state.offeredSlots,
+              offeredSlots: (state.offeredSlots || []).slice(0, 4),
               photos: photoCount(input.conversationId),
-              bookingStrategy: state.bookingStrategy || playbook.bookingStrategy,
-              urgency: state.urgency || "normal",
-              safety: SAFETY_RE.test(text),
-              appointmentReadiness: nextDecision.readiness,
               nextAction: nextDecision.action,
               requiredMissing: nextDecision.requiredMissing,
               locationSufficient: nextDecision.locationSufficient,
-            })}\n${readinessPromptHint(nextDecision.readiness)}\n${plannerBlock}\nNEXT_ACTION_ENGINE: action=${nextDecision.action}; reason=${nextDecision.reason}; askField=${nextDecision.askField || "none"}; requiredMissing=[${nextDecision.requiredMissing.join(", ") || "none"}]. Solo puedes solicitar campos en requiredMissing. Si action=CONFIRM_OR_BOOK debes llamar create_appointment ahora. PROHIBIDO inventar referencia/dirección/detalle adicional.`,
+            })}\n${readinessPromptHint(nextDecision.readiness)}\n${responsePlanPromptBlock(responsePlan)}\n${plannerBlock}\nSi action=CONFIRM_OR_BOOK llama create_appointment. PROHIBIDO inventar referencia/dirección extra o disponibilidad no observada.`,
           },
           ...history.map((item) => ({
             role: item.role === "assistant" ? "assistant" : "user",
@@ -1508,11 +1721,21 @@ export async function conciergeTurn(input: {
             ctx.state = executed.state;
             ctx.leadId = executed.leadId;
             state = executed.state;
+            llmToolCalls += 1;
+            const observation = formatToolObservation(toolName, executed.result);
+            lastToolObservation = {
+              tool: observation.tool,
+              requested: observation.requested,
+              requestedAvailable: observation.requestedAvailable,
+              alternatives: observation.alternatives,
+              ok: observation.ok,
+              error: observation.error,
+            };
             messages.push({
               role: "tool",
               tool_call_id: call.id,
               name: call.function?.name || "",
-              content: JSON.stringify(executed.result),
+              content: toolObservationMessage(observation),
             });
           }
         }
@@ -1582,16 +1805,23 @@ export async function conciergeTurn(input: {
       logNextAction(input.conversationId, finalDecision, { rewritten: true });
     }
 
+    const style = applyNaturalStyleGuard(reply, state, { bookedThisTurn: ctx.bookedThisTurn });
+    reply = style.reply;
+    if (style.styleFlags.length) addEvent(input.conversationId, "NATURAL_STYLE_GUARD");
+
     const repeated = detectRepeatedQuestion(reply, state);
+    let reaskPrevented = false;
     if (repeated.length) {
       addEvent(input.conversationId, "REPEATED_QUESTION");
       recordFunnelEvent(input.conversationId, "IntentDetected", { intent: "repeated_question", service: repeated.join(",") });
-      // Hard rewrite if still asking known location
       if (repeated.includes("location") && finalDecision.locationSufficient) {
         reply = finalDecision.action === "CONFIRM_OR_BOOK" || ctx.bookedThisTurn
-          ? "Perfecto. Con los datos que ya tengo confirmo la visita."
+          ? "Con los datos que ya tengo confirmo la visita."
           : finalDecision.cannedQuestion || "Con la ubicación que me diste es suficiente. Sigamos con la cita.";
         state = markOptionalDeclined(state, "no ningún detalle más");
+        reaskPrevented = true;
+      } else {
+        reaskPrevented = true;
       }
     }
 
@@ -1619,11 +1849,12 @@ export async function conciergeTurn(input: {
     reply = priced.text;
 
     if (route.priceIntent && (looksLikeAvailabilityLoop(reply) || !reply.trim())) {
-      reply = priceGuidanceReply(state, true);
+      reply = priceGuidanceReply(state, false);
+      if (areOfferedSlotsActive(state)) reply += " Cuando quieras seguimos con la cita.";
       addEvent(input.conversationId, "PRICE_INTENT_HANDLED");
     } else if (route.newNeedIntent && looksLikeAvailabilityLoop(reply)) {
       reply = newNeedReply();
-    } else if (route.bookingPauseIntent) {
+    } else if (route.bookingPauseIntent && looksLikeAvailabilityLoop(reply)) {
       reply = bookingPauseReply();
     } else if (route.socialAckIntent && looksLikeAvailabilityLoop(reply)) {
       reply = socialAckReply(state);
@@ -1634,7 +1865,7 @@ export async function conciergeTurn(input: {
     ) {
       addEvent(input.conversationId, "RESPONSE_LOOP_DETECTED");
       reply = route.priceIntent
-        ? priceGuidanceReply(state, true)
+        ? `${priceGuidanceReply(state, false)}${areOfferedSlotsActive(state) ? " Cuando quieras seguimos con la cita." : ""}`
         : route.newNeedIntent
           ? newNeedReply()
           : socialAckReply(state);
@@ -1719,6 +1950,8 @@ export async function conciergeTurn(input: {
         if (slotSelectedThisTurn && isSlotConfirmed(state)) {
           logStaleNextActionBlocked(input.conversationId, "OFFER_SLOTS_AFTER_SELECT");
           reply = formatSlotSelectionConfirmation(state);
+        } else if (calendarQueriedThisTurn && !/si quieres.*revis|puedo revisar|quieres que revise/i.test(reply)) {
+          // LLM already speaking from a real calendar observation — keep wording.
         } else {
           reply = availabilityHint || formatAvailabilityResults(state.offeredSlots || [], state.preferredDate);
         }
@@ -1743,6 +1976,28 @@ export async function conciergeTurn(input: {
           : "Claro. Si me dejas un teléfono, dejo la solicitud para que el equipo te contacte. No tengo a alguien en línea en este chat.";
       }
     }
+
+    const naturalCheck = validateNaturalResponse(reply, state, {
+      bookedThisTurn: ctx.bookedThisTurn,
+      calendarQueried: calendarQueriedThisTurn,
+      offeredSlots: state.offeredSlots,
+    });
+    logResponseValidated(input.conversationId, naturalCheck.ok, naturalCheck.reasons.join(","));
+    if (!naturalCheck.ok) {
+      reply = repairNaturalResponse(reply, state, naturalCheck);
+    }
+    state = recordOpening(state, reply);
+
+    logNaturalTurn({
+      conversationId: input.conversationId,
+      intent: route.priceIntent ? "PRICE" : route.isInterruption ? "INTERRUPTION" : "TURN",
+      goal: String(state.facts?._plannerGoal || finalDecision.action),
+      nextAction: finalDecision.action,
+      toolCalls: llmToolCalls,
+      reaskPrevented,
+      validation: naturalCheck.ok ? "pass" : naturalCheck.reasons.join(",").slice(0, 80),
+      latencyMs: Date.now() - turnStartedAt,
+    });
     const ended = Boolean(state.humanHandoffRequested && HUMAN_RE.test(text));
     state.questionsAsked = (state.questionsAsked || 0) + (countQuestions(reply) > 0 ? 1 : 0);
     if (shouldFlagOverquestioning(state, state.questionsAsked, ctx.leadId, state.appointmentId)) {

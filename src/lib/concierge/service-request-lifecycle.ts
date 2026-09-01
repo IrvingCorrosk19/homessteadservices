@@ -16,6 +16,10 @@ import { getHomesteadDb } from "@/lib/service-requests";
 import { ingestCanonicalLead, saveLeadPreference } from "@/lib/revenue-store";
 import { isTestHandoff, shouldCreateCanonicalLead } from "@/lib/concierge-handoff";
 import {
+  classifyActionableServiceIntent,
+  isNonDemandTurn,
+} from "@/lib/concierge/actionable-intent";
+import {
   hasActiveBookedAppointment,
   rehydrateRequestFromAppointment,
   resolveAuthoritativeRequestId,
@@ -30,13 +34,25 @@ export type EnsureRequestResult = {
 
 const GENERIC_NAMES = /^(cliente(\s+web)?|usuario|test|prueba)$/i;
 
-/** Valid service intent: enough to open an operational request. */
-export function hasValidServiceIntent(state: ConversationState): boolean {
-  const service = state.primaryService || state.service;
+/**
+ * Valid *actionable* service intent — enough to open an operational HS.
+ * A detected trade word or a long utterance is not sufficient.
+ * Catalog / capability / coverage / price-exploration questions must not create HS.
+ */
+export function hasValidServiceIntent(state: ConversationState, userText = ""): boolean {
+  const text = userText.trim();
+  if (text) {
+    const decision = classifyActionableServiceIntent(text, state);
+    if (decision.informationalOnly) return false;
+    if (decision.createServiceRequest) return true;
+    if (decision.actionableServiceIntent) return true;
+    if (state.activeLeadId && isNonDemandTurn(text)) return true;
+    return false;
+  }
+  if (state.activeLeadId) return true;
   const problem = (state.problem || state.facts?.need || state.facts?.what || "").trim();
-  const hasService = Boolean(service && service !== "unknown" && service !== "other" && service !== "multiple");
-  const hasProblem = problem.length >= 8;
-  return hasService || hasProblem;
+  if (!problem) return false;
+  return classifyActionableServiceIntent(problem, state).createServiceRequest;
 }
 
 function resolveService(state: ConversationState, summary: string) {
@@ -208,6 +224,7 @@ export async function ensureActiveServiceRequest(input: {
   summary: string;
   conversationLeadId?: string;
   utm?: Record<string, string>;
+  userText?: string;
 }): Promise<EnsureRequestResult | null> {
   if (!shouldCreateCanonicalLead()) return null;
 
@@ -217,7 +234,21 @@ export async function ensureActiveServiceRequest(input: {
     state = { ...state, activeLeadId: authoritative };
   }
 
-  if (!hasValidServiceIntent(state) && !hasActiveBookedAppointment(state)) return null;
+  const userText = (input.userText || "").trim();
+  const intent = userText ? classifyActionableServiceIntent(userText, state) : null;
+  if (intent?.informationalOnly && !hasActiveBookedAppointment(state)) {
+    if (authoritative || state.activeLeadId) {
+      return {
+        publicId: String(state.activeLeadId || authoritative),
+        created: false,
+        updated: false,
+        announce: false,
+      };
+    }
+    return null;
+  }
+
+  if (!hasValidServiceIntent(state, userText) && !hasActiveBookedAppointment(state)) return null;
 
   const existing = state.activeLeadId || authoritative || "";
 
@@ -242,7 +273,7 @@ export async function ensureActiveServiceRequest(input: {
     }
   }
 
-  if (!hasValidServiceIntent(state)) return null;
+  if (!hasValidServiceIntent(state, userText)) return null;
 
   const created = await createEarlyRequest({ ...input, state });
   return { publicId: created, created: true, updated: false, announce: true };

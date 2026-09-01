@@ -68,6 +68,13 @@ export const HOMESTEAD_TOOL_REGISTRY: Record<string, ToolDescriptor> = {
     idempotent: true,
     description: "Cancel active visit",
   },
+  cancel_service_request: {
+    name: "cancel_service_request",
+    risk: "HIGH_IMPACT_WRITE",
+    requiresExplicitIntent: true,
+    idempotent: true,
+    description: "Cancel HS request and linked future HA",
+  },
   escalate_human: {
     name: "escalate_human",
     risk: "LOW_RISK_WRITE",

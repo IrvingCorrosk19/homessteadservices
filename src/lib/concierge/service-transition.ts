@@ -5,13 +5,14 @@
  */
 import type { ConversationState } from "@/lib/concierge-store";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
 import {
   emptyDigitalLockChecklist,
   getDigitalLockChecklist,
   setDigitalLockChecklist,
 } from "@/lib/concierge/digital-lock-vision";
 import { logInfo } from "@/lib/log";
-import { updateRequestStatus } from "@/lib/service-requests";
+import { cancelServiceRequest } from "@/lib/service-request-cancellation";
 
 export type TransitionKind =
   | "CONTINUE_CURRENT_SERVICE"
@@ -116,11 +117,11 @@ export function detectConversationTransition(
   const switchPhrase = SWITCH_TO_RE.test(text);
   const lockActive = getDigitalLockChecklist(state).active;
 
-  const capabilityQuestion =
-    /\?/.test(text) &&
-    /\b(arreglan|hacen|ofrecen|instalan|reparan)\b/i.test(text) &&
-    !/\b(trabajan|domingo|s[aá]bado|horario|atienden)\b/i.test(text) &&
-    !/\b(tambi[eé]n\s+necesito|tambi[eé]n\s+quiero)\b/i.test(text);
+  const capabilityQuestion = (() => {
+    const intent = classifyActionableServiceIntent(text, state);
+    if (intent.informationalOnly) return true;
+    return false;
+  })();
   if (capabilityQuestion) {
     return {
       kind: "GENERAL_QUESTION",
@@ -337,7 +338,14 @@ export function applyConversationTransition(
     const oldHs = state.activeLeadId || "";
     if (opts.cancelExistingHs !== false && oldHs && !oldHs.startsWith("DRY-")) {
       try {
-        updateRequestStatus(oldHs, "CANCELLED");
+        cancelServiceRequest({
+          requestId: oldHs,
+          actor: "CUSTOMER_AI",
+          source: "CUSTOMER_AI",
+          reason: kind === "SWITCH_SERVICE" ? "Cambio de servicio" : "Servicio abandonado en conversación",
+          reasonCategory: kind === "SWITCH_SERVICE" ? "CUSTOMER_CHANGED_MIND" : "NO_LONGER_NEEDED",
+          notify: kind !== "SWITCH_SERVICE",
+        });
         logInfo("SERVICE_CANCELLED", {
           contentJobId: oldHs.slice(0, 16),
           stage: previousService || "unknown",

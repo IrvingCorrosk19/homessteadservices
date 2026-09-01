@@ -78,6 +78,20 @@ export function applyContradictionResolution(state: ConversationState, text: str
     graphChanged = true;
   }
 
+  const unitCorr = text.match(
+    /\b(?:perd[oó]n|disculp|mejor dicho|en realidad)[^.]{0,24}?(?:es\s+)?(\d+\s*[a-zA-Z]|[a-zA-Z]\s*\d+)\b/i,
+  );
+  if (unitCorr?.[1]) {
+    const unit = unitCorr[1].replace(/\s+/g, "").toUpperCase();
+    if (unit !== (next.facts.unit || next.facts.apartment || "")) {
+      next.facts.unit = unit;
+      next.facts.apartment = unit;
+      supersedeFact(graph, "unit", unit, { source: "USER_EXPLICIT" });
+      next.corrections.push(`unit:${unit}`);
+      graphChanged = true;
+    }
+  }
+
   if (graphChanged) {
     next = mergeConfirmedFacts(next, { facts: next.facts }, { explicitCorrection: true });
     next.facts._factGraph = JSON.stringify(

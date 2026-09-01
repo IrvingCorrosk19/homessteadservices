@@ -8,6 +8,7 @@ import { primaryGoal, resolveUserGoals, type UserGoal } from "@/lib/concierge/us
 import { filterAskableFields } from "@/lib/concierge/question-value-engine";
 import { buildFactGraph, serializeFactGraph } from "@/lib/concierge/fact-model";
 import { isPresent } from "@/lib/concierge/canonical-state";
+import { parseConversationObjective } from "@/lib/concierge/conversation-objective";
 
 export type PlannerToolStep = {
   tool: string;
@@ -69,17 +70,30 @@ export function planHomesteadTurn(input: {
   if (isPresent(state.facts?.symptom)) understanding += `; síntoma: ${state.facts!.symptom}`;
   if (perception.serviceCandidates.length > 1) understanding += "; múltiples servicios detectados";
 
+  const objective = parseConversationObjective(state);
+  const asking =
+    goal === "GET_ESTIMATE" ||
+    goal === "ASK_GENERAL_QUESTION" ||
+    perception.userIntent === "ASK_SERVICE_CAPABILITY" ||
+    perception.secondaryIntents.includes("ASK_PRICING") ||
+    perception.secondaryIntents.includes("ASK_GENERAL_QUESTION");
+
   let responseStrategy = "ACKNOWLEDGE";
-  if (goal === "GET_ESTIMATE" || goal === "ASK_GENERAL_QUESTION") responseStrategy = "ANSWER";
+  if (asking && (objective.interruptedGoal || objective.primaryGoal === "BOOK_VISIT" || state.primaryService)) {
+    responseStrategy = "ANSWER_THEN_RESUME";
+  } else if (goal === "GET_ESTIMATE" || goal === "ASK_GENERAL_QUESTION") responseStrategy = "ANSWER";
   else if (goal === "CHANGE_VISIT" || perception.userIntent === "REPROGRAM_APPOINTMENT") responseStrategy = "ACT";
   else if (goal === "BOOK_VISIT" && nextDecision.action === "CONFIRM_OR_BOOK") responseStrategy = "ACT";
+  else if (nextDecision.action === "ASK_IDENTITY") responseStrategy = "ASK_COMBINED";
   else if (missingCriticalInformation.length) responseStrategy = "CLARIFY";
   else if (nextDecision.action === "ASK_SLOT_SELECTION") responseStrategy = "OFFER_OPTIONS";
   else if (bookedThisTurn) responseStrategy = "CONFIRM";
 
   if (goal === "REQUEST_SERVICE" || goal === "BOOK_VISIT") {
-    recommendedActions.push("ENSURE_SERVICE_REQUEST");
-    toolPlan.push({ tool: "create_or_update_lead", purpose: "ensure HS", risk: "LOW_RISK_WRITE" });
+    if (perception.userIntent !== "ASK_SERVICE_CAPABILITY" && perception.userIntent !== "ASK_GENERAL_QUESTION") {
+      recommendedActions.push("ENSURE_SERVICE_REQUEST");
+      toolPlan.push({ tool: "create_or_update_lead", purpose: "ensure HS", risk: "LOW_RISK_WRITE" });
+    }
   }
   if (nextDecision.action === "CHECK_AVAILABILITY" || nextDecision.action === "ASK_SLOT_SELECTION") {
     recommendedActions.push("QUERY_AVAILABILITY");
@@ -95,7 +109,7 @@ export function planHomesteadTurn(input: {
   }
   if (goal === "GET_ESTIMATE") {
     recommendedActions.push("ANSWER_PRICING_POLICY");
-    responseStrategy = "ANSWER";
+    if (responseStrategy !== "ANSWER_THEN_RESUME") responseStrategy = "ANSWER";
   }
   if (perception.referencesPriorContext) {
     recommendedActions.push("RETRIEVE_CUSTOMER_HISTORY");

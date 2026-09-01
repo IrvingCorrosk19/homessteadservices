@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { getHomesteadDb } from "@/lib/service-requests";
+import { getHomesteadDb, isRequestEligibleForAppointment } from "@/lib/service-requests";
 import { classifyPhone } from "@/lib/phone";
 import {
   homesteadLeadScore,
@@ -596,6 +596,7 @@ export function createAppointment(
   status = "PROPOSED",
   extra: { notes?: string; source?: string } = {},
 ) {
+  if (!isRequestEligibleForAppointment(leadId)) return null;
   const lead = getLead(leadId);
   if (!lead) return null;
   const normalized = isAppointmentStatus(status) ? status : "PROPOSED";
@@ -755,6 +756,9 @@ export function rescheduleAppointment(
 ): RescheduleResult {
   const current = getAppointment(appointmentId);
   if (!current) return { ok: false, reason: "not_found" };
+  if (!isRequestEligibleForAppointment(current.leadId)) {
+    return { ok: false, reason: "invalid_status" };
+  }
   if (current.status === "CANCELLED" || current.status === "COMPLETED") {
     return { ok: false, reason: "invalid_status" };
   }

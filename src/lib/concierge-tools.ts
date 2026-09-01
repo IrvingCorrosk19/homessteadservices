@@ -11,6 +11,13 @@ import {
   saveLeadPreference,
   setAppointmentStatus,
 } from "@/lib/revenue-store";
+import { cancelAppointmentOnly, cancelServiceRequest } from "@/lib/service-request-cancellation";
+import { isRequestEligibleForAppointment } from "@/lib/service-requests";
+import {
+  applyAppointmentOnlyCancelledState,
+  applyRequestCancelledConversationState,
+} from "@/lib/concierge/cancellation-conversation";
+import { requestOwnedByConversation } from "@/lib/concierge/cancellation-intent";
 import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
 import { isConciergeDryRun } from "@/lib/concierge-flags";
 import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
@@ -24,6 +31,8 @@ import {
 } from "@/lib/concierge/playbook-engine";
 import { applyTurnIntelligence, parseTurnIntelligence } from "@/lib/concierge/turn-intelligence";
 import { getAppointmentReadiness, firstMissingQuestion } from "@/lib/concierge/appointment-readiness";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { hasValidServiceIntent } from "@/lib/concierge/service-request-lifecycle";
 import { logInfo } from "@/lib/log";
 import {
   activateOfferedSlots,
@@ -161,10 +170,27 @@ export const CONCIERGE_TOOLS = [
     type: "function",
     function: {
       name: "cancel_appointment",
-      description: "Cancela la cita existente si el cliente lo pide.",
+      description: "Cancela solo la visita (HA). No cancela la solicitud HS.",
       parameters: {
         type: "object",
         properties: { customerConfirmed: { type: "boolean" } },
+        required: ["customerConfirmed"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_service_request",
+      description:
+        "Cancela la solicitud HS del cliente. No inventes el folio. Usa el requestId activo de la conversación. El motivo es opcional.",
+      parameters: {
+        type: "object",
+        properties: {
+          requestId: { type: "string", description: "Folio HS-YYYY-NNNNNN de ESTA conversación" },
+          reason: { type: "string" },
+          customerConfirmed: { type: "boolean" },
+        },
         required: ["customerConfirmed"],
       },
     },
@@ -201,6 +227,7 @@ export type ToolContext = {
   state: ConversationState;
   leadId: string;
   summary: string;
+  userText?: string;
   utm: Record<string, string>;
   bookedThisTurn: boolean;
   lastSlots: AvailabilitySlot[];
@@ -345,6 +372,22 @@ export async function executeConciergeTool(
   }
 
   if (name === "create_or_update_lead") {
+    const userText = ctx.userText || ctx.summary || "";
+    const intent = classifyActionableServiceIntent(userText, state);
+    if (intent.informationalOnly && !state.activeLeadId) {
+      return {
+        result: { ok: false, reason: "no_actionable_service_intent" },
+        state,
+        leadId,
+      };
+    }
+    if (!state.activeLeadId && !hasValidServiceIntent(state, userText)) {
+      return {
+        result: { ok: false, reason: "no_actionable_service_intent" },
+        state,
+        leadId,
+      };
+    }
     const targetLead = state.activeLeadId || leadId;
     const created = await createLeadFromConcierge({
       conversationId: ctx.conversationId,
@@ -516,6 +559,17 @@ export async function executeConciergeTool(
       resolveAuthoritativeRequestId(state, leadId) ||
       state.activeLeadId ||
       leadId;
+    if (bookingLeadId && !isRequestEligibleForAppointment(bookingLeadId)) {
+      return {
+        result: {
+          ok: false,
+          reason: "request_not_bookable",
+          instruction: "La solicitud ya no admite citas. NO digas que quedó agendada.",
+        },
+        state,
+        leadId: bookingLeadId,
+      };
+    }
     if (!bookingLeadId) {
       const created = await createLeadFromConcierge({
         conversationId: ctx.conversationId,
@@ -594,6 +648,10 @@ export async function executeConciergeTool(
     const current = latestAppointment(leadId);
     const id = state.appointmentId || current?.appointment_id;
     if (!id) return { result: { ok: false, reason: "no_appointment" }, state, leadId };
+    const hs = resolveAuthoritativeRequestId(state, leadId) || leadId;
+    if (hs && !isRequestEligibleForAppointment(hs)) {
+      return { result: { ok: false, reason: "request_not_bookable" }, state, leadId };
+    }
     const moved = rescheduleAppointment(id, date, time, { actor: "concierge" });
     if (!moved.ok) return { result: { ok: false, reason: moved.reason || "reschedule_failed" }, state, leadId };
     if (!isConciergeDryRun()) {
@@ -607,9 +665,68 @@ export async function executeConciergeTool(
     if (!Boolean(args.customerConfirmed) || !state.appointmentId) {
       return { result: { ok: false, reason: "need_existing_appointment_and_confirmation" }, state, leadId };
     }
-    setAppointmentStatus(state.appointmentId, "CANCELLED");
-    if (!isConciergeDryRun()) await notifyAppointmentEvent(state.appointmentId, "CANCELLED");
-    return { result: { ok: true, appointmentId: state.appointmentId, status: "CANCELLED" }, state, leadId };
+    const cancelled = cancelAppointmentOnly({
+      appointmentId: state.appointmentId,
+      actor: "CUSTOMER_AI",
+      source: "CUSTOMER_AI",
+      requestId: state.activeLeadId || leadId,
+    });
+    if (!cancelled.success) {
+      return { result: { ok: false, reason: cancelled.errorCode || "cancel_failed" }, state, leadId };
+    }
+    if (!isConciergeDryRun() && !cancelled.alreadyCancelled) {
+      await notifyAppointmentEvent(state.appointmentId, "CANCELLED");
+    }
+    state = applyAppointmentOnlyCancelledState(state);
+    return {
+      result: {
+        ok: true,
+        appointmentId: cancelled.appointmentId,
+        status: "CANCELLED",
+        alreadyCancelled: cancelled.alreadyCancelled,
+        requestStillActive: cancelled.requestStillActive,
+      },
+      state,
+      leadId,
+    };
+  }
+
+  if (name === "cancel_service_request") {
+    if (!Boolean(args.customerConfirmed)) {
+      return { result: { ok: false, reason: "need_customer_confirmation" }, state, leadId };
+    }
+    const requested = asString(args.requestId).toUpperCase();
+    const target = requested || state.activeLeadId || leadId;
+    if (!target || !requestOwnedByConversation(target, state, leadId)) {
+      return { result: { ok: false, reason: "not_authorized" }, state, leadId };
+    }
+    const cancelled = cancelServiceRequest({
+      requestId: target,
+      actor: "CUSTOMER_AI",
+      source: "CUSTOMER_AI",
+      reason: asString(args.reason),
+      conversationId: ctx.conversationId,
+      idempotencyKey: `service_request.cancelled:${target}`,
+      notify: true,
+    });
+    if (cancelled.success && !cancelled.alreadyCancelled) {
+      state = applyRequestCancelledConversationState(state, target);
+    }
+    return {
+      result: {
+        ok: cancelled.success,
+        requestId: cancelled.requestId,
+        previousStatus: cancelled.previousStatus,
+        newStatus: cancelled.newStatus,
+        cancelledAppointmentIds: cancelled.cancelledAppointmentIds,
+        calendarReleased: cancelled.calendarReleased,
+        alreadyCancelled: cancelled.alreadyCancelled,
+        auditEventId: cancelled.auditEventId,
+        errorCode: cancelled.errorCode,
+      },
+      state,
+      leadId: cancelled.success && !cancelled.alreadyCancelled ? "" : leadId,
+    };
   }
 
   if (name === "get_customer_context") {

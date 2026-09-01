@@ -281,7 +281,16 @@ Read-only checks only; no new production HS created.
 
 ## Temporal Follow-Up
 
-**24-HOUR CHECK: PENDING TIME-BASED FOLLOW-UP** (~3h elapsed at certification; not a technical defect).
+**24-HOUR CHECK: NOT YET ELIGIBLE** (gate verified 2026-08-30 21:47 America/Panama)
+
+| Item | Value |
+|------|-------|
+| Controlled go-live (America/Panama) | 2026-08-30 21:30 |
+| Elapsed at gate check | ~0.3 hours (~17 minutes) |
+| Eligible at (America/Panama) | **2026-08-31 21:30** |
+| Eligible at (UTC) | 2026-09-01T02:30Z |
+
+Re-run `docs/RUNBOOKS/POST-GO-LIVE-24H-CHECK.md` after eligible time. Not a technical defect.
 
 ---
 

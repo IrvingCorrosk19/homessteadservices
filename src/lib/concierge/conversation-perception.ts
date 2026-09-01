@@ -12,6 +12,7 @@ import { hasRescheduleSignal } from "@/lib/concierge/canonical-state";
 import { isScheduleOrTimeOnlyMessage, isQualityFeedbackNotSchedule } from "@/lib/concierge/schedule-phrases";
 import { classifyPhone } from "@/lib/phone";
 import { isPresent } from "@/lib/concierge/canonical-state";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
 
 export type ConversationPerception = {
   userIntent: string;
@@ -60,6 +61,7 @@ export function perceiveTurn(
   const route = interpretTurnRoute(text, state);
   const services = detectServices(text);
   const primaryHint = resolvePrimaryFromMessage(text) || state.primaryService || "";
+  const actionable = classifyActionableServiceIntent(text, state);
   const secondaryIntents: string[] = [];
   let userIntent = "CONTINUE";
   let relationship: ConversationPerception["transactionRelationship"] = "CONTINUE";
@@ -67,8 +69,19 @@ export function perceiveTurn(
   if (transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE") {
     userIntent = CANCEL_RE.test(text) ? "CANCEL_VISIT" : "CHANGE_SERVICE";
     relationship = "SWITCH";
-  } else if (transition.kind === "GENERAL_QUESTION") {
-    userIntent = INFO_ONLY_RE.test(text) ? "ASK_GENERAL_QUESTION" : "ASK_SERVICE_CAPABILITY";
+  } else if (actionable.primaryIntent === "MIXED_QUESTION_AND_REQUEST") {
+    userIntent = "REQUEST_SERVICE";
+    relationship = "NEW";
+    secondaryIntents.push("ASK_SERVICE_CAPABILITY");
+  } else if (transition.kind === "GENERAL_QUESTION" || actionable.informationalOnly) {
+    if (actionable.primaryIntent === "PRICE_EXPLORATION") {
+      userIntent = "GET_ESTIMATE";
+      secondaryIntents.push("ASK_PRICING");
+    } else if (INFO_ONLY_RE.test(text) || actionable.primaryIntent === "COVERAGE_QUESTION") {
+      userIntent = "ASK_GENERAL_QUESTION";
+    } else {
+      userIntent = "ASK_SERVICE_CAPABILITY";
+    }
   } else if (transition.kind === "ADD_ANOTHER_SERVICE") {
     userIntent = "ADD_SERVICE";
     relationship = "ADD";
@@ -105,13 +118,15 @@ export function perceiveTurn(
   } else if (route.priceIntent) {
     userIntent = "GET_ESTIMATE";
     secondaryIntents.push("ASK_PRICING");
+  } else if (/\b(ya\s+no\s+quiero\s+el\s+servicio|cancela\s+mi\s+solicitud)\b/i.test(text)) {
+    userIntent = "CANCEL_REQUEST";
   } else if (CANCEL_RE.test(text)) {
     userIntent = "CANCEL_VISIT";
   } else if (STATUS_RE.test(text)) {
     userIntent = "CHECK_STATUS";
   } else if (INFO_ONLY_RE.test(text) && !services.length) {
     userIntent = "ASK_GENERAL_QUESTION";
-  } else if (services.length && !state.primaryService) {
+  } else if (services.length && !state.primaryService && actionable.createServiceRequest) {
     userIntent = "REQUEST_SERVICE";
     relationship = "NEW";
   } else if (state.bookingIntent || /\b(agendar|cita|visita|mañana|horario)\b/i.test(text)) {
@@ -119,6 +134,21 @@ export function perceiveTurn(
   } else if (services.length > 1) {
     userIntent = "MULTI_NEED";
     secondaryIntents.push("MULTI_SERVICE");
+  }
+
+  if (
+    (userIntent === "ASK_SERVICE_CAPABILITY" || userIntent === "ASK_GENERAL_QUESTION") &&
+    (state.primaryService || state.activeLeadId || state.bookingIntent)
+  ) {
+    secondaryIntents.push("CONTINUE_BOOKING");
+  }
+  if (
+    /\?/.test(text) &&
+    userIntent !== "ASK_GENERAL_QUESTION" &&
+    userIntent !== "ASK_SERVICE_CAPABILITY" &&
+    (INFO_ONLY_RE.test(text) || SERVICE_CAPABILITY_RE.test(text) || SERVICE_CAPABILITY_QUESTION_RE.test(text) || PRICE_RE.test(text))
+  ) {
+    secondaryIntents.push(PRICE_RE.test(text) ? "ASK_PRICING" : "ASK_GENERAL_QUESTION");
   }
 
   if (transition.kind === "REFINE_CURRENT_SERVICE") {

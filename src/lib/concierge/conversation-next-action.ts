@@ -20,6 +20,7 @@ import type { ConversationState } from "@/lib/concierge-store";
 export type ConciergeNextAction =
   | "ASK_NAME"
   | "ASK_PHONE"
+  | "ASK_IDENTITY"
   | "ASK_LOCATION"
   | "ASK_PROPERTY_TYPE"
   | "ASK_BUILDING"
@@ -190,6 +191,26 @@ export function determineNextAction(
   const requiredMissing = missing;
   const ready = requiredMissing.length === 0;
 
+  const nameAndPhoneMissing =
+    requiredMissing.includes("customer_name") && requiredMissing.includes("contact");
+  const locationBlocking =
+    requiredMissing.includes("location") ||
+    requiredMissing.includes("building") ||
+    requiredMissing.includes("unit");
+  if (!ready && nameAndPhoneMissing && !locationBlocking && !requiredMissing.includes("service")) {
+    return {
+      action: "ASK_IDENTITY",
+      missingFields: requiredMissing,
+      requiredMissing,
+      askField: "contact",
+      reason: "missing_name_and_phone",
+      cannedQuestion: "¿A nombre de quién la registro y qué número podemos usar para contactarte?",
+      readiness: { ...readiness, missingFields: requiredMissing, ready: false },
+      locationSufficient,
+      blockInventedAsks: true,
+    };
+  }
+
   // Exact when named by user but not yet calendar-locked → query calendar, do NOT re-ask date/time.
   if (
     ready &&
@@ -316,14 +337,15 @@ export function enforceDeterministicAsk(
     ) && decision.requiredMissing.length === 0;
 
   if ((inventingLocation || inventingVague) && decision.action === "CONFIRM_OR_BOOK") {
-    text =
-      "Perfecto, con eso ya puedo confirmar la visita. Dame un segundo para dejarla agendada.";
+    text = "Con eso ya puedo confirmar la visita. Dame un segundo para dejarla agendada.";
     rewritten = true;
   } else if ((inventingLocation || inventingVague) && decision.askField) {
     text =
-      decision.askField === "slot"
-        ? rotatingSlotQuestion(String(state.facts?.lastBotQuestion || ""))
-        : firstMissingQuestion(decision.readiness, decision.askField, state.questionsAsked || 0);
+      decision.action === "ASK_IDENTITY" && decision.cannedQuestion
+        ? decision.cannedQuestion
+        : decision.askField === "slot"
+          ? rotatingSlotQuestion(String(state.facts?.lastBotQuestion || ""))
+          : firstMissingQuestion(decision.readiness, decision.askField, state.questionsAsked || 0);
     rewritten = true;
   } else if ((inventingLocation || inventingVague) && decision.cannedQuestion) {
     text = decision.cannedQuestion;

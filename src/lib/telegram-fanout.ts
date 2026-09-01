@@ -74,3 +74,57 @@ export async function fanOutServiceRequestTelegram(data: Record<string, unknown>
   });
   return { sent, failed, skipped: false as const };
 }
+
+export async function fanOutServiceRequestCancelledTelegram(data: Record<string, unknown>) {
+  const requestId = String(data.requestId || data.correlationId || "");
+  const service = String((data.service as string) || "");
+  const reason = String((data.reason as string) || "");
+  const reasonCategory = String((data.reasonCategory as string) || "");
+  const cancelledAppointmentIds = Array.isArray(data.cancelledAppointmentIds)
+    ? data.cancelledAppointmentIds.map(String).filter(Boolean)
+    : [];
+  const motivo =
+    reason ||
+    (reasonCategory === "NOT_PROVIDED" || !reasonCategory ? "No se registró un motivo" : reasonCategory);
+  const text = [
+    "❌ SOLICITUD CANCELADA",
+    "",
+    requestId,
+    service ? `Servicio: ${service}` : "",
+    `Motivo: ${motivo.slice(0, 160)}`,
+    cancelledAppointmentIds.length
+      ? `Cita asociada: ${cancelledAppointmentIds.join(", ")} cancelada`
+      : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  if (!text.trim() || !requestId) return { sent: 0, skipped: true as const };
+
+  const chats = adminChatIds("requests");
+  if (!chats.length) return { sent: 0, skipped: true as const };
+
+  let sent = 0;
+  let failed = 0;
+  for (const chatId of chats) {
+    try {
+      const id = await sendTelegramMessage({ chatId, text });
+      if (id) {
+        sent += 1;
+        incrementTelegramMetric("telegram_delivery_success");
+      } else {
+        failed += 1;
+        incrementTelegramMetric("telegram_delivery_failure");
+      }
+    } catch {
+      failed += 1;
+      incrementTelegramMetric("telegram_delivery_failure");
+    }
+  }
+  logInfo("TelegramFanoutDelivered", {
+    correlationId: requestId,
+    stage: "service_request.cancelled",
+    attempt: sent,
+    contentJobId: failed ? `fail:${failed}` : undefined,
+  });
+  return { sent, failed, skipped: false as const };
+}

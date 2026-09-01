@@ -1,6 +1,7 @@
 import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
 import { formatPanamaSlot } from "@/lib/concierge-datetime";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
 import { areOfferedSlotsActive, resolveSlotFromMessage } from "@/lib/concierge-transaction";
 
 export type TurnRoute = {
@@ -56,7 +57,8 @@ export function interpretTurnRoute(text: string, state: ConversationState): Turn
   const bookingPauseIntent = BOOKING_PAUSE.test(text);
   const newNeedIntent = NEW_NEED.test(text);
   const humanHandoffIntent = HUMAN.test(text);
-  const serviceQuestionIntent = SERVICE_Q.test(text);
+  const serviceQuestionIntent =
+    SERVICE_Q.test(text) || classifyActionableServiceIntent(text, state).informationalOnly;
   const socialAckIntent = isSocialAck(text);
   const photoIntent = PHOTO.test(text);
   const resumeBookingIntent = RESUME.test(text) && areOfferedSlotsActive(state);

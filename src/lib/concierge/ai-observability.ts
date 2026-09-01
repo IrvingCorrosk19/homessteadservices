@@ -46,3 +46,30 @@ export function logResponseValidated(conversationId: string, ok: boolean, reason
     phone: reason.slice(0, 80),
   });
 }
+
+export function logNaturalTurn(input: {
+  conversationId: string;
+  intent: string;
+  goal: string;
+  nextAction: string;
+  toolCalls: number;
+  reaskPrevented: boolean;
+  validation: string;
+  latencyMs: number;
+}) {
+  logInfo("NATURAL_TURN", {
+    contentJobId: input.conversationId.slice(0, 8),
+    stage: input.nextAction.slice(0, 40),
+    phone: [
+      input.intent,
+      input.goal,
+      `tools=${input.toolCalls}`,
+      input.reaskPrevented ? "reask_prevented" : "",
+      input.validation,
+      `${input.latencyMs}ms`,
+    ]
+      .filter(Boolean)
+      .join("|")
+      .slice(0, 180),
+  });
+}

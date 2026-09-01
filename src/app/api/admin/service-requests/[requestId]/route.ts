@@ -3,6 +3,7 @@ import { isRequestStatus, PUBLIC_ID_PATTERN } from "@/lib/admin-format";
 import { logInfo } from "@/lib/log";
 import { markEntityContacted } from "@/lib/ops-store";
 import { getRequestByPublicId, updateRequestStatus } from "@/lib/service-requests";
+import { cancelServiceRequest } from "@/lib/service-request-cancellation";
 
 type Params = { params: Promise<{ requestId: string }> };
 
@@ -23,6 +24,25 @@ export async function PATCH(request: Request, { params }: Params) {
     const updated = getRequestByPublicId(requestId);
     if (!updated) return NextResponse.json({ ok: false }, { status: 404 });
     logInfo("ServiceRequestStatusChanged", { requestId, status, via: "markEntityContacted" });
+    return NextResponse.json({ ok: true, status: updated.status, updatedAt: updated.updatedAt });
+  }
+
+  if (status === "CANCELLED") {
+    const cancelled = cancelServiceRequest({
+      requestId,
+      actor: "ADMIN",
+      source: "ADMIN",
+      notify: true,
+    });
+    if (!cancelled.success && cancelled.errorCode === "NOT_FOUND") {
+      return NextResponse.json({ ok: false }, { status: 404 });
+    }
+    if (!cancelled.success && cancelled.errorCode === "NOT_CANCELLABLE") {
+      return NextResponse.json({ ok: false, error: "not_cancellable" }, { status: 409 });
+    }
+    const updated = getRequestByPublicId(requestId);
+    if (!updated) return NextResponse.json({ ok: false }, { status: 404 });
+    logInfo("ServiceRequestStatusChanged", { requestId, status, via: "cancelServiceRequest" });
     return NextResponse.json({ ok: true, status: updated.status, updatedAt: updated.updatedAt });
   }
 

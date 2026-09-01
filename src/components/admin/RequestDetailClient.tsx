@@ -141,6 +141,20 @@ export function RequestDetailClient({
         <p className="mt-4 text-[0.72rem] uppercase tracking-[0.12em] text-mist">
           {formatPanamaDateTime(request.createdAt)}
         </p>
+        {request.status === "CANCELLED" ? (
+          <div className="mt-5 rounded-2xl border border-navy/10 bg-cream-deep p-4">
+            <p className="text-[0.72rem] uppercase tracking-[0.12em] text-mist">Cancelada</p>
+            <p className="mt-2 text-navy">
+              {request.cancelledAt ? formatPanamaDateTime(request.cancelledAt) : ""}
+              {request.cancellationSource ? ` · ${request.cancellationSource}` : ""}
+            </p>
+            <p className="mt-2 text-sm text-navy-soft">
+              {request.cancellationReason
+                ? request.cancellationReason
+                : "No se registró un motivo."}
+            </p>
+          </div>
+        ) : null}
         {whatsappUrl ? (
           <a
             href={whatsappUrl}

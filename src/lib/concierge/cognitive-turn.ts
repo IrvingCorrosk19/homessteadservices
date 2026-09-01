@@ -9,6 +9,8 @@ import { applyContradictionResolution } from "@/lib/concierge/contradiction-engi
 import { planHomesteadTurn, type PlannerOutput } from "@/lib/concierge/homestead-planner";
 import { buildConversationSummary, persistSummaryOnState } from "@/lib/concierge/conversation-summary";
 import { logAiUnderstanding, logPlanCreated } from "@/lib/concierge/ai-observability";
+import { updateConversationObjective } from "@/lib/concierge/conversation-objective";
+import type { TurnRoute } from "@/lib/concierge-turn-routing";
 
 export type CognitiveTurnResult = {
   state: ConversationState;
@@ -24,6 +26,7 @@ export function runCognitiveTurn(input: {
   nextDecision: NextActionDecision;
   hasCalendarResult: boolean;
   bookedThisTurn: boolean;
+  route?: TurnRoute;
 }): CognitiveTurnResult {
   let state = applyContradictionResolution(input.state, input.text);
   const perception = perceiveTurn(input.text, state, input.transition);
@@ -38,6 +41,14 @@ export function runCognitiveTurn(input: {
     userText: input.text,
   });
   logPlanCreated(input.conversationId, plan);
+
+  state = updateConversationObjective({
+    state,
+    perception,
+    plan,
+    route: input.route,
+    userText: input.text,
+  });
 
   const summary = buildConversationSummary(state, plan);
   state = persistSummaryOnState(state, summary);

@@ -69,6 +69,8 @@ const LOCKSMITH: ServicePlaybook = {
     "quede afuera",
     "cerradura digital",
     "smart lock",
+    "lock digital",
+    "seradura",
     "locksmith",
   ],
   objective: "Para compra/instalación de cerradura digital: revisar frente, interior y canto con visión; para cerrajería general: fotos útiles y acceso.",
@@ -108,7 +110,10 @@ const AC: ServicePlaybook = {
     "minisplit",
     "no enfría",
     "no enfria",
+    "no da frío",
+    "no da frio",
     "bota agua",
+    "abanico",
     "condens",
     "filtro",
     "mantenimiento de aire",
@@ -137,7 +142,7 @@ const AC: ServicePlaybook = {
 const PLUMBING: ServicePlaybook = {
   serviceId: "plumbing",
   label: "Plomería",
-  aliases: ["plom", "fuga", "fregador", "tuber", "inodoro", "sanitario", "grifo", "grifer", "ducha", "cisterna", "se sale agua"],
+  aliases: ["plom", "fuga", "fregador", "fregadero", "tuber", "tubo", "gotea", "goteando", "inodoro", "sanitario", "grifo", "grifer", "ducha", "cisterna", "se sale agua"],
   objective: "Saber qué ocurre, dónde, y si el agua sigue saliendo.",
   facts: {
     what: fact("USEFUL", "Qué ocurre", "fuga, no baja, se tapa"),
@@ -203,7 +208,7 @@ const ELECTRICAL: ServicePlaybook = {
 const PAINTING: ServicePlaybook = {
   serviceId: "painting",
   label: "Pintura",
-  aliases: ["pintar", "pintura", "pintores", "brocha", "impermeabiliz"],
+  aliases: ["pintar", "pintura", "pinten", "pintan", "pintores", "brocha", "fachada", "impermeabiliz"],
   objective: "Entender interior/exterior, alcance y estado de superficie.",
   facts: {
     interiorExterior: fact("USEFUL", "Interior o exterior", ""),

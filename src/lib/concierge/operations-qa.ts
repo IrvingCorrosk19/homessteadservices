@@ -8,7 +8,7 @@ export function answerOperationsQuestion(text: string): { handled: boolean; repl
     return {
       handled: true,
       reply:
-        "El costo depende del diagnóstico en sitio. Si quieres, reviso disponibilidad para una visita y el técnico te confirma el alcance contigo.",
+        "El costo depende del diagnóstico en sitio; no hay una tarifa publicada. El técnico te confirma el alcance antes de trabajar.",
     };
   }
   if (!/\b(trabajan|atienden|domingo|s[aá]bado|festivo|horario de atenci[oó]n)\b/i.test(text)) {

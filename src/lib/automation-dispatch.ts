@@ -52,6 +52,22 @@ async function deliverOpsEvent(data: Record<string, unknown>, eventType: string)
   return { ok: false as const, cause: "unknown_event" };
 }
 
+async function deliverCancelledEvent(data: Record<string, unknown>, eventType: string) {
+  if (eventType === "service_request.cancelled") {
+    const { fanOutServiceRequestCancelledTelegram } = await import("@/lib/telegram-fanout");
+    await fanOutServiceRequestCancelledTelegram(data);
+    return { ok: true as const, cause: "telegram_fanout" };
+  }
+  if (eventType === "appointment.cancelled") {
+    const appointmentId = String(data.appointmentId || "");
+    if (!appointmentId) return { ok: true as const, cause: "no_appointment" };
+    const { notifyAppointmentEvent } = await import("@/lib/revenue-telegram");
+    await notifyAppointmentEvent(appointmentId, "CANCELLED");
+    return { ok: true as const, cause: "appointment_telegram" };
+  }
+  return { ok: false as const, cause: "unknown_cancel_event" };
+}
+
 export async function drainAutomationOutbox(limit = 8) {
   if (!isAutomationDispatchEnabled()) return { claimed: 0, delivered: 0, failed: 0 };
   const due = listDueOutbox(limit);
@@ -82,7 +98,9 @@ export async function drainAutomationOutbox(limit = 8) {
               idempotencyKey: row.idempotencyKey,
               correlationId: row.correlationId,
             })
-          : await deliverOpsEvent(envelope.data, eventType);
+          : eventType === "service_request.cancelled" || eventType === "appointment.cancelled"
+            ? await deliverCancelledEvent(envelope.data, eventType)
+            : await deliverOpsEvent(envelope.data, eventType);
       if (result.ok && eventType === "service_request.created") {
         // One business event → N Telegram deliveries. n8n keeps primary chat;
         // Homestead fans out to other eligible operators without duplicating HS/outbox.

@@ -21,6 +21,7 @@ import {
 } from "@/lib/concierge/schedule-phrases";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
 
 export type FactConfidence = "EXPLICIT" | "HIGH_CONFIDENCE" | "UNCERTAIN";
 
@@ -253,14 +254,17 @@ function extractBareQuantityReply(text: string, state: ConversationState) {
   return "";
 }
 
-/** Bare "3A" / "3 a" when bot asked for apartment/unit. */
+/** Bare "3A" / "3 a" when bot asked for apartment/unit, or explicit correction. */
 function extractBareUnitReply(text: string, state: ConversationState) {
   const awaiting =
     state.facts?.lastAskedField === "unit" ||
     /apartamento|unidad|n[uú]mero de apartamento|qu[eé] apartamento/i.test(state.facts?.lastBotQuestion || "");
-  if (!awaiting) return "";
+  const correcting = /\b(perd[oó]n|disculp|mejor dicho|en realidad)\b/i.test(text);
+  if (!awaiting && !correcting) return "";
   const trimmed = text.trim().replace(/\s+/g, "");
   if (/^(\d+[a-zA-Z]|[a-zA-Z]\d+|\d+)$/i.test(trimmed)) return trimmed.toUpperCase();
+  const embedded = text.match(/\b(?:es\s+)?(\d+\s*[a-zA-Z]|[a-zA-Z]\s*\d+)\b/i);
+  if (embedded?.[1] && (awaiting || correcting)) return embedded[1].replace(/\s+/g, "").toUpperCase();
   return "";
 }
 
@@ -399,9 +403,9 @@ function extractBuildingFacts(text: string): {
     "";
   const tower = text.match(/\btorre\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ]+)/i)?.[1] || "";
   const unit =
-    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*(\d+)\s*([A-Za-z])\b/i)?.slice(1)?.join("") ||
-    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*([A-Za-z0-9\-]+)/i)?.[1] ||
-    text.match(/\bapartamento\s+([A-Za-z0-9\-]+)/i)?.[1] ||
+    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*(?:es\s+)?(\d+)\s*([A-Za-z])\b/i)?.slice(1)?.join("") ||
+    text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*(?:es\s+)?([A-Za-z0-9\-]+)/i)?.[1] ||
+    text.match(/\bapartamento\s+(?:es\s+)?([A-Za-z0-9\-]+)/i)?.[1] ||
     "";
   const normalizedUnit = unit ? unit.replace(/\s+/g, "").toUpperCase() : "";
   return {
@@ -605,28 +609,35 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
   }
 
   const detected = detectServices(text);
+  const intent = classifyActionableServiceIntent(text, next);
   next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
   const previousPrimary = next.primaryService || next.service || "";
-  next.primaryService = choosePrimary(next.detectedServices, previousPrimary, text);
-  if (previousPrimary && next.primaryService && previousPrimary !== next.primaryService) {
-    next.facts = {
-      ...(next.facts || {}),
-      serviceRefinedFrom: previousPrimary,
-      serviceRefinedTo: next.primaryService,
-    };
+  if (!intent.informationalOnly) {
+    next.primaryService = choosePrimary(next.detectedServices, previousPrimary, text);
+    if (previousPrimary && next.primaryService && previousPrimary !== next.primaryService) {
+      next.facts = {
+        ...(next.facts || {}),
+        serviceRefinedFrom: previousPrimary,
+        serviceRefinedTo: next.primaryService,
+      };
+    }
+    if (next.primaryService) next.service = next.primaryService;
+  } else {
+    next.facts = { ...(next.facts || {}), catalogInquiry: "1" };
   }
-  if (next.primaryService) next.service = next.primaryService;
   next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
 
   const playbook = getPlaybook(next.primaryService || next.service);
   next.bookingStrategy = playbook.bookingStrategy;
-  if (detectUnknownOpportunity(text) || next.primaryService === "other") next.needsReview = true;
+  if (!intent.informationalOnly && (detectUnknownOpportunity(text) || next.primaryService === "other")) {
+    next.needsReview = true;
+  }
 
   const urgency = detectUrgency(text, playbook);
   if (urgency !== "normal" || !next.urgency) next.urgency = urgency;
-  if (/agend|cita|visita|disponib/i.test(text)) next.bookingIntent = true;
+  if (/agend|cita|visita|disponib/i.test(text) && !intent.informationalOnly) next.bookingIntent = true;
 
-  if (text.trim().length > 12 && !/^te envi[eé] una foto/i.test(text)) {
+  if (intent.createServiceRequest && text.trim().length > 8 && !/^te envi[eé] una foto/i.test(text)) {
     const intentFromMessage = resolvePrimaryFromMessage(text);
     if (intentFromMessage || !next.problem) {
       next.problem = text.trim().slice(0, 500);

@@ -41,6 +41,11 @@ export type SavedServiceRequest = {
   message: string;
   photos: SavedPhoto[];
   factsJson?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancellationReason?: string;
+  cancellationSource?: string;
+  cancellationReasonCategory?: string;
 };
 
 export type RequestMessage = {
@@ -356,7 +361,22 @@ function migrateContentStudio(database: Database.Database) {
   if (requestCols.length && !requestCols.includes("facts_json")) {
     database.exec(`ALTER TABLE service_requests ADD COLUMN facts_json TEXT NOT NULL DEFAULT ''`);
   }
+  migrateServiceRequestCancellation(database);
   migrateRevenueEngine(database);
+}
+
+function migrateServiceRequestCancellation(database: Database.Database) {
+  const columns = columnNames(database, "service_requests");
+  if (!columns.length) return;
+  const add = (name: string, ddl: string) => {
+    if (!columns.includes(name)) database.exec(`ALTER TABLE service_requests ADD COLUMN ${ddl}`);
+  };
+  add("cancelled_at", "cancelled_at TEXT");
+  add("cancelled_by", "cancelled_by TEXT NOT NULL DEFAULT ''");
+  add("cancellation_reason", "cancellation_reason TEXT NOT NULL DEFAULT ''");
+  add("cancellation_source", "cancellation_source TEXT NOT NULL DEFAULT ''");
+  add("cancellation_reason_category", "cancellation_reason_category TEXT NOT NULL DEFAULT ''");
+  add("cancellation_idempotency_key", "cancellation_idempotency_key TEXT");
 }
 
 function migrateRevenueEngine(database: Database.Database) {
@@ -1015,6 +1035,11 @@ type DbRequestRow = {
   message: string;
   photos_json: string;
   facts_json?: string;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancellation_reason?: string | null;
+  cancellation_source?: string | null;
+  cancellation_reason_category?: string | null;
   sla_first_alerted_at?: string | null;
   sla_escalated_at?: string | null;
 };
@@ -1034,6 +1059,11 @@ function mapRequest(row: DbRequestRow): SavedServiceRequest {
     message: row.message,
     photos: JSON.parse(row.photos_json) as SavedPhoto[],
     factsJson: row.facts_json || "",
+    cancelledAt: row.cancelled_at || "",
+    cancelledBy: row.cancelled_by || "",
+    cancellationReason: row.cancellation_reason || "",
+    cancellationSource: row.cancellation_source || "",
+    cancellationReasonCategory: row.cancellation_reason_category || "",
   };
 }
 
@@ -1070,7 +1100,7 @@ function insertMessage(
     );
 }
 
-const REQUEST_SELECT = `id, public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, COALESCE(facts_json,'') as facts_json`;
+const REQUEST_SELECT = `id, public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, COALESCE(facts_json,'') as facts_json, COALESCE(cancelled_at,'') as cancelled_at, COALESCE(cancelled_by,'') as cancelled_by, COALESCE(cancellation_reason,'') as cancellation_reason, COALESCE(cancellation_source,'') as cancellation_source, COALESCE(cancellation_reason_category,'') as cancellation_reason_category`;
 const REQUEST_OPS_SELECT = `${REQUEST_SELECT}, sla_first_alerted_at, sla_escalated_at`;
 
 export function getRequestByPublicId(publicId: string) {
@@ -1234,6 +1264,31 @@ export function updateRequestStatus(publicId: string, status: RequestStatus) {
     )
     .run(status, updatedAt, publicId);
   return getRequestByPublicId(publicId);
+}
+
+const BOOKABLE_REQUEST_STATUSES = new Set<RequestStatus>(["NEW", "CONTACTED", "IN_PROGRESS"]);
+
+export function isRequestEligibleForAppointment(publicId: string) {
+  if (!publicId) return false;
+  if (!PUBLIC_ID_PATTERN.test(publicId)) return true;
+  const request = getRequestByPublicId(publicId);
+  if (!request) return true;
+  return BOOKABLE_REQUEST_STATUSES.has(request.status);
+}
+
+export function listCancellableRequestsForCustomer(phone: string) {
+  const digits = toWhatsAppDigits(phone) || phone.replace(/\D/g, "");
+  const tail = digits.slice(-8);
+  if (tail.length < 8) return [] as SavedServiceRequest[];
+  const rows = getDb()
+    .prepare(
+      `SELECT ${REQUEST_SELECT} FROM service_requests
+       WHERE status NOT IN ('CANCELLED','COMPLETED')
+         AND (replace(replace(replace(phone,'+',''),' ',''),'-','') LIKE ? OR phone LIKE ?)
+       ORDER BY created_at DESC`,
+    )
+    .all(`%${tail}`, `%${tail}%`) as DbRequestRow[];
+  return rows.map(mapRequest);
 }
 
 export function repliedPublicIds() {

@@ -436,6 +436,13 @@ export function resolveStaleSignals(includeTest = false) {
 
   db.prepare(
     `UPDATE operational_signals SET status = 'RESOLVED', resolved_at = datetime('now'), updated_at = datetime('now')
+     WHERE signal_type IN ('REQUEST_WITHOUT_NEXT_STEP','CUSTOMER_WAITING','REQUEST_AGING','APPOINTMENT_UPCOMING','APPOINTMENT_TODAY','REQUIREMENT_MISSING_BEFORE_VISIT')
+       AND status NOT IN ('RESOLVED','EXPIRED','SUPERSEDED')
+       AND request_id IN (SELECT public_id FROM service_requests WHERE status = 'CANCELLED')`,
+  ).run();
+
+  db.prepare(
+    `UPDATE operational_signals SET status = 'RESOLVED', resolved_at = datetime('now'), updated_at = datetime('now')
      WHERE signal_type = 'AUTOMATION_FAILURE' AND status NOT IN ('RESOLVED','EXPIRED','SUPERSEDED')
        AND entity_id NOT IN (SELECT event_id FROM automation_outbox WHERE status = 'FAILED')`,
   ).run();

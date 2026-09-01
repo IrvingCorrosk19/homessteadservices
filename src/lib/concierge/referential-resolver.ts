@@ -98,7 +98,7 @@ export function resolveCancelReferent(
   text: string,
   state: { appointmentId?: string; activeLeadId?: string },
 ): ReferentialResolution<"appointment" | "request"> {
-  if (!/\b(cancel|cancela|anul|canc[eé]lalo)\b/i.test(text)) {
+  if (!/\b(cancel|cancela|anul|canc[eé]lalo|cansela)\b/i.test(text)) {
     return { resolved: null, ambiguous: false, needsClarification: false };
   }
   const hasAppt = Boolean(state.appointmentId);

@@ -222,7 +222,7 @@ export function questionEconomyBlock(state: ConversationState, playbook: Service
   return `ECONOMÍA DE PREGUNTAS
 Ya sabemos (NO volver a preguntar ni confirmar uno por uno): ${JSON.stringify(known)}
 Falta de verdad (REQUIRED/útil que aún bloquea avance): ${missing.join(", ") || "nada crítico"}
-${combined ? "Cerrajería con foto: puedes pedir zona y teléfono en UNA sola pregunta natural." : "Una pregunta útil por turno; combina solo si encaja naturalmente."}
+${combined ? "Cerrajería con foto: pide zona y teléfono en UNA sola pregunta natural." : "Pregunta útil ≠ un campo. Nombre+teléfono juntos si ambos faltan. No interrogues."}
 Si ya hay suficiente contexto: micro-cierre (solicitud o agenda real) — no más interrogatorio.
 PROHIBIDO preguntar "algún otro detalle", "dirección precisa" o "referencia" si location/building/unit ya están.`;
 }

@@ -33,6 +33,7 @@ const INTENT_TO_GOAL: Record<string, UserGoal> = {
   CHANGE_SERVICE: "CHANGE_SERVICE",
   ADD_SERVICE: "ADD_SERVICE",
   ASK_GENERAL_QUESTION: "ASK_GENERAL_QUESTION",
+  ASK_SERVICE_CAPABILITY: "ASK_GENERAL_QUESTION",
   MULTI_NEED: "REQUEST_SERVICE",
   CONTINUE: "CONTINUE",
 };
@@ -47,6 +48,10 @@ export function resolveUserGoals(
   goals.push(primary);
 
   if (perception.secondaryIntents.includes("ASK_PRICING")) goals.push("GET_ESTIMATE");
+  if (perception.secondaryIntents.includes("ASK_GENERAL_QUESTION") || perception.userIntent === "ASK_SERVICE_CAPABILITY") {
+    goals.push("ASK_GENERAL_QUESTION");
+  }
+  if (perception.secondaryIntents.includes("CONTINUE_BOOKING")) goals.push("BOOK_VISIT");
   if (perception.secondaryIntents.includes("MULTI_SERVICE")) goals.push("ADD_SERVICE");
   if (state.humanHandoffRequested) goals.push("COMPLAIN");
   if (/\b(eso\s+es\s+todo|eso\s+ser[ií]a\s+todo|nada\s+m[aá]s)\b/i.test(userText)) {

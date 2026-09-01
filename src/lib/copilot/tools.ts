@@ -646,6 +646,16 @@ export function executeCopilotTool(input: {
             service: req.service,
             status: req.status,
             createdAt: req.createdAt,
+            cancelledAt: req.cancelledAt || "",
+            cancellationReason: req.cancellationReason || "",
+            cancellationSource: req.cancellationSource || "",
+            cancellationReasonCategory: req.cancellationReasonCategory || "",
+            cancellationNote:
+              req.status === "CANCELLED"
+                ? req.cancellationReason
+                  ? `El cliente canceló la solicitud. Motivo: ${req.cancellationReason}`
+                  : "El cliente canceló la solicitud. No se registró un motivo."
+                : "",
             phoneLast4: maskPhone(req.phone || ""),
             zone: req.message?.match(/Zona:\s*([^\n.]+)/i)?.[1] || "",
           },

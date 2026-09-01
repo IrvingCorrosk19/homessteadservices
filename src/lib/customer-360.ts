@@ -182,6 +182,34 @@ function buildTimeline(customerId: number): TimelineEvent[] {
       status: row.status,
     });
   }
+  const cancelledRequests = db
+    .prepare(
+      `SELECT r.public_id, COALESCE(r.cancelled_at, r.updated_at) AS cancelled_at, r.service, r.cancellation_reason, r.cancellation_source, r.status
+       FROM service_requests r
+       JOIN revenue_leads l ON l.lead_id = r.public_id
+       WHERE l.customer_id = ? AND r.status = 'CANCELLED' AND COALESCE(r.cancelled_at, r.updated_at) != ''`,
+    )
+    .all(customerId) as Array<{
+    public_id: string;
+    cancelled_at: string;
+    service: string;
+    cancellation_reason: string;
+    cancellation_source: string;
+    status: string;
+  }>;
+  for (const row of cancelledRequests) {
+    const reason = (row.cancellation_reason || "").trim();
+    events.push({
+      at: row.cancelled_at,
+      type: "REQUEST_CANCELLED",
+      entityType: "HS",
+      entityId: row.public_id,
+      label: reason
+        ? `Solicitud ${row.public_id} cancelada. ${reason.slice(0, 80)}`
+        : `Solicitud ${row.public_id} cancelada.`,
+      status: row.status,
+    });
+  }
   const appts = db
     .prepare(
       `SELECT appointment_id, created_at, service, status, date, start_time
@@ -204,6 +232,16 @@ function buildTimeline(customerId: number): TimelineEvent[] {
       label: `${appointmentServiceLabel(row.service)} · ${row.date} ${row.start_time}`,
       status: row.status,
     });
+    if (row.status === "CANCELLED") {
+      events.push({
+        at: row.created_at,
+        type: "APPOINTMENT_CANCELLED",
+        entityType: "HA",
+        entityId: row.appointment_id,
+        label: `Cita ${row.appointment_id} cancelada`,
+        status: row.status,
+      });
+    }
   }
   const jobs = db
     .prepare(

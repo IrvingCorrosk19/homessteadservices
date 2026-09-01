@@ -608,14 +608,15 @@ function formatAppointmentTelegram(
   }
   if (eventType === "CANCELLED") {
     return [
-      "❌ CITA CANCELADA",
+      "📅 CITA CANCELADA",
       "",
-      `Cliente: ${appointment.customerName}`,
-      `Servicio: ${appointment.serviceLabel}`,
-      `Fecha: ${formatAppointmentDay(appointment.date)}`,
-      `Hora: ${formatAppointmentClock(appointment.startTime)}`,
-      "No se enviarán recordatorios de esta cita.",
-    ].join("\n");
+      appointment.leadId,
+      appointment.appointmentId,
+      appointment.serviceLabel ? `Servicio: ${appointment.serviceLabel}` : "",
+      "Solicitud continúa activa.",
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
   }
   if (eventType === "REMINDER") {
     const remaining = extra?.remainingMs ? formatRemaining(extra.remainingMs) : extra?.offsetLabel || "";

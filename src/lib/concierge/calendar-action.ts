@@ -160,7 +160,8 @@ export function formatAvailabilityResults(slots: OfferedSlot[], preferredDate = 
     return "Para esa fecha no tengo horarios libres en este momento. ¿Quieres que revise otro día?";
   }
   const sameDay = preferredDate ? slots.filter((s) => s.date === preferredDate) : slots;
-  const use = sameDay.length ? sameDay : slots;
+  let use = sameDay.length ? sameDay : slots;
+  if (use.length > 3) use = use.slice(0, 3);
   const labels = use.slice(0, 6).map((s) => {
     const clock = s.label.match(/\d{1,2}:\d{2}\s*(a\.\s*m\.|p\.\s*m\.)?/i)?.[0] || s.time;
     return clock;
