@@ -10,6 +10,10 @@ import {
 import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
 import { parseUtmRecord } from "@/lib/campaign-attribution";
 import { recordCampaignEvent } from "@/lib/campaign-store";
+import {
+  checklistPublicSummary,
+  validateDigitalLockFormEvidence,
+} from "@/lib/form-digital-lock-validation";
 import { getServiceRequirements, isDigitalLockEvidenceIntent } from "@/lib/service-requirements";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
