@@ -336,6 +336,9 @@ export function ConciergeWidget() {
           utm_campaign: utm.utm_campaign || "",
           utm_content: utm.utm_content || "",
           hs: utm.hs || "",
+          hs_ref: utm.hs_ref || utm.hs || "",
+          utm_medium: utm.utm_medium || "",
+          hs_test: utm.hs_test || "",
           referrer: document.referrer || "",
         },
       }),
@@ -728,13 +731,26 @@ export function ConciergeWidget() {
       style={{ bottom: `calc(1.25rem + ${keyboardPad}px)`, paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       {invite && !open && (
-        <button
-          type="button"
-          onClick={openChat}
-          className="pointer-events-auto max-w-64 rounded-2xl border border-line bg-white px-4 py-3 text-left text-sm leading-6 text-charcoal shadow-[0_18px_40px_rgba(31,51,68,0.16)] md:max-w-72"
-        >
-          Hola. Cuéntame qué está pasando en tu casa o propiedad y te ayudo a orientarlo.
-        </button>
+        <div className="pointer-events-auto relative max-w-56 rounded-xl border border-line bg-white/95 px-3 py-2.5 text-left text-xs leading-5 text-charcoal shadow-[0_10px_24px_rgba(31,51,68,0.12)]">
+          <button
+            type="button"
+            className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md text-navy-soft hover:bg-navy/5 hover:text-navy"
+            aria-label="Cerrar saludo"
+            onClick={() => {
+              sessionStorage.setItem(GREET_KEY, "1");
+              setInvite(false);
+            }}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+          <button
+            type="button"
+            onClick={openChat}
+            className="pr-6 text-left"
+          >
+            ¿Necesitas orientar un servicio? Escríbenos aquí.
+          </button>
+        </div>
       )}
 
       {lightboxSrc && (

@@ -36,11 +36,70 @@
       "typeVersion": 4,
       "position": [460, 300],
       "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json || {};\nconst httpError = Boolean(item.error);\nconst ok = item.ok === true && !httpError;\nreturn [{ json: { homesteadOk: ok, homesteadError: httpError ? String(item.error?.message || item.error || 'http_error') : (ok ? '' : (item.error && String(item.error)) || 'ok_false') } }];"
+      },
+      "id": "hs-cs-sched-norm",
+      "name": "Normalizar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.homesteadOk }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "hs-cs-sched-ok",
+      "name": "¿Homestead ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $vars.HOMESTEAD_TELEGRAM_CHAT_ID, text: 'Homestead scheduler: Homestead respondió error o ok:false. n8n NO publica en Meta. Revisa scheduler-tick.' }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "hs-cs-sched-alert",
+      "name": "Avisar fallo Homestead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1140, 420],
+      "continueOnFail": true
     }
   ],
   "connections": {
     "Cada 10 minutos": {
       "main": [[{ "node": "Homestead scheduler", "type": "main", "index": 0 }]]
+    },
+    "Homestead scheduler": {
+      "main": [[{ "node": "Normalizar respuesta", "type": "main", "index": 0 }]]
+    },
+    "Normalizar respuesta": {
+      "main": [[{ "node": "¿Homestead ok?", "type": "main", "index": 0 }]]
+    },
+    "¿Homestead ok?": {
+      "main": [
+        [],
+        [{ "node": "Avisar fallo Homestead", "type": "main", "index": 0 }]
+      ]
     }
   },
   "settings": {

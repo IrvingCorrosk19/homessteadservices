@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       logError("ContentSchedulerFailed", {
         cause: error instanceof Error ? error.name : "unknown",
       });
-      result = { ok: true, content: "failed_isolated" };
+      result = { ok: false, content: "failed_isolated" };
     }
     let reminders: { sent: number; checked?: number; minutes?: number } = { sent: 0 };
     try {

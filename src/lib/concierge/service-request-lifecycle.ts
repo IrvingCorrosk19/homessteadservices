@@ -15,6 +15,7 @@ import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/conci
 import { getHomesteadDb, getRequestByPublicId } from "@/lib/service-requests";
 import { ingestCanonicalLead, saveLeadPreference } from "@/lib/revenue-store";
 import { isTestHandoff, shouldCreateCanonicalLead } from "@/lib/concierge-handoff";
+import { parseUtmRecord } from "@/lib/campaign-attribution";
 import {
   classifyActionableServiceIntent,
   isNonDemandTurn,
@@ -186,9 +187,15 @@ async function createEarlyRequest(input: {
   const service = resolveService(input.state, input.summary);
   const payload = buildRequestPayload(input.state, input.summary, service);
   const photos = conciergePhotoBuffers(input.conversationId);
+  const parsedUtm = parseUtmRecord(input.utm);
   const saved = await persistServiceRequest({
     ...payload,
     photos,
+    campaignPublicId: parsedUtm.campaignId,
+    piecePublicId: parsedUtm.pieceId,
+    utmJson: JSON.stringify(input.utm || {}),
+    hsRef: parsedUtm.hsRef,
+    isTest: isTestHandoff(input.state, input.utm || {}),
   });
   copyConciergePhotosToRequest(input.conversationId, saved.publicId);
   ingestCanonicalLead({

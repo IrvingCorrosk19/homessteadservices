@@ -40,6 +40,9 @@ type JobRow = {
   business_priority: number | null;
   valid_until: string | null;
   source_job_id: string | null;
+  approved_version: number | null;
+  live_once: number | null;
+  campaign_public_id: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -69,6 +72,9 @@ function mapJob(row: JobRow): ContentJob {
     businessPriority: row.business_priority || 0,
     validUntil: row.valid_until ?? null,
     sourceJobId: row.source_job_id || "",
+    approvedVersion: row.approved_version ?? null,
+    liveOnce: row.live_once ? 1 : 0,
+    campaignPublicId: row.campaign_public_id || "",
   };
 }
 
@@ -188,6 +194,9 @@ export function updateJob(
     format: string;
     businessPriority: number;
     validUntil: string | null;
+    approvedVersion: number | null;
+    liveOnce: number;
+    campaignPublicId: string;
   }>,
 ) {
   const current = getJobByPublicId(publicId);
@@ -214,6 +223,9 @@ export function updateJob(
         format = ?,
         business_priority = ?,
         valid_until = ?,
+        approved_version = ?,
+        live_once = ?,
+        campaign_public_id = ?,
         updated_at = ?
        WHERE public_id = ?`,
     )
@@ -242,6 +254,9 @@ export function updateJob(
       patch.format ?? current.format,
       patch.businessPriority ?? current.businessPriority,
       patch.validUntil === undefined ? current.validUntil : patch.validUntil,
+      patch.approvedVersion === undefined ? current.approvedVersion : patch.approvedVersion,
+      patch.liveOnce === undefined ? current.liveOnce : patch.liveOnce,
+      patch.campaignPublicId ?? current.campaignPublicId,
       updatedAt,
       publicId,
     );
@@ -544,6 +559,84 @@ export function saveVersion(input: {
     );
 }
 
+export function getAssetById(id: number) {
+  const row = getHomesteadDb()
+    .prepare("SELECT * FROM content_assets WHERE id = ?")
+    .get(id) as
+    | {
+        id: number;
+        job_id: number;
+        public_id: string;
+        version: number;
+        asset_type: ContentAssetType;
+        role: ContentAssetRole;
+        stored_filename: string;
+        relative_path: string;
+        mime_type: string;
+        size: number;
+        width: number | null;
+        height: number | null;
+        sha256: string;
+        telegram_file_id: string | null;
+        created_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    publicId: row.public_id,
+    version: row.version,
+    assetType: row.asset_type,
+    role: row.role,
+    storedFilename: row.stored_filename,
+    relativePath: row.relative_path,
+    mimeType: row.mime_type,
+    size: row.size,
+    width: row.width,
+    height: row.height,
+    sha256: row.sha256,
+    telegramFileId: row.telegram_file_id,
+    createdAt: row.created_at,
+  } satisfies ContentAsset;
+}
+
+export function getContentVersion(publicId: string, version: number) {
+  const row = getHomesteadDb()
+    .prepare(
+      `SELECT * FROM content_versions WHERE public_id = ? AND version = ? ORDER BY id DESC LIMIT 1`,
+    )
+    .get(publicId, version) as
+    | {
+        id: number;
+        job_id: number;
+        public_id: string;
+        version: number;
+        kind: ContentVersion["kind"];
+        copy: string;
+        cta: string;
+        hashtags: string;
+        prompt: string;
+        privacy_note: string;
+        created_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    publicId: row.public_id,
+    version: row.version,
+    kind: row.kind,
+    copy: row.copy,
+    cta: row.cta,
+    hashtags: row.hashtags,
+    prompt: row.prompt,
+    privacyNote: row.privacy_note,
+    createdAt: row.created_at,
+  } satisfies ContentVersion;
+}
+
 export function latestVersion(publicId: string) {
   const row = getHomesteadDb()
     .prepare(
@@ -684,9 +777,24 @@ export function getContentSettings(): ContentSettings {
 }
 
 export function setContentPaused(paused: boolean) {
-  getHomesteadDb()
-    .prepare("UPDATE content_settings SET paused = ?, updated_at = ? WHERE id = 1")
-    .run(paused ? 1 : 0, new Date().toISOString());
+  const database = getHomesteadDb();
+  const now = new Date().toISOString();
+  database.prepare("UPDATE content_settings SET paused = ?, updated_at = ? WHERE id = 1").run(
+    paused ? 1 : 0,
+    now,
+  );
+  if (paused) {
+    database
+      .prepare("UPDATE content_jobs SET live_once = 0, updated_at = ? WHERE live_once != 0")
+      .run(now);
+  }
+}
+
+export function countLiveOnceJobs() {
+  const row = getHomesteadDb()
+    .prepare("SELECT COUNT(*) as n FROM content_jobs WHERE live_once != 0")
+    .get() as { n: number };
+  return row.n;
 }
 
 export function beginPublishLock(publicId: string, ms = 120_000) {
@@ -713,14 +821,51 @@ export function clearPublishLock(publicId: string) {
     .run(publicId);
 }
 
-export function findPublication(publicId: string, platform: string, dryRun: boolean) {
-  return getHomesteadDb()
-    .prepare(
-      "SELECT * FROM content_publications WHERE idempotency_key = ?",
-    )
-    .get(`${publicId}:${platform}:${dryRun ? "dry" : "live"}`) as
-    | { status: string; external_post_id: string }
+export type ContentPublicationRecord = {
+  status: string;
+  externalPostId: string;
+  permalink: string;
+  containerId: string;
+  error: string;
+  publishedAt: string | null;
+  version: number;
+};
+
+function mapPublication(row: {
+  status: string;
+  external_post_id: string;
+  permalink?: string;
+  container_id?: string;
+  error: string;
+  published_at: string | null;
+  version?: number;
+}): ContentPublicationRecord {
+  return {
+    status: row.status,
+    externalPostId: row.external_post_id,
+    permalink: row.permalink || "",
+    containerId: row.container_id || "",
+    error: row.error || "",
+    publishedAt: row.published_at,
+    version: row.version || 0,
+  };
+}
+
+export function findPublication(publicId: string, platform: string, live: boolean) {
+  const row = getHomesteadDb()
+    .prepare("SELECT * FROM content_publications WHERE idempotency_key = ?")
+    .get(`${publicId}:${platform}:${live ? "live" : "dry"}`) as
+    | {
+        status: string;
+        external_post_id: string;
+        permalink?: string;
+        container_id?: string;
+        error: string;
+        published_at: string | null;
+        version?: number;
+      }
     | undefined;
+  return row ? mapPublication(row) : undefined;
 }
 
 export function recordPublication(input: {
@@ -730,20 +875,29 @@ export function recordPublication(input: {
   status: string;
   caption: string;
   externalPostId?: string;
+  permalink?: string;
+  containerId?: string;
   error?: string;
+  version?: number;
 }) {
   const key = `${input.publicId}:${input.platform}:${input.dryRun ? "dry" : "live"}`;
   const now = new Date().toISOString();
+  const publishedAt = input.status === "PUBLISHED" || input.status === "SIMULATED" ? now : null;
   getHomesteadDb()
     .prepare(
       `INSERT INTO content_publications
-        (public_id, platform, idempotency_key, status, dry_run, external_post_id, caption, error, attempt, published_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        (public_id, platform, idempotency_key, status, dry_run, external_post_id, caption, error, attempt, published_at, created_at, permalink, container_id, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
        ON CONFLICT(idempotency_key) DO UPDATE SET
-         status = excluded.status,
+         status = CASE WHEN content_publications.status = 'PUBLISHED' AND excluded.status != 'PUBLISHED' THEN content_publications.status ELSE excluded.status END,
          error = excluded.error,
          attempt = attempt + 1,
-         published_at = excluded.published_at`,
+         published_at = COALESCE(excluded.published_at, content_publications.published_at),
+         external_post_id = CASE WHEN excluded.external_post_id != '' THEN excluded.external_post_id ELSE content_publications.external_post_id END,
+         permalink = CASE WHEN excluded.permalink != '' THEN excluded.permalink ELSE content_publications.permalink END,
+         container_id = CASE WHEN excluded.container_id != '' THEN excluded.container_id ELSE content_publications.container_id END,
+         caption = excluded.caption,
+         version = CASE WHEN excluded.version > 0 THEN excluded.version ELSE content_publications.version END`,
     )
     .run(
       input.publicId,
@@ -754,7 +908,10 @@ export function recordPublication(input: {
       input.externalPostId || "",
       input.caption,
       input.error || "",
-      input.status === "PUBLISHED" ? now : null,
+      publishedAt,
       now,
+      input.permalink || "",
+      input.containerId || "",
+      input.version || 0,
     );
 }

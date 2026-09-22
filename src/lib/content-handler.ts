@@ -50,7 +50,7 @@ import {
 } from "@/lib/marketing-engine";
 import { latestRecommendation, recordLead, hisForPublicId, markRecommendationDecision } from "@/lib/marketing-store";
 import { mapServiceCategory } from "@/lib/marketing-config";
-import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
+import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS, CONTENT_ID_PATTERN } from "@/lib/content-types";
 import { logError, logInfo } from "@/lib/log";
 import {
   buildAiCampaignBrief,
@@ -135,7 +135,8 @@ function hasContentPermission(operator: TelegramOperator, callbackData: string) 
     callbackData.includes(":approve") ||
     callbackData.includes(":reject") ||
     callbackData.includes(":slot") ||
-    callbackData.includes(":now")
+    callbackData.includes(":now") ||
+    callbackData.includes(":live")
   ) {
     return hasTelegramPermission(operator, "content.approve");
   }
@@ -207,6 +208,16 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
       return { ok: true, denied: true };
     }
+    if (callback.data.startsWith("cm:") || callback.data.startsWith("cp:")) {
+      const write = /:(ok|pause|x|img)$/.test(callback.data);
+      if (!hasTelegramPermission(operator, write ? "content.approve" : "content.read")) {
+        await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+        return { ok: true, denied: true };
+      }
+      const { handleCampaignCallback } = await import("@/lib/campaign-telegram");
+      await handleCampaignCallback(callback.data, chatId, userId);
+      return { ok: true };
+    }
     if (callback.data.startsWith("mi:")) {
       const bits = callback.data.split(":");
       const action = bits[1];
@@ -231,7 +242,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     const versionGate = assertCallbackVersion(job.publicId, parsed.version);
     if (
       !versionGate.ok &&
-      ["approve", "now", "slot", "edit", "alt", "drop", "date"].includes(parsed.action)
+      ["approve", "now", "slot", "edit", "alt", "drop", "date", "live", "liveyes"].includes(parsed.action)
     ) {
       incrementTelegramMetric("telegram_stale_callback");
       await sendTelegramMessage({
@@ -275,13 +286,95 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true };
     }
     if (parsed.action === "now") {
+      const version = parsed.version || latestVersion(job.publicId)?.version || null;
+      if (job.status === "PUBLISHED") {
+        await sendTelegramMessage({
+          chatId,
+          text: `Esta pieza ya se publicó en vivo.\n\n${job.publicId}`,
+        });
+        return { ok: true };
+      }
+      updateJob(job.publicId, {
+        approvedAt: job.approvedAt || new Date().toISOString(),
+        approvedVersion: version,
+        pendingInput: null,
+      });
       void publishJob(job.publicId, "now");
       return { ok: true };
     }
+    if (parsed.action === "live") {
+      const settings = getContentSettings();
+      await sendTelegramMessage({
+        chatId,
+        text: [
+          "Confirmación de publicación REAL",
+          "",
+          job.publicId,
+          parsed.version ? `Versión: V${parsed.version}` : "",
+          "",
+          "Esto publica SOLO esta pieza en Instagram y/o Facebook.",
+          "El resto de la cola sigue en simulación (CONTENT_DRY_RUN).",
+          settings.dryRun ? "No voy a apagar el dry-run global." : "El modo global ya es publicación real.",
+          "",
+          "Si Meta no está conectado, fallará con un mensaje claro. No lo contaré como publicado.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        keyboard: [
+          [
+            {
+              text: "CONFIRMAR EN VIVO",
+              callback_data: `cs:${job.publicId}:liveyes:v${parsed.version || latestVersion(job.publicId)?.version || 1}`,
+            },
+          ],
+          [{ text: "CANCELAR", callback_data: `cs:${job.publicId}:livecancel:v${parsed.version || 1}` }],
+        ],
+      });
+      return { ok: true };
+    }
+    if (parsed.action === "liveyes") {
+      const version = parsed.version || latestVersion(job.publicId)?.version || null;
+      const latest = latestVersion(job.publicId)?.version || null;
+      if (version && latest && version !== latest) {
+        await sendTelegramMessage({
+          chatId,
+          text: `Ese botón es de V${version}. La pieza actual es V${latest}. Aprueba de nuevo.`,
+        });
+        return { ok: true };
+      }
+      if (job.status === "PUBLISHED") {
+        await sendTelegramMessage({
+          chatId,
+          text: `Esta pieza ya se publicó en vivo.\n\n${job.publicId}`,
+        });
+        return { ok: true };
+      }
+      updateJob(job.publicId, {
+        liveOnce: 1,
+        approvedAt: job.approvedAt || new Date().toISOString(),
+        approvedVersion: version,
+        pendingInput: null,
+      });
+      await sendTelegramMessage({
+        chatId,
+        text: `Publicación real de ${job.publicId} en curso.\nNo pulses otra vez. Si una red falla, reintento solo esa.`,
+      });
+      void publishJob(job.publicId, "live");
+      return { ok: true };
+    }
+    if (parsed.action === "livecancel") {
+      await sendTelegramMessage({
+        chatId,
+        text: `Publicación en vivo cancelada.\n\n${job.publicId}\n\nSigue en simulación. No se publicó nada.`,
+      });
+      return { ok: true };
+    }
     if (parsed.action === "slot") {
+      const version = parsed.version || latestVersion(job.publicId)?.version || null;
       updateJob(job.publicId, {
         status: "SCHEDULED",
         approvedAt: new Date().toISOString(),
+        approvedVersion: version,
         pendingInput: null,
       });
       recordContentEvent(job.publicId, "CONTENT_APPROVED", "schedule");
@@ -363,6 +456,8 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
         return { ok: true };
       }
       logInfo("ContentApproved", { contentJobId: job.publicId });
+      const version = parsed.version || latestVersion(job.publicId)?.version || null;
+      updateJob(job.publicId, { approvedVersion: version });
       recordTelegramOperatorAudit({
         operator,
         action: "CONTENT_APPROVE",
@@ -470,7 +565,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   const gate = gateOperator(userId, chatId);
   if (!gate.ok) {
     logError("ContentStudioUnauthorized", { stage: "message", contentJobId: chatId.slice(0, 24) });
-    if (isOpsCommand(text) || text === "/publicar" || text.startsWith("/publicar@") || text === "/homestead" || text.startsWith("/homestead@")) {
+    if (isOpsCommand(text) || text === "/publicar" || text.startsWith("/publicar@") || text.startsWith("/live") || text === "/homestead" || text.startsWith("/homestead@")) {
       await sendTelegramMessage({ chatId, text: accessDeniedText(gate.reason) });
     }
     return { ok: true, denied: true };
@@ -501,9 +596,30 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return { ok: true };
   }
 
+  // Campaign engine — NL and commands before Copilot and single-post AI
+  if (studioEnabled() && text && hasTelegramPermission(operator, "content.read")) {
+    const { looksLikeCampaignCommand, handleCampaignText } = await import("@/lib/campaign-telegram");
+    if (looksLikeCampaignCommand(text)) {
+      if (
+        (text.toLowerCase().includes("aprobar") || text.startsWith("/aprobar")) &&
+        !hasTelegramPermission(operator, "content.approve")
+      ) {
+        await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+        return { ok: true, denied: true };
+      }
+      const handled = await handleCampaignText({ text, chatId, userId });
+      if (handled.handled) return { ok: true, campaignId: handled.campaignId };
+    }
+  }
+
   // Content Studio V3 — marketing NL before Copilot (¿questions about publishing)
   if (studioEnabled() && text && !text.startsWith("/") && hasTelegramPermission(operator, "content.read")) {
     const intent = interpretContentCampaignIntent(text);
+    if (intent.kind === "CAMPAIGN_PLAN") {
+      const { handleCampaignText } = await import("@/lib/campaign-telegram");
+      const handled = await handleCampaignText({ text, chatId, userId });
+      if (handled.handled) return { ok: true, campaignId: handled.campaignId };
+    }
     if (intent.kind === "AI_CAMPAIGN") {
       if (!hasTelegramPermission(operator, "content.approve") && !hasTelegramPermission(operator, "content.read")) {
         await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
@@ -738,7 +854,10 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   }
   if (text === "/pausa" || text.startsWith("/pausa@")) {
     setContentPaused(true);
-    await sendTelegramMessage({ chatId, text: "Autopublicación en pausa. El scheduler no publicará." });
+    await sendTelegramMessage({
+      chatId,
+      text: "Pausa de emergencia activada.\nNo se publica nada: ni la cola, ni piezas con autorización individual. live_once quedó en 0.",
+    });
     return { ok: true };
   }
   if (text === "/reanudar" || text.startsWith("/reanudar@")) {
@@ -1004,6 +1123,40 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     });
     updateJob(job.publicId, { status: "RECEIVING", telegramStatusMessageId: sent });
     return { ok: true, publicId: job.publicId };
+  }
+
+  if (text === "/live" || text.startsWith("/live@") || text.startsWith("/live ")) {
+    if (!hasTelegramPermission(operator, "content.approve")) {
+      await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+      return { ok: true, denied: true };
+    }
+    const folio = text.replace(/^\/live(@\S+)?\s*/i, "").trim();
+    if (!CONTENT_ID_PATTERN.test(folio)) {
+      await sendTelegramMessage({
+        chatId,
+        text: "Para publicar en vivo UNA pieza, escribe:\n/live HC-2026-000018\n\nEl dry-run global no se apaga.",
+      });
+      return { ok: true };
+    }
+    const target = getJobByPublicId(folio);
+    if (!target) {
+      await sendTelegramMessage({ chatId, text: "No encuentro esa pieza." });
+      return { ok: true };
+    }
+    const version = latestVersion(target.publicId)?.version;
+    await sendTelegramMessage({
+      chatId,
+      text: `Confirma publicación REAL de ${folio}${version ? ` V${version}` : ""}.\nEl resto de la cola sigue en simulación.`,
+      keyboard: [
+        [
+          {
+            text: "CONFIRMAR EN VIVO",
+            callback_data: `cs:${folio}:liveyes:v${version || 1}`,
+          },
+        ],
+      ],
+    });
+    return { ok: true };
   }
 
   let job = activeJobForChat(chatId);

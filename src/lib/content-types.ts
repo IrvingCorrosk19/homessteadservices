@@ -8,6 +8,7 @@ export const CONTENT_STATUSES = [
   "APPROVED",
   "PUBLISHING",
   "PUBLISHED",
+  "SIMULATED",
   "REJECTED",
   "FAILED",
   "NEEDS_REVIEW",
@@ -64,7 +65,18 @@ export type ContentJob = {
   businessPriority: number;
   validUntil: string | null;
   sourceJobId: string;
+  approvedVersion: number | null;
+  liveOnce: number;
+  campaignPublicId: string;
 };
+
+export type ContentPublicationStatus =
+  | "SIMULATED"
+  | "PENDING"
+  | "PUBLISHING"
+  | "PUBLISHED"
+  | "FAILED"
+  | "UNCERTAIN";
 
 export type ContentAsset = {
   id: number;

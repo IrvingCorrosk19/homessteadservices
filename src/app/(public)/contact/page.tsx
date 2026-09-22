@@ -14,7 +14,16 @@ export const metadata: Metadata = pageMetadata({
 export default async function ContactPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string; intent?: string }>;
+  searchParams: Promise<{
+    service?: string;
+    intent?: string;
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    hs_ref?: string;
+    hs_test?: string;
+  }>;
 }) {
   const params = await searchParams;
 
@@ -23,6 +32,14 @@ export default async function ContactPage({
       <ContactSection
         defaultService={params.service}
         defaultIntent={params.intent}
+        attribution={{
+          utm_source: params.utm_source,
+          utm_medium: params.utm_medium,
+          utm_campaign: params.utm_campaign,
+          utm_content: params.utm_content,
+          hs_ref: params.hs_ref,
+          hs_test: params.hs_test,
+        }}
       />
     </div>
   );

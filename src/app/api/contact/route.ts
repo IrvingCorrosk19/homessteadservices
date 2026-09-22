@@ -8,10 +8,8 @@ import {
   sniffImage,
 } from "@/lib/photos";
 import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-request-service";
-import {
-  checklistPublicSummary,
-  validateDigitalLockFormEvidence,
-} from "@/lib/form-digital-lock-validation";
+import { parseUtmRecord } from "@/lib/campaign-attribution";
+import { recordCampaignEvent } from "@/lib/campaign-store";
 import { getServiceRequirements, isDigitalLockEvidenceIntent } from "@/lib/service-requirements";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -125,6 +123,26 @@ export async function POST(request: Request) {
       };
     }
 
+    const utm = parseUtmRecord({
+      utm_source: String(form.get("utm_source") ?? ""),
+      utm_medium: String(form.get("utm_medium") ?? ""),
+      utm_campaign: String(form.get("utm_campaign") ?? ""),
+      utm_content: String(form.get("utm_content") ?? ""),
+      hs_ref: String(form.get("hs_ref") ?? form.get("ref") ?? ""),
+      hs_test: String(form.get("hs_test") ?? ""),
+    });
+    const isTest =
+      utm.isTest || /CAMPAIGN-ENGINE-TEST|HS-TEST-CAMPAIGN/i.test(message);
+
+    factsPayload = {
+      ...factsPayload,
+      utm_source: utm.source,
+      utm_medium: utm.medium,
+      utm_campaign: utm.campaignId,
+      utm_content: utm.pieceId,
+      hs_ref: utm.hsRef,
+    };
+
     const saved = await persistServiceRequest({
       name,
       phone,
@@ -134,12 +152,27 @@ export async function POST(request: Request) {
       message,
       photos: bufferedPhotos,
       factsJson: JSON.stringify(factsPayload),
+      campaignPublicId: utm.campaignId,
+      piecePublicId: utm.pieceId,
+      utmJson: JSON.stringify({
+        utm_source: utm.source,
+        utm_medium: utm.medium,
+        utm_campaign: utm.campaignId,
+        utm_content: utm.pieceId,
+        hs_ref: utm.hsRef,
+      }),
+      hsRef: utm.hsRef,
+      isTest,
     });
 
     const hsRef = String(form.get("hs_ref") ?? form.get("ref") ?? "").trim();
     if (/^HC-\d{4}-\d{6}$/.test(hsRef)) {
       const { recordLead } = await import("@/lib/marketing-store");
       recordLead({ publicId: hsRef, channel: "website", outcome: "CONTACT" });
+    }
+
+    if (utm.campaignId) {
+      recordCampaignEvent(utm.campaignId, "REQUEST", saved.publicId, utm.pieceId);
     }
 
     logInfo("ServiceRequestCreated", {
@@ -149,12 +182,14 @@ export async function POST(request: Request) {
       intent: requirements.intentId,
     });
 
-    const photoFiles = bufferedPhotos.map(
-      (photo) => new File([new Uint8Array(photo.bytes)], photo.name, { type: photo.type }),
-    );
-    await dispatchServiceRequest(saved, { email: true, n8n: true, photos: photoFiles });
+    if (!isTest) {
+      const photoFiles = bufferedPhotos.map(
+        (photo) => new File([new Uint8Array(photo.bytes)], photo.name, { type: photo.type }),
+      );
+      await dispatchServiceRequest(saved, { email: true, n8n: true, photos: photoFiles });
+    }
 
-    return NextResponse.json({ ok: true, requestId: saved.publicId });
+    return NextResponse.json({ ok: true, requestId: saved.publicId, test: isTest });
   } catch (error) {
     console.error("[homestead-contact]", error);
     return NextResponse.json({ ok: false }, { status: 500 });

@@ -1,3 +1,4 @@
+import { campaignWeeklyBlock } from "@/lib/campaign-funnel";
 import { NextResponse } from "next/server";
 import { verifyInternalHomesteadRequest } from "@/lib/internal-auth";
 import { marketingBaseline } from "@/lib/marketing-engine";
@@ -14,6 +15,12 @@ export async function POST(request: Request) {
   const base = marketingBaseline();
   const rec = latestRecommendation();
   const leads = leadCount();
+  let campaigns = "";
+  try {
+    campaigns = campaignWeeklyBlock();
+  } catch {
+    campaigns = "Campañas: no disponible (migración pendiente).";
+  }
   const text = [
     "HOMESTEAD WEEKLY MARKETING",
     "",
@@ -30,8 +37,10 @@ export async function POST(request: Request) {
     rec
       ? `Siguiente recomendación: ${rec.publicId} (${rec.confidence})`
       : "Sin recomendación vigente. Usa /recomendar.",
+    "",
+    campaigns,
   ].join("\n");
   const chat = adminChatIds()[0];
   if (chat) await sendTelegramMessage({ chatId: chat, text });
-  return NextResponse.json({ ok: true, sent: Boolean(chat) });
+  return NextResponse.json({ ok: true, sent: Boolean(chat), campaigns: Boolean(campaigns) });
 }

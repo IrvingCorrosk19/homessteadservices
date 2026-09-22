@@ -10,7 +10,8 @@ export function ingestSavedRequest(saved: SavedServiceRequest) {
   const national = classifyPhone(saved.phone).national;
   const blob = `${saved.name} ${saved.message}`;
   const isTest =
-    /WAVE-A-TEST|WAVE-B-TEST|WAVE-C-TEST|N8N-MASTER-AUDIT-TEST|V2-TEST|TEST-HS-E2E|AUDIT-CHATBOT-TEST/i.test(blob) ||
+    Boolean(saved.isTest) ||
+    /WAVE-A-TEST|WAVE-B-TEST|WAVE-C-TEST|N8N-MASTER-AUDIT-TEST|V2-TEST|TEST-HS-E2E|AUDIT-CHATBOT-TEST|CAMPAIGN-ENGINE-TEST/i.test(blob) ||
     national === "60001111" ||
     national === "60000000";
   ingestCanonicalLead({
@@ -25,5 +26,7 @@ export function ingestSavedRequest(saved: SavedServiceRequest) {
     location: zone?.[1]?.trim() || "",
     inboxStatus: saved.status,
     isTest,
+    utm: saved.utmJson ? JSON.parse(saved.utmJson) : undefined,
+    contentId: saved.piecePublicId || saved.campaignPublicId || "",
   });
 }

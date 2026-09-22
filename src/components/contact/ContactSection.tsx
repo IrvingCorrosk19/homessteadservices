@@ -11,9 +11,18 @@ type ContactDetail = {
 export function ContactSection({
   defaultService = "",
   defaultIntent = "",
+  attribution = {},
 }: {
   defaultService?: string;
   defaultIntent?: string;
+  attribution?: {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    hs_ref?: string;
+    hs_test?: string;
+  };
 }) {
   const dictionary = getDictionary();
   const phone = phoneHref();
@@ -100,6 +109,7 @@ export function ContactSection({
           <RequestForm
             defaultService={defaultService}
             defaultIntent={defaultIntent}
+            attribution={attribution}
           />
         </div>
       </div>

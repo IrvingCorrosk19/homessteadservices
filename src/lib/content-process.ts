@@ -27,17 +27,20 @@ import {
   analyzeAndWriteCopy,
   enhanceWithOpenAi,
   generateCampaignImage,
+  isOpenAiConfigured,
   rewriteCopyOnly,
   writeAiCampaignCopy,
 } from "@/lib/content-openai";
 import { sendTelegramMessage, sendTelegramPhotos } from "@/lib/content-telegram";
 import { enqueueForApproval, formatPanama } from "@/lib/content-queue";
+import { withCanonicalCta } from "@/lib/content-copy";
+import { anyMetaPlatformConfigured } from "@/lib/content-meta";
 import { logError, logInfo } from "@/lib/log";
 import type { ContentAssetRole } from "@/lib/content-types";
 import type { ContentJob } from "@/lib/content-types";
 
-function reviewKeyboard(publicId: string, version: number) {
-  return [
+function reviewKeyboard(publicId: string, version: number, dryRun: boolean) {
+  const rows = [
     [{ text: "✅ APROBAR", callback_data: `cs:${publicId}:approve:v${version}` }],
     [{ text: "PUBLICAR AHORA", callback_data: `cs:${publicId}:now:v${version}` }],
     [{ text: "APROBAR HORARIO", callback_data: `cs:${publicId}:slot:v${version}` }],
@@ -50,6 +53,10 @@ function reviewKeyboard(publicId: string, version: number) {
       { text: "❌ DESCARTAR", callback_data: `cs:${publicId}:drop:v${version}` },
     ],
   ];
+  if (dryRun) {
+    rows.push([{ text: "PUBLICAR EN VIVO ESTA PIEZA", callback_data: `cs:${publicId}:live:v${version}` }]);
+  }
+  return rows;
 }
 
 function failKeyboard(publicId: string) {
@@ -87,6 +94,15 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
     ? formatPanama(fresh.recommendedPublishAt, settings)
     : "por definir";
   const isAi = fresh.contentType === "AI_CAMPAIGN";
+  const platforms = (settings.platforms.length ? settings.platforms : ["instagram", "facebook"])
+    .map((item) => (item === "instagram" ? "Instagram" : item === "facebook" ? "Facebook" : item))
+    .join(", ");
+  const generation = isOpenAiConfigured()
+    ? "OpenAI configurado (texto/imagen según el modo)"
+    : "OpenAI NO configurado — no se pudo generar con el modelo";
+  const meta = anyMetaPlatformConfigured()
+    ? "Meta: token de Página presente (publicación real sigue bloqueada si DRY RUN)"
+    : "Meta: no conectado";
   const text = [
     "HOMESTEAD CONTENT",
     "",
@@ -94,16 +110,22 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
     `Versión: V${version}`,
     "",
     `Servicio: ${fresh.serviceType || fresh.mixType || "mantenimiento"}`,
-    `Origen: ${isAi ? "Creatividad AI (no es evidencia de trabajo real)" : "Fotos de trabajo real"}`,
-    `Formato: ${fresh.format || "Instagram"}`,
-    `Recomendado: ${when}`,
+    `Origen: ${isAi ? "Creatividad AI (no es evidencia de trabajo real)" : "Fotos de trabajo real — originales conservados"}`,
+    `Formato: imagen + texto (feed 4:5)`,
+    `Plataformas: ${platforms}`,
+    `Hora Panamá: ${when}`,
+    `Aprobación: pendiente (V${version})`,
+    settings.dryRun
+      ? "Modo: SIMULACIÓN. La cola global no publica en redes. Puedes autorizar SOLO esta pieza con PUBLICAR EN VIVO."
+      : "Modo: PUBLICACIÓN REAL cuando apruebes y llegue la hora.",
+    generation,
+    meta,
     "",
     copy,
     "",
     hashtags,
     "",
     "Estado: LISTO PARA REVISIÓN",
-    settings.dryRun ? "Modo: DRY RUN (no publica en redes sin configuración Meta)" : "",
     ...extra,
   ]
     .filter(Boolean)
@@ -111,7 +133,7 @@ async function sendPreview(job: ContentJob, version: number, copy: string, hasht
   await sendTelegramMessage({
     chatId: job.telegramChatId,
     text,
-    keyboard: reviewKeyboard(job.publicId, version),
+    keyboard: reviewKeyboard(job.publicId, version, settings.dryRun),
   });
 }
 
@@ -166,7 +188,7 @@ async function renderVersion(
   logInfo("ImageAnalysisCompleted", { contentJobId: job.publicId });
 
   const version = nextVersionNumber(job.publicId);
-  const copy = analysisCopy?.full || analysis.copy.full;
+  const copy = withCanonicalCta(analysisCopy?.full || analysis.copy.full);
   const cta = analysisCopy?.cta || analysis.copy.cta;
   const hashtags = (analysisCopy?.hashtags || analysis.copy.hashtags).join(" ");
 
@@ -296,7 +318,7 @@ export async function processContentJob(publicId: string, kind: "full" | "image"
     });
     const result = await renderVersion(job, kind);
     const queued = getJobByPublicId(publicId) || job;
-    updateJob(publicId, { approvedAt: null });
+    updateJob(publicId, { approvedAt: null, approvedVersion: null, liveOnce: 0 });
     enqueueForApproval(queued);
     recordContentEvent(publicId, "CONTENT_READY", `v${result.version}`);
     logInfo("PreviewSent", { contentJobId: publicId, stage: `v${result.version}` });
@@ -330,7 +352,7 @@ export async function regenerateCopy(publicId: string, instruction?: string) {
     job,
     version: next,
     kind: "copy",
-    copy: rewritten.full,
+    copy: withCanonicalCta(rewritten.full),
     cta: rewritten.cta,
     hashtags: rewritten.hashtags.join(" "),
     prompt: "copy_only",
@@ -356,13 +378,15 @@ export async function regenerateCopy(publicId: string, instruction?: string) {
   }
   logInfo("ContentRegenerated", { contentJobId: publicId, stage: `copy-v${next}` });
   updateJob(publicId, {
-    selectedCaption: rewritten.full,
+    selectedCaption: withCanonicalCta(rewritten.full),
     pendingInput: null,
     status: "AWAITING_APPROVAL",
     approvedAt: null,
+    approvedVersion: null,
+    liveOnce: 0,
   });
   recordContentEvent(publicId, "CONTENT_REVISION", `v${next}`);
-  await sendPreview(job, next, rewritten.full, rewritten.hashtags.join(" "), [
+  await sendPreview(job, next, withCanonicalCta(rewritten.full), rewritten.hashtags.join(" "), [
     "La versión anterior ya no está aprobada. Revisa V" + next + ".",
   ]);
 }
@@ -448,18 +472,22 @@ export async function processAiCampaignJob(publicId: string) {
       height: branded.square.height,
     });
     const hashtags = copy.hashtags.join(" ");
+    const caption = withCanonicalCta(copy.full);
     saveVersion({
       job,
       version,
       kind: "full",
-      copy: copy.full,
+      copy: caption,
       cta: copy.cta,
       hashtags,
       prompt: "ai_campaign_v3",
       privacyNote: "AI_GENERATED — no es evidencia de trabajo real",
     });
     updateJob(publicId, {
-      selectedCaption: copy.full,
+      selectedCaption: caption,
+      approvedAt: null,
+      approvedVersion: null,
+      liveOnce: 0,
       captionsJson: JSON.stringify({
         commercial: copy.commercial,
         warm: copy.warm,
@@ -467,14 +495,13 @@ export async function processAiCampaignJob(publicId: string) {
       }),
       mixType: "AI_CAMPAIGN",
       contentType: "AI_CAMPAIGN",
-      approvedAt: null,
     });
     recordUsage(publicId, "openai", "ai_campaign");
     recordContentEvent(publicId, "CONTENT_PROCESSED", `ai-v${version}`);
     const queued = getJobByPublicId(publicId) || job;
     enqueueForApproval(queued);
     logInfo("PreviewSent", { contentJobId: publicId, stage: `ai-v${version}` });
-    await sendPreview(queued, version, copy.full, hashtags, [
+    await sendPreview(queued, version, caption, hashtags, [
       "⚠️ Creatividad generada por IA. No representa un trabajo real de Homestead.",
     ]);
   } catch (error) {

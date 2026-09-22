@@ -38,7 +38,7 @@ ok("CSV3-15 stale version gate", /stale_version|ya fue reemplazada/.test(handler
 ok("CSV3-16 aigen retry", /aigen/.test(handler));
 ok("CSV3-17 research not fabricated", /Research web externo: NO CONFIGURADO/.test(handler));
 ok("CSV3-18 existing n8n reused", /homestead-content-studio/.test(n8n));
-ok("CSV3-19 no autonomous publish default", /dryRun|metaConfigured/.test(publish));
+ok("CSV3-19 no autonomous publish default", /jobUsesLiveOverride|SIMULATED/.test(publish));
 ok("CSV3-20 watermark deterministic", /applyHomesteadWatermark/.test(images));
 ok("CSV3-21 content statuses include APPROVED", /APPROVED/.test(types));
 ok("CSV3-22 silence not approval", /tryApproveContentJob/.test(handler) && !/auto.?approv/i.test(handler));

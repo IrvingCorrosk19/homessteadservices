@@ -4,6 +4,7 @@
  */
 
 export type ContentCampaignIntent =
+  | { kind: "CAMPAIGN_PLAN"; serviceHint: string; days: number; goal: string; raw: string }
   | { kind: "AI_CAMPAIGN"; serviceHint: string; platformHint: string; raw: string }
   | { kind: "IDEATION"; raw: string }
   | { kind: "PREPARE_IDEA_YES"; raw: string }
@@ -56,10 +57,27 @@ export function interpretContentCampaignIntent(text: string): ContentCampaignInt
   }
 
   if (
-    /\b(crea|cr[eé]ame|haz|hazme|genera|prep[aá]rame|quiero)\b.*\b(publicidad|anuncio|post|publicaci[oó]n|campa[nñ]a|promo)\b/.test(
+    /\b(prepara|crea|arma|planifica|quiero)\b.*\bcampa[nñ]a\b/.test(lower) ||
+    /\bcampa[nñ]a\b.*\b(\d+\s*d[ií]as?|siete|semana|cerrajer|cerradura)\b/.test(lower)
+  ) {
+    const dayMatch = lower.match(/(\d+)\s*d[ií]as?/);
+    const days = dayMatch ? Number(dayMatch[1]) : /\bsiete\b/.test(lower) ? 7 : 7;
+    const service = detectService(raw);
+    const digital = /\bcerradura digital|cerrajer[ií]a digital|digital lock\b/i.test(raw);
+    return {
+      kind: "CAMPAIGN_PLAN",
+      serviceHint: digital ? "locksmith-digital" : service?.id || "",
+      days,
+      goal: /\bsolicitud|instalaci[oó]n\b/.test(lower) ? "solicitudes de instalación" : "solicitudes calificadas",
+      raw,
+    };
+  }
+
+  if (
+    /\b(crea|cr[eé]ame|haz|hazme|genera|prep[aá]rame|quiero)\b.*\b(publicidad|anuncio|post|publicaci[oó]n|promo)\b/.test(
       lower,
     ) ||
-    /\b(publicidad|anuncio|post|campa[nñ]a)\b.*\b(de|para)\b/.test(lower) ||
+    /\b(publicidad|anuncio|post)\b.*\b(de|para)\b/.test(lower) ||
     /\b(quiero (conseguir|atraer) clientes)\b/.test(lower) ||
     /\b(promocionar|promueve|promov[eé])\b/.test(lower)
   ) {

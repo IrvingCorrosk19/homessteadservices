@@ -41,6 +41,11 @@ export type SavedServiceRequest = {
   message: string;
   photos: SavedPhoto[];
   factsJson?: string;
+  campaignPublicId?: string;
+  piecePublicId?: string;
+  utmJson?: string;
+  hsRef?: string;
+  isTest?: number;
   cancelledAt?: string;
   cancelledBy?: string;
   cancellationReason?: string;
@@ -200,6 +205,106 @@ function migrateContentStudio(database: Database.Database) {
   addJobCol("business_priority", "business_priority INTEGER NOT NULL DEFAULT 0");
   addJobCol("valid_until", "valid_until TEXT");
   addJobCol("source_job_id", "source_job_id TEXT NOT NULL DEFAULT ''");
+  addJobCol("approved_version", "approved_version INTEGER");
+  addJobCol("live_once", "live_once INTEGER NOT NULL DEFAULT 0");
+  addJobCol("campaign_public_id", "campaign_public_id TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS campaign_counters (
+      year INTEGER PRIMARY KEY,
+      last_campaign INTEGER NOT NULL DEFAULT 0,
+      last_piece INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      service TEXT NOT NULL,
+      service_slug TEXT NOT NULL,
+      zone TEXT NOT NULL,
+      audience TEXT NOT NULL,
+      problem TEXT NOT NULL,
+      benefit TEXT NOT NULL,
+      offer TEXT NOT NULL DEFAULT '',
+      objections TEXT NOT NULL DEFAULT '',
+      evidence TEXT NOT NULL DEFAULT '',
+      conversion_channel TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      starts_at TEXT,
+      ends_at TEXT,
+      requested_horizon_days INTEGER NOT NULL,
+      scheduled_horizon_days INTEGER NOT NULL,
+      schedule_note TEXT NOT NULL DEFAULT '',
+      max_generation INTEGER NOT NULL DEFAULT 0,
+      generation_used INTEGER NOT NULL DEFAULT 0,
+      experiment_json TEXT NOT NULL DEFAULT '{}',
+      approval_manifest TEXT NOT NULL DEFAULT '',
+      telegram_chat_id TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      is_test INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS campaign_pieces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      campaign_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      approved_version INTEGER,
+      pillar TEXT NOT NULL,
+      format TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      problem TEXT NOT NULL,
+      hook TEXT NOT NULL,
+      benefit TEXT NOT NULL,
+      evidence TEXT NOT NULL,
+      objection TEXT NOT NULL,
+      visual_need TEXT NOT NULL,
+      copy TEXT NOT NULL,
+      alt_copy TEXT NOT NULL DEFAULT '',
+      overlay_text TEXT NOT NULL DEFAULT '',
+      cta TEXT NOT NULL,
+      alt_text TEXT NOT NULL DEFAULT '',
+      hypothesis TEXT NOT NULL,
+      destination_url TEXT NOT NULL,
+      whatsapp_url TEXT NOT NULL DEFAULT '',
+      content_job_id TEXT NOT NULL DEFAULT '',
+      scheduled_at TEXT,
+      editorial_score INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS campaign_experiments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL UNIQUE,
+      campaign_id TEXT NOT NULL,
+      variable TEXT NOT NULL,
+      variant_a TEXT NOT NULL,
+      variant_b TEXT NOT NULL,
+      hypothesis TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PLANNED',
+      result_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS campaign_clicks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id TEXT NOT NULL,
+      piece_id TEXT NOT NULL DEFAULT '',
+      channel TEXT NOT NULL,
+      ref TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      is_test INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS campaign_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id TEXT NOT NULL,
+      piece_id TEXT NOT NULL DEFAULT '',
+      event TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_campaign_pieces_campaign ON campaign_pieces (campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_clicks_campaign ON campaign_clicks (campaign_id, created_at);
+  `);
   database.exec(`
     CREATE TABLE IF NOT EXISTS content_publications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -237,6 +342,13 @@ function migrateContentStudio(database: Database.Database) {
       updated_at TEXT NOT NULL
     );
   `);
+  const pubCols = columnNames(database, "content_publications");
+  const addPubCol = (name: string, ddl: string) => {
+    if (!pubCols.includes(name)) database.exec(`ALTER TABLE content_publications ADD COLUMN ${ddl}`);
+  };
+  addPubCol("permalink", "permalink TEXT NOT NULL DEFAULT ''");
+  addPubCol("container_id", "container_id TEXT NOT NULL DEFAULT ''");
+  addPubCol("version", "version INTEGER NOT NULL DEFAULT 0");
   const settings = database.prepare("SELECT id FROM content_settings WHERE id = 1").get();
   if (!settings) {
     database
@@ -377,6 +489,11 @@ function migrateServiceRequestCancellation(database: Database.Database) {
   add("cancellation_source", "cancellation_source TEXT NOT NULL DEFAULT ''");
   add("cancellation_reason_category", "cancellation_reason_category TEXT NOT NULL DEFAULT ''");
   add("cancellation_idempotency_key", "cancellation_idempotency_key TEXT");
+  add("campaign_public_id", "campaign_public_id TEXT NOT NULL DEFAULT ''");
+  add("piece_public_id", "piece_public_id TEXT NOT NULL DEFAULT ''");
+  add("utm_json", "utm_json TEXT NOT NULL DEFAULT ''");
+  add("hs_ref", "hs_ref TEXT NOT NULL DEFAULT ''");
+  add("is_test", "is_test INTEGER NOT NULL DEFAULT 0");
 }
 
 function migrateRevenueEngine(database: Database.Database) {
@@ -907,6 +1024,11 @@ export function saveServiceRequest(input: {
   message: string;
   photos: BufferedPhoto[];
   factsJson?: string;
+  campaignPublicId?: string;
+  piecePublicId?: string;
+  utmJson?: string;
+  hsRef?: string;
+  isTest?: boolean;
 }): SavedServiceRequest {
   const database = getDb();
   const created = new Date();
@@ -934,11 +1056,16 @@ export function saveServiceRequest(input: {
       });
     }
     const factsJson = input.factsJson || "";
+    const campaignPublicId = input.campaignPublicId || "";
+    const piecePublicId = input.piecePublicId || "";
+    const utmJson = input.utmJson || "";
+    const hsRef = input.hsRef || "";
+    const isTest = input.isTest ? 1 : 0;
     const info = database
       .prepare(
         `INSERT INTO service_requests
-          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, facts_json)
-         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, facts_json, campaign_public_id, piece_public_id, utm_json, hs_ref, is_test)
+         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         publicId,
@@ -952,6 +1079,11 @@ export function saveServiceRequest(input: {
         input.message,
         JSON.stringify(photos),
         factsJson,
+        campaignPublicId,
+        piecePublicId,
+        utmJson,
+        hsRef,
+        isTest,
       );
     const saved: SavedServiceRequest = {
       id: Number(info.lastInsertRowid),
@@ -967,6 +1099,11 @@ export function saveServiceRequest(input: {
       message: input.message,
       photos,
       factsJson,
+      campaignPublicId,
+      piecePublicId,
+      utmJson,
+      hsRef,
+      isTest,
     };
     insertMessage(database, {
       requestPk: saved.id,

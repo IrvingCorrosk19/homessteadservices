@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Loader } from "@/components/ui/Loader";
 import { useToast } from "@/components/ui/Toast";
@@ -60,9 +60,18 @@ const emptySlots = (): Record<SlotId, SlotState> => ({
 export function RequestForm({
   defaultService = "",
   defaultIntent = "",
+  attribution = {},
 }: {
   defaultService?: string;
   defaultIntent?: string;
+  attribution?: {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    hs_ref?: string;
+    hs_test?: string;
+  };
 }) {
   const dictionary = getDictionary();
   const toast = useToast();
@@ -77,6 +86,7 @@ export function RequestForm({
   const [values, setValues] = useState<FormState>({
     ...empty,
     service: preset,
+    intent: defaultIntent || "",
     message,
   });
   const [files, setFiles] = useState<File[]>([]);
@@ -88,6 +98,27 @@ export function RequestForm({
   const [status, setStatus] = useState<"idle" | "loading" | "success">("idle");
   const [photoHint, setPhotoHint] = useState("");
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
+  const [tracking, setTracking] = useState({
+    utm_source: attribution.utm_source || "",
+    utm_medium: attribution.utm_medium || "",
+    utm_campaign: attribution.utm_campaign || "",
+    utm_content: attribution.utm_content || "",
+    hs_ref: attribution.hs_ref || "",
+    hs_test: attribution.hs_test || "",
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setTracking((current) => ({
+      utm_source: current.utm_source || params.get("utm_source") || "",
+      utm_medium: current.utm_medium || params.get("utm_medium") || "",
+      utm_campaign: current.utm_campaign || params.get("utm_campaign") || "",
+      utm_content: current.utm_content || params.get("utm_content") || "",
+      hs_ref: current.hs_ref || params.get("hs_ref") || params.get("hs") || "",
+      hs_test: current.hs_test || params.get("hs_test") || "",
+    }));
+  }, []);
 
   const requirements = useMemo(
     () =>
@@ -249,6 +280,12 @@ export function RequestForm({
       payload.set("intent", values.intent);
       payload.set("message", values.message);
       payload.set("website", values.website);
+      payload.set("utm_source", tracking.utm_source);
+      payload.set("utm_medium", tracking.utm_medium);
+      payload.set("utm_campaign", tracking.utm_campaign);
+      payload.set("utm_content", tracking.utm_content);
+      payload.set("hs_ref", tracking.hs_ref);
+      payload.set("hs_test", tracking.hs_test);
 
       if (needsDigitalLockSlots) {
         (["front", "inside", "edge"] as SlotId[]).forEach((id) => {
@@ -348,6 +385,12 @@ export function RequestForm({
 
   return (
     <form onSubmit={onSubmit} className="grid gap-5" noValidate>
+      <input type="hidden" name="utm_source" value={tracking.utm_source} />
+      <input type="hidden" name="utm_medium" value={tracking.utm_medium} />
+      <input type="hidden" name="utm_campaign" value={tracking.utm_campaign} />
+      <input type="hidden" name="utm_content" value={tracking.utm_content} />
+      <input type="hidden" name="hs_ref" value={tracking.hs_ref} />
+      <input type="hidden" name="hs_test" value={tracking.hs_test} />
       <Field
         label={dictionary.form.name}
         name="name"

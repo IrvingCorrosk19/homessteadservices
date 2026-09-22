@@ -13,6 +13,7 @@ import { detectServices, formatRequestBrief } from "@/lib/concierge/playbook-eng
 import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
 import { getHomesteadDb } from "@/lib/service-requests";
 import { syncServiceRequestFromState } from "@/lib/concierge/service-request-lifecycle";
+import { parseUtmRecord } from "@/lib/campaign-attribution";
 
 export function canHandoffLead(state: ConversationState) {
   const phone = classifyPhone(state.phone);
@@ -113,6 +114,7 @@ export async function createLeadFromConcierge(input: {
     needsReview: Boolean(input.state.needsReview || playbook.unknownCatalog),
     location: input.state.location,
   });
+  const parsedUtm = parseUtmRecord(input.utm);
   const saved = await persistServiceRequest({
     name,
     phone: phone.e164 || input.state.phone.trim(),
@@ -122,6 +124,11 @@ export async function createLeadFromConcierge(input: {
     message,
     photos,
     factsJson,
+    campaignPublicId: parsedUtm.campaignId,
+    piecePublicId: parsedUtm.pieceId,
+    utmJson: JSON.stringify(input.utm || {}),
+    hsRef: parsedUtm.hsRef,
+    isTest: isTestHandoff(input.state, input.utm || {}),
   });
   copyConciergePhotosToRequest(input.conversationId, saved.publicId);
   try {
