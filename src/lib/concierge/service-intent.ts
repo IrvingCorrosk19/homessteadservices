@@ -1,17 +1,8 @@
 import { SERVICE_PLAYBOOKS, type PlaybookServiceId } from "@/lib/concierge/service-playbooks";
+import { aliasHits, foldLex } from "@/lib/concierge/lexical-match";
 
 function fold(value: string) {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-function aliasHits(blob: string, alias: string) {
-  const needle = fold(alias);
-  if (!needle) return false;
-  if (needle.length <= 4) {
-    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?:^|[^a-z0-9])${escaped}`).test(blob);
-  }
-  return blob.includes(needle);
+  return foldLex(value);
 }
 
 function detectServicesLocal(text: string): PlaybookServiceId[] {

@@ -17,16 +17,17 @@ import {
 import { assessUserContact, isPassiveClose, shouldStopCommercial } from "@/lib/concierge-contact";
 import { canHandoffLead, createLeadFromConcierge, stopLeadIfPresent } from "@/lib/concierge-handoff";
 import { classifyPhone, looksLikePhoneAttempt } from "@/lib/phone";
-import { whatsappHref } from "@/lib/site";
+import { whatsappHref, whatsappRequestMessage } from "@/lib/site";
 import { logError, logInfo } from "@/lib/log";
 import { conciergeApiKey, conciergeModel, isConciergeDryRun, isConciergeEnabled } from "@/lib/concierge-flags";
 import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
+import { getActiveAppointmentIdForLead } from "@/lib/revenue-store";
 import { CONCIERGE_TOOLS, executeConciergeTool, mergeParsedWhen, type ToolContext } from "@/lib/concierge-tools";
 import { inferOutcome, recordFunnelEvent, setConversationOutcome } from "@/lib/concierge-intelligence";
 import { formatPanamaSlot } from "@/lib/concierge-datetime";
 import type { AvailabilitySlot } from "@/lib/concierge-availability";
 import type { SniffedImage } from "@/lib/photos";
-import { getPlaybook } from "@/lib/concierge/service-playbooks";
+import { getPlaybook, serviceCatalogCustomerReply } from "@/lib/concierge/service-playbooks";
 import {
   applyLocationCorrection,
   countQuestions,
@@ -60,6 +61,7 @@ import {
   applyRetrievedMemory,
   formatPriorServiceAcknowledgment,
   retrieveCustomerMemory,
+  answerAuthorizedRequestHistory,
 } from "@/lib/concierge/customer-memory";
 import { isTestInjectionActive } from "@/lib/concierge/test-injection";
 import {
@@ -118,6 +120,9 @@ import {
   responseReferencesStaleService,
   switchAckPrefix,
 } from "@/lib/concierge/service-transition";
+import {
+  classifyActionableServiceIntent,
+} from "@/lib/concierge/actionable-intent";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 import {
   bumpStateVersion,
@@ -160,6 +165,18 @@ import {
   markActiveRequest,
 } from "@/lib/concierge/conversation-reset";
 import { detectCustomerCancellationIntent, formatMultiRequestClarification, resolveCancellationTarget } from "@/lib/concierge/cancellation-intent";
+import {
+  classifyExistingRequestOperation,
+  extractExplicitRequestIds,
+  serviceAfterNewRequestOperator,
+} from "@/lib/concierge/existing-request-operation";
+import {
+  authorizeConversationAction,
+  buildTurnActionPlan,
+  logTurnLedger,
+  resolveTurnIntent,
+} from "@/lib/concierge/conversation-action-gate";
+import { isHypotheticalSpeech, isQuotedThirdPartyCommand } from "@/lib/concierge/speech-act-safety";
 import {
   applyAppointmentOnlyCancelledState,
   applyRequestCancelledConversationState,
@@ -207,11 +224,30 @@ function fallbackReply(message: string, state?: ConversationState, lastAssistant
   }
   if (INJECTION_RE.test(message)) return injectionDeniedReply();
   if (EXIT_RE.test(message)) return "Claro, lo dejamos ahí. Cuando quieras retomar una reparación o mantenimiento, aquí estamos.";
+  const intent = classifyActionableServiceIntent(message, state || null);
+  if (
+    intent.primaryIntent === "SERVICE_CATALOG_QUESTION" ||
+    intent.primaryIntent === "CAPABILITY_QUESTION"
+  ) {
+    return serviceCatalogCustomerReply();
+  }
+  if (
+    !state?.activeLeadId &&
+    !intent.createServiceRequest &&
+    (intent.actionability === "POSSIBLE" ||
+      intent.primaryIntent === "PROBLEM_MENTION" ||
+      intent.primaryIntent === "DIAGNOSTIC_QUESTION" ||
+      intent.informationalOnly)
+  ) {
+    return "Entiendo. Cuéntame un poco más de lo que está pasando para saber cómo ayudarte.";
+  }
   const service = state?.primaryService || state?.service;
   const playbook = service ? getPlaybook(service) : null;
   const hasPhone = state?.contactStatus === "VALID";
   const hasLocation = Boolean(state?.location?.trim());
-  const hasSchedule = Boolean(state?.preferredDate && state?.preferredTime);
+  const hasSchedule = Boolean(
+    state?.preferredDate && state?.preferredTime && /^\d{2}:\d{2}$/.test(state.preferredTime),
+  );
   if (playbook?.bookingStrategy === "PHOTO_REVIEW_FIRST") {
     if (state?.facts?.digitalLockAbandoned === "1" || (service && service !== "locksmith")) {
       return "Perfecto, seguimos con lo que necesitas ahora. Cuéntame un poco más para coordinar.";
@@ -220,7 +256,7 @@ function fallbackReply(message: string, state?: ConversationState, lastAssistant
   }
   if (playbook?.serviceId === "ac") {
     if (hasPhone && hasLocation && hasSchedule) {
-      return "Con lo que tengo anotado puedo coordinar la visita del aire. ¿Confirmamos ese horario?";
+      return "Con lo que tengo anotado puedo revisar el calendario del aire. Dame un segundo.";
     }
     if (hasPhone && hasLocation) {
       const primary = "Gracias, ya tengo tu contacto y zona. ¿Qué día y hora te conviene para la visita?";
@@ -235,6 +271,9 @@ function fallbackReply(message: string, state?: ConversationState, lastAssistant
     return "Sigo contigo con lo del aire. Cuéntame qué está pasando o, si ya lo mencionaste, dime en qué zona estás para coordinar.";
   }
   if (playbook) {
+    if (hasPhone && hasLocation && hasSchedule) {
+      return "Con lo que me diste puedo revisar el calendario. Dame un segundo.";
+    }
     if (hasPhone && hasLocation) {
       const primary = "Gracias, ya tengo lo esencial. ¿Qué día y hora te conviene para la visita?";
       const alternate = "Para revisar el calendario, ¿qué día y hora te funcionan mejor?";
@@ -330,6 +369,30 @@ export async function conciergeTurn(input: {
   }
   try {
     const text = input.message.trim().slice(0, 2000);
+    if (!text && !input.skipUserMessage) {
+      const session = buildSessionSnapshot(conversation.state);
+      return {
+        ok: true as const,
+        reply: "Cuando quieras, dime en qué te ayudo.",
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        nextAction: "CONTINUE",
+        leadId: conversation.leadPublicId || conversation.state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
     if (!input.skipUserMessage) {
       addMessage(input.conversationId, "user", text);
     }
@@ -339,8 +402,23 @@ export async function conciergeTurn(input: {
     let lastToolObservation: ToolObservationSummary | null = null;
     let groundedCompanyAnswer = "";
     let state = reconcileTransactionState(conversation.state, text, conversation.leadPublicId);
+    const listedFromHistory = (() => {
+      const assistants = recentMessages(input.conversationId, 10).filter((row) => row.role === "assistant");
+      for (let i = assistants.length - 1; i >= 0; i -= 1) {
+        const ids = extractExplicitRequestIds(assistants[i].body || "");
+        if (ids.length >= 2) return ids;
+      }
+      return [] as string[];
+    })();
+    if (listedFromHistory.length) {
+      state = {
+        ...state,
+        facts: { ...(state.facts || {}), listedRequestIds: listedFromHistory.join("|") },
+      };
+    }
     const stateBeforeTurn = { ...state, facts: { ...(state.facts || {}) } };
     let clearedLeadPublicId: string | undefined;
+    let cancelAckPrefix = "";
 
     if (detectFullConversationReset(text)) {
       const reset = applyFullConversationReset(state, {
@@ -422,12 +500,14 @@ export async function conciergeTurn(input: {
     }
 
     const cancelIntent = detectCustomerCancellationIntent(text, state);
+    const skipCancelMutation = isHypotheticalSpeech(text) || isQuotedThirdPartyCommand(text);
     if (
-      cancelIntent.kind === "DELETE_DATA_REQUEST" ||
+      !skipCancelMutation &&
+      (cancelIntent.kind === "DELETE_DATA_REQUEST" ||
       cancelIntent.kind === "AMBIGUOUS_TOMORROW" ||
       cancelIntent.kind === "AMBIGUOUS_CANCEL_TARGET" ||
       cancelIntent.kind === "CANCEL_REQUEST" ||
-      cancelIntent.kind === "CANCEL_APPOINTMENT_ONLY"
+      cancelIntent.kind === "CANCEL_APPOINTMENT_ONLY")
     ) {
       let cancelReply = "";
       let cancelLeadId: string | null = state.activeLeadId || conversation.leadPublicId || null;
@@ -445,7 +525,7 @@ export async function conciergeTurn(input: {
           cancelReply = ambiguousCancelTargetReply();
         }
       } else if (cancelIntent.kind === "CANCEL_REQUEST") {
-        const target = resolveCancellationTarget(cancelIntent, state, conversation.leadPublicId);
+        const target = resolveCancellationTarget(cancelIntent, state, conversation.leadPublicId, text);
         if (!target.ok && target.errorCode === "NEEDS_CLARIFICATION") {
           cancelReply = formatMultiRequestClarification(target.options || []);
         } else if (!target.ok) {
@@ -463,6 +543,27 @@ export async function conciergeTurn(input: {
             reasonCategory: "NOT_PROVIDED",
           });
         } else {
+          const cancelAuth = authorizeConversationAction("CANCEL_REQUEST", {
+            text,
+            state,
+            conversationId: input.conversationId,
+            targetId: target.requestId,
+          });
+          if (!cancelAuth.allowed) {
+            cancelReply = groundedRequestCancelReply({
+              success: false,
+              requestId: target.requestId,
+              previousStatus: "",
+              newStatus: "",
+              cancelledAppointmentIds: [],
+              calendarReleased: false,
+              alreadyCancelled: false,
+              auditEventId: "",
+              errorCode: "NOT_AUTHORIZED",
+              reasonStored: "",
+              reasonCategory: "NOT_PROVIDED",
+            });
+          } else {
           const cancelled = cancelServiceRequest({
             requestId: target.requestId,
             actor: "CUSTOMER_AI",
@@ -482,9 +583,38 @@ export async function conciergeTurn(input: {
             explainedAsDelete: cancelIntent.explainedAsDelete,
             hadReason: Boolean(cancelIntent.reason) && cancelIntent.reasonCategory !== "NOT_PROVIDED",
           });
+          const existingOp = classifyExistingRequestOperation(text);
+          if (
+            cancelled.success &&
+            existingOp.hasExplicitNewRequestOperator
+          ) {
+            const extraService = serviceAfterNewRequestOperator(text);
+            if (extraService) {
+              cancelAckPrefix = cancelReply;
+              state = {
+                ...state,
+                activeLeadId: "",
+                appointmentId: "",
+                primaryService: extraService,
+                service: extraService,
+                detectedServices: [extraService],
+                problem: extraService,
+              };
+              cancelReply = "";
+            }
+          }
+          }
         }
       } else {
-        const appointmentId = state.appointmentId;
+        const target = resolveCancellationTarget(
+          { ...cancelIntent, kind: "CANCEL_REQUEST" },
+          state,
+          conversation.leadPublicId,
+          text,
+        );
+        const appointmentId = target.ok
+          ? getActiveAppointmentIdForLead(target.requestId)
+          : state.appointmentId;
         if (!appointmentId) {
           cancelReply = "No veo una visita activa para cancelar. Si quieres, cancelo la solicitud.";
         } else {
@@ -493,7 +623,7 @@ export async function conciergeTurn(input: {
             actor: "CUSTOMER_AI",
             source: "CUSTOMER_AI",
             reason: cancelIntent.reason,
-            requestId: state.activeLeadId,
+            requestId: target.ok ? target.requestId : state.activeLeadId,
           });
           if (ha.success) {
             state = applyAppointmentOnlyCancelledState(state);
@@ -508,6 +638,7 @@ export async function conciergeTurn(input: {
           }
         }
       }
+      if (cancelReply) {
       addMessage(input.conversationId, "assistant", cancelReply);
       touchConversation(input.conversationId, {
         state,
@@ -536,6 +667,7 @@ export async function conciergeTurn(input: {
         showPhotoCta: false,
         photosRemaining: session.photosRemaining,
       };
+      }
     }
 
     // RAW MESSAGE → detect transition BEFORE merge, vision, or pending playbook replies.
@@ -544,6 +676,12 @@ export async function conciergeTurn(input: {
       contentJobId: input.conversationId.slice(0, 8),
       stage: `${transition.kind}:${transition.nextService || "none"}`,
     });
+    const actionDecision = classifyActionableServiceIntent(text, state);
+    logInfo("ConciergeActionability", {
+      contentJobId: input.conversationId.slice(0, 8),
+      stage: actionDecision.actionability,
+      phone: actionDecision.createServiceRequest ? "create" : "hold",
+    });
     const serviceContextAtTurnStart = state.facts?.serviceContextId || "";
     if (
       transition.kind === "SWITCH_SERVICE" ||
@@ -551,7 +689,7 @@ export async function conciergeTurn(input: {
       transition.kind === "REFINE_CURRENT_SERVICE" ||
       transition.kind === "ADD_ANOTHER_SERVICE"
     ) {
-      state = applyConversationTransition(state, transition);
+      state = applyConversationTransition(state, transition, { userText: text });
       state = bumpStateVersion(state);
       logInfo("SERVICE_CONTEXT_SWITCHED", {
         contentJobId: input.conversationId.slice(0, 8),
@@ -652,6 +790,7 @@ export async function conciergeTurn(input: {
           service: conversation.state.service || "locksmith",
         },
         switchTransition,
+        { userText: text },
       );
       state = extractCasualFacts(state, text);
       state = bumpStateVersion(state);
@@ -698,32 +837,55 @@ export async function conciergeTurn(input: {
     let transitionAck = switchAckPrefix(transition);
 
     if (transition.kind === "ADD_ANOTHER_SERVICE") {
-      const clarify =
-        state.facts?.lastBotQuestion ||
-        "Claro. ¿Quieres agregar eso además del servicio actual, o dejamos el actual y seguimos solo con lo nuevo?";
-      addMessage(input.conversationId, "assistant", clarify);
-      touchConversation(input.conversationId, { state });
-      const session = buildSessionSnapshot(state);
-      return {
-        ok: true as const,
-        reply: clarify,
-        chips: session.chips,
-        historicalChips: session.historicalChips,
-        leadBanner: null,
-        nextAction: "CONTINUE",
-        leadId: state.activeLeadId || null,
-        dryLead: false,
-        whatsappUrl: null,
-        contactUrl: "/contact",
-        ended: false,
-        requiresHuman: false,
-        awaitingSlotSelection: session.awaitingSlotSelection,
-        bookingPending: session.bookingPending,
-        slotGroups: session.slotGroups,
-        serviceContext: session.serviceContext,
-        showResumeBooking: session.showResumeBooking,
-        showPhotoCta: session.showPhotoCta,
-        photosRemaining: session.photosRemaining,
+      const addIntent = classifyActionableServiceIntent(text, state);
+      if (!addIntent.createServiceRequest) {
+        const clarify =
+          state.facts?.lastBotQuestion ||
+          "Claro. ¿Quieres agregar eso además del servicio actual, o dejamos el actual y seguimos solo con lo nuevo?";
+        addMessage(input.conversationId, "assistant", clarify);
+        touchConversation(input.conversationId, { state });
+        const session = buildSessionSnapshot(state);
+        return {
+          ok: true as const,
+          reply: clarify,
+          chips: session.chips,
+          historicalChips: session.historicalChips,
+          leadBanner: null,
+          nextAction: "CONTINUE",
+          leadId: state.activeLeadId || null,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: session.awaitingSlotSelection,
+          bookingPending: session.bookingPending,
+          slotGroups: session.slotGroups,
+          serviceContext: session.serviceContext,
+          showResumeBooking: session.showResumeBooking,
+          showPhotoCta: session.showPhotoCta,
+          photosRemaining: session.photosRemaining,
+        };
+      }
+      const preserved = state.activeLeadId || "";
+      state = {
+        ...state,
+        activeLeadId: "",
+        appointmentId: "",
+        primaryService: transition.nextService || state.primaryService,
+        service: transition.nextService || state.service,
+        problem: text.trim().slice(0, 500),
+        preferredDate: "",
+        preferredTime: "",
+        offeredSlots: [],
+        pendingSlot: null,
+        awaitingSlotSelection: false,
+        facts: {
+          ...(state.facts || {}),
+          preservedRequestId: preserved,
+          pendingAddService: "",
+          lastAskedField: "",
+        },
       };
     }
 
@@ -757,23 +919,31 @@ export async function conciergeTurn(input: {
 
     if (transition.kind === "SWITCH_SERVICE" && transition.nextService === "painting") {
       try {
-        const ensured = await ensureActiveServiceRequest({
-          conversationId: input.conversationId,
+        const paintAuth = authorizeConversationAction("CREATE_REQUEST", {
+          text,
           state,
-          summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
-          conversationLeadId: "",
-          utm: input.utm,
-          userText: text,
+          conversationId: input.conversationId,
         });
-        if (ensured) {
-          state.activeLeadId = ensured.publicId;
-          if (ensured.announce) {
-            leadCreatedThisTurn = true;
-            const playbook = getPlaybook(state.primaryService || state.service);
-            transitionAck = [transitionAck, requestFolioIntro(ensured.publicId, playbook?.label || "")]
-              .filter(Boolean)
-              .join("\n\n");
-            state.facts = { ...(state.facts || {}), requestFolioShown: "1" };
+        if (paintAuth.allowed) {
+          const ensured = await ensureActiveServiceRequest({
+            conversationId: input.conversationId,
+            state,
+            summary: [state.problem, state.service, state.location].filter(Boolean).join(". "),
+            conversationLeadId: "",
+            utm: input.utm,
+            userText: text,
+            authorization: paintAuth,
+          });
+          if (ensured) {
+            state.activeLeadId = ensured.publicId;
+            if (ensured.announce) {
+              leadCreatedThisTurn = true;
+              const playbook = getPlaybook(state.primaryService || state.service);
+              transitionAck = [transitionAck, requestFolioIntro(ensured.publicId, playbook?.label || "")]
+                .filter(Boolean)
+                .join("\n\n");
+              state.facts = { ...(state.facts || {}), requestFolioShown: "1" };
+            }
           }
         }
       } catch {
@@ -1044,6 +1214,37 @@ export async function conciergeTurn(input: {
       state.contactStatus = "INVALID";
     }
 
+    const preMutateDecision = determineNextAction(state, {
+      userText: text,
+      interruption: route.isInterruption && !route.slotSelectionIntent,
+    });
+    const preMutateCognitive = runCognitiveTurn({
+      conversationId: input.conversationId,
+      text,
+      state,
+      transition,
+      nextDecision: preMutateDecision,
+      hasCalendarResult: false,
+      bookedThisTurn: false,
+      route,
+    });
+    state = preMutateCognitive.state;
+    const resolvedIntent = resolveTurnIntent(text, state);
+    const actionPlan = buildTurnActionPlan(resolvedIntent, state);
+    const createAuth = authorizeConversationAction("CREATE_REQUEST", {
+      text,
+      state,
+      conversationId: input.conversationId,
+      resolved: resolvedIntent,
+      plan: actionPlan,
+    });
+    logTurnLedger({
+      conversationId: input.conversationId,
+      resolved: resolvedIntent,
+      plan: actionPlan,
+      authorization: createAuth,
+    });
+
     let requestAnnounce = "";
     try {
       const ensured = await ensureActiveServiceRequest({
@@ -1053,9 +1254,17 @@ export async function conciergeTurn(input: {
         conversationLeadId: state.activeLeadId || "",
         utm: input.utm,
         userText: text,
+        authorization: createAuth,
       });
       if (ensured) {
         state = markActiveRequest(state, ensured.publicId);
+        state = {
+          ...state,
+          facts: {
+            ...(state.facts || {}),
+            serviceFactSource: ensured.created ? "CURRENT_USER_EXPLICIT" : "BUSINESS_DB",
+          },
+        };
         if (!state.appointmentId && state.funnelStage !== "BOOKED") {
           state.funnelStage = "HANDOFF";
         }
@@ -1358,6 +1567,7 @@ export async function conciergeTurn(input: {
     }
 
     const memory = answerMemoryQuestion(text, state, state.activeLeadId || conversation.leadPublicId);
+    const requestHistory = answerAuthorizedRequestHistory(text, state);
     const apptTime = answerAppointmentTimeQuestion(text, repairSummaryAppointmentTime(state));
     const opsQa = answerOperationsQuestion(text);
     const bookingNudge = answerBookingNudge(text, state);
@@ -1403,6 +1613,7 @@ export async function conciergeTurn(input: {
     const llmAvailable = Boolean(conciergeApiKey());
     if (llmAvailable) {
       if (apptTime.handled) groundedCompanyAnswer = apptTime.reply;
+      else if (requestHistory.handled) groundedCompanyAnswer = requestHistory.reply;
       else if (opsQa.handled) groundedCompanyAnswer = opsQa.reply;
       else if (memory.handled) groundedCompanyAnswer = memory.reply;
     } else {
@@ -1413,6 +1624,34 @@ export async function conciergeTurn(input: {
       return {
         ok: true as const,
         reply: apptTime.reply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
+        nextAction: "CONTINUE",
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+    if (requestHistory.handled) {
+      const historyReply = resumeAfterInterruption(requestHistory.reply, state);
+      addMessage(input.conversationId, "assistant", historyReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+      return {
+        ok: true as const,
+        reply: historyReply,
         chips: session.chips,
         historicalChips: session.historicalChips,
         leadBanner: session.leadBanner,
@@ -1782,6 +2021,12 @@ export async function conciergeTurn(input: {
           ? { date: state.preferredDate, time: state.preferredTime, label: `${state.preferredDate} ${state.preferredTime}` }
           : null);
       if (slot?.date && slot?.time) {
+        const bookAuth = authorizeConversationAction("CREATE_APPOINTMENT", {
+          text,
+          state,
+          conversationId: input.conversationId,
+        });
+        if (bookAuth.allowed) {
         const booked = await executeConciergeTool(
           "create_appointment",
           { date: slot.date, time: slot.time, customerConfirmed: true },
@@ -1793,6 +2038,7 @@ export async function conciergeTurn(input: {
         if (booked.result && typeof booked.result === "object" && (booked.result as { ok?: boolean }).ok) {
           addEvent(input.conversationId, "DETERMINISTIC_BOOK");
           logNextAction(input.conversationId, finalDecision, { deterministicBook: true });
+        }
         }
       }
     }
@@ -1826,6 +2072,12 @@ export async function conciergeTurn(input: {
     }
 
     if (!ctx.leadId && canCreateLead(state) && !returningGreeting && !state.appointmentId) {
+      const lateAuth = authorizeConversationAction("CREATE_REQUEST", {
+        text,
+        state,
+        conversationId: input.conversationId,
+      });
+      if (lateAuth.allowed) {
       const created = await createLeadFromConcierge({
         conversationId: input.conversationId,
         state,
@@ -1833,11 +2085,13 @@ export async function conciergeTurn(input: {
         existingLeadId: state.activeLeadId || "",
         utm: conversation.utm,
         escalate: HUMAN_RE.test(text) || state.humanRequested,
+        userText: text,
       });
       if (created) {
         ctx.leadId = created;
         state.activeLeadId = created;
         leadCreatedThisTurn = true;
+      }
       }
     }
 
@@ -1882,6 +2136,11 @@ export async function conciergeTurn(input: {
     const responseCompat = validateResponseCompatibility(reply, state, {
       attachmentCount: lockTurnPolicy.attachmentCount,
     });
+    const catalogSafeReply =
+      actionDecision.primaryIntent === "SERVICE_CATALOG_QUESTION" ||
+      actionDecision.primaryIntent === "CAPABILITY_QUESTION"
+        ? serviceCatalogCustomerReply()
+        : "Claro, sigamos con lo que me acabas de pedir. ¿Qué más necesitas contarme?";
     if (!responseCompat.compatible) {
       logIncompatibleResponse(input.conversationId, responseCompat, "final_reply");
       reply =
@@ -1890,7 +2149,7 @@ export async function conciergeTurn(input: {
           ? paintingFollowUpQuestion(state)
           : slotSelectedThisTurn && isSlotConfirmed(state)
             ? formatSlotSelectionConfirmation(state)
-            : "Claro, sigamos con lo que me acabas de pedir. ¿Qué más necesitas contarme?");
+            : catalogSafeReply);
     } else if (responseReferencesStaleService(reply, state) || lockPhotoReplyIncompatibleWithState(reply, state)) {
       logInfo("STALE_ASSISTANT_RESPONSE_BLOCKED", {
         contentJobId: input.conversationId.slice(0, 8),
@@ -1904,7 +2163,7 @@ export async function conciergeTurn(input: {
         transitionAck ||
         (state.primaryService === "painting"
           ? paintingFollowUpQuestion(state)
-          : "Claro, sigamos con lo que me acabas de pedir. ¿Qué más necesitas contarme?");
+          : catalogSafeReply);
       if (transitionAck && !reply.startsWith(transitionAck)) {
         reply = `${transitionAck}\n\n${reply}`;
       }
@@ -1914,6 +2173,9 @@ export async function conciergeTurn(input: {
 
     if (requestAnnounce && state.activeLeadId && !reply.includes(state.activeLeadId)) {
       reply = reply.trim() ? `${requestAnnounce}\n\n${reply}` : requestAnnounce;
+    }
+    if (cancelAckPrefix && !reply.includes(cancelAckPrefix.slice(0, 24))) {
+      reply = reply.trim() ? `${cancelAckPrefix}\n\n${reply}` : cancelAckPrefix;
     }
 
     if (ctx.bookedThisTurn) {
@@ -2033,7 +2295,7 @@ export async function conciergeTurn(input: {
 
     const wa =
       knowledge.whatsappConfigured && leadBanner
-        ? whatsappHref(`Hola, vengo del asistente de Homestead Services. Mi solicitud es ${leadBanner}.`)
+        ? whatsappHref(whatsappRequestMessage(leadBanner))
         : null;
 
     return {

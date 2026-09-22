@@ -10,7 +10,7 @@ import { bumpStateVersion } from "@/lib/concierge/turn-context-guards";
 
 /** Typo-tolerant full reset (not jailbreak "olvida instrucciones"). */
 export const RESET_CONVERSATION_RE =
-  /\b(olv[ií]?d(a|e)\s+todo|olvidemos\s+todo|dejemos\s+todo|empecemos\s+de\s+nuevo|quiero\s+empezar\s+de\s+cero|nueva\s+consulta|reinici(ar|emos)\s+(la\s+)?(charla|conversaci[oó]n)|oldida\s+todo)\b/i;
+  /\b(olv[ií]?d(a|e)\s+todo|olvidemos\s+todo|dejemos\s+todo|empecemos\s+de\s+nuevo|quiero\s+empezar\s+de\s+cero|nueva\s+consulta|reinici(ar|emos)\s+(la\s+)?(charla|conversaci[oó]n)|oldida\s+todo|olv[ií]da(lo|mos)?\s+lo\s+que\s+hablamos)\b/i;
 
 export function detectFullConversationReset(text: string): boolean {
   const trimmed = text.trim();

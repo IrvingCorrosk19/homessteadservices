@@ -49,7 +49,9 @@ export function SocialIcons({
 }) {
   const dictionary = getDictionary();
   // Only live social links — no "próximamente" placeholders on the public site.
-  const platforms = getSocialPlatforms().filter((platform) => Boolean(platform.href));
+  const platforms = getSocialPlatforms()
+    .filter((platform) => Boolean(platform.href))
+    .filter((platform) => variant !== "menu" || platform.id !== "whatsapp");
   if (platforms.length === 0) return null;
 
   return (

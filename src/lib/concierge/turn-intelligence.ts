@@ -149,6 +149,7 @@ const REASK_PATTERNS: Array<{ key: string; re: RegExp }> = [
   { key: "photos", re: /(?:env[ií]a(?:me)? una foto|mand[aá] una foto|tienes foto)/i },
   { key: "building", re: /(?:nombre del ph|qu[eé] ph|edificio)/i },
   { key: "unit", re: /(?:qu[eé] apartamento|qu[eé] unidad|n[uú]mero de apartamento)/i },
+  { key: "slot", re: /(?:qu[eé] d[ií]a y hora|d[ií]a y hora te conviene|d[ií]a te gustar[ií]a la visita|horario te queda)/i },
 ];
 
 export function detectRepeatedQuestion(reply: string, state: ConversationState): string[] {
@@ -165,6 +166,14 @@ export function detectRepeatedQuestion(reply: string, state: ConversationState):
     if (pattern.key === "photos" && (state.photoCount || 0) > 0) repeated.push("photos");
     if (pattern.key === "building" && (state.facts?.building || state.facts?.ph)) repeated.push("building");
     if (pattern.key === "unit" && (state.facts?.unit || state.facts?.apartment)) repeated.push("unit");
+    if (
+      pattern.key === "slot" &&
+      state.preferredDate &&
+      state.preferredTime &&
+      /^\d{2}:\d{2}$/.test(state.preferredTime)
+    ) {
+      repeated.push("slot");
+    }
   }
   return repeated;
 }

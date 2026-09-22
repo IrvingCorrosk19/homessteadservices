@@ -6,6 +6,8 @@ import type { SlotGroup } from "@/lib/concierge-turn-routing";
 import { buildSlotGroups, serviceContextLabel } from "@/lib/concierge-turn-routing";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { classifyExistingRequestOperation } from "@/lib/concierge/existing-request-operation";
 import { buildRequestCard } from "@/lib/concierge/service-request-lifecycle";
 import { photosRemainingFromCount } from "@/lib/concierge-photo-cta";
 import {
@@ -47,7 +49,7 @@ const SLOT_PICK =
   /\b(me sirve|ese horario|la de las|confirmo|agendar|visita|ese d[ií]a|a las)\b/i;
 const TIME_HINT = /\d{1,2}(:\d{2})?\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)?/i;
 const NEW_NEED =
-  /\b(ahora|mejor|en realidad|otra cosa|tambi[eé]n necesito|diferente|en vez|cambiar de|primero necesito|nuevo|otra solicitud)\b/i;
+  /\b(ahora\s+(quiero|necesito|mejor|vamos)|mejor\s+(quiero|necesito)|en realidad|otra cosa|tambi[eé]n necesito|diferente|en vez|cambiar de|primero necesito|nuevo|otra solicitud)\b/i;
 const RESCHEDULE = /\b(reprogram|cambiar (la )?cita|mover (la )?cita|otro horario)\b/i;
 
 function normalizeLabel(value: string) {
@@ -145,6 +147,17 @@ function isTimeRescheduleMessage(text: string, state: ConversationState) {
 }
 
 export function detectNewTransactionSignal(state: ConversationState, text: string, nextPrimary = "") {
+  const existingOp = classifyExistingRequestOperation(text);
+  if (existingOp.blocksServiceSwitch) {
+    return false;
+  }
+  if (
+    existingOp.primaryAction === "CANCEL_REQUEST" ||
+    existingOp.primaryAction === "CANCEL_APPOINTMENT_ONLY" ||
+    existingOp.primaryAction === "RESCHEDULE_APPOINTMENT"
+  ) {
+    return false;
+  }
   if (state.appointmentId && isTimeRescheduleMessage(text, state)) {
     return false;
   }
@@ -152,9 +165,19 @@ export function detectNewTransactionSignal(state: ConversationState, text: strin
     return false;
   }
   const latest = nextPrimary || resolvePrimaryFromMessage(text);
-  if (latest && state.primaryService && latest !== state.primaryService) return true;
-  if (nextPrimary && state.primaryService && nextPrimary !== state.primaryService) return true;
-  if (NEW_NEED.test(text) && text.trim().length > 12) return true;
+  const intent = classifyActionableServiceIntent(text, state);
+  if (latest && state.primaryService && latest !== state.primaryService) {
+    if (!intent.createServiceRequest && !existingOp.hasExplicitNewRequestOperator) return false;
+    return true;
+  }
+  if (nextPrimary && state.primaryService && nextPrimary !== state.primaryService) {
+    if (!intent.createServiceRequest && !existingOp.hasExplicitNewRequestOperator) return false;
+    return true;
+  }
+  if (NEW_NEED.test(text) && text.trim().length > 12) {
+    if (!intent.createServiceRequest && !existingOp.hasExplicitNewRequestOperator) return false;
+    return true;
+  }
   return false;
 }
 

@@ -5,6 +5,7 @@ import type { ConversationState } from "@/lib/concierge-store";
 import { classifyPhone } from "@/lib/phone";
 import { getCustomerContextByPhone, type CustomerContextSnapshot } from "@/lib/concierge/customer-context-read";
 import { logInfo } from "@/lib/log";
+import { classifyExistingRequestOperation } from "@/lib/concierge/existing-request-operation";
 
 export type RetrievedCustomerMemory = {
   snapshot: CustomerContextSnapshot;
@@ -73,4 +74,47 @@ export function customerMemoryBlocksCrossLeak(
   if (memoryA.snapshot.customerId === memoryB.snapshot.customerId) return false;
   const idsA = new Set(memoryA.historicalRequestIds);
   return !memoryB.historicalRequestIds.some((id) => idsA.has(id));
+}
+
+/** Authorized request list/count for the current customer only. Never tenant-wide. */
+export function answerAuthorizedRequestHistory(
+  text: string,
+  state: ConversationState,
+): { handled: boolean; reply: string } {
+  const op = classifyExistingRequestOperation(text);
+  if (op.primaryAction !== "CHECK_STATUS") return { handled: false, reply: "" };
+  const memory = retrieveCustomerMemory(state);
+  const rows = memory?.snapshot.priorRequests || [];
+  const live = state.activeLeadId && !state.activeLeadId.startsWith("DRY-") ? state.activeLeadId : "";
+  if (!rows.length && !live) {
+    if (state.contactStatus !== "VALID") {
+      return {
+        handled: true,
+        reply:
+          "Para decirte con certeza cuántas solicitudes tienes, necesito el teléfono con el que las registramos.",
+      };
+    }
+    return {
+      handled: true,
+      reply: "No veo solicitudes asociadas a tu contacto en este momento.",
+    };
+  }
+  const unique = new Map<string, { publicId: string; service: string; status: string }>();
+  for (const row of rows) unique.set(row.publicId, row);
+  if (live && !unique.has(live)) {
+    unique.set(live, {
+      publicId: live,
+      service: state.primaryService || state.service || "",
+      status: "NEW",
+    });
+  }
+  const list = [...unique.values()];
+  const lines = list
+    .slice(0, 8)
+    .map((row) => `${row.publicId} (${row.service || "servicio"}, ${row.status})`)
+    .join("; ");
+  return {
+    handled: true,
+    reply: `En tu historial autorizado hay ${list.length} solicitud(es): ${lines}.`,
+  };
 }

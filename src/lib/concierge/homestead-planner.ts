@@ -89,7 +89,10 @@ export function planHomesteadTurn(input: {
   else if (nextDecision.action === "ASK_SLOT_SELECTION") responseStrategy = "OFFER_OPTIONS";
   else if (bookedThisTurn) responseStrategy = "CONFIRM";
 
-  if (goal === "REQUEST_SERVICE" || goal === "BOOK_VISIT") {
+  if (perception.userIntent === "CANCEL_REQUEST" || perception.transactionRelationship === "CANCEL") {
+    recommendedActions.push("CANCEL_EXISTING_REQUEST");
+    toolPlan.push({ tool: "cancel_service_request", purpose: "cancel referenced HS", risk: "HIGH_IMPACT_WRITE" });
+  } else if (goal === "REQUEST_SERVICE" || goal === "BOOK_VISIT") {
     if (perception.userIntent !== "ASK_SERVICE_CAPABILITY" && perception.userIntent !== "ASK_GENERAL_QUESTION") {
       recommendedActions.push("ENSURE_SERVICE_REQUEST");
       toolPlan.push({ tool: "create_or_update_lead", purpose: "ensure HS", risk: "LOW_RISK_WRITE" });

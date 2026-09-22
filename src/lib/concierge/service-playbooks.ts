@@ -323,3 +323,9 @@ export function getPlaybook(serviceId: string | undefined | null): ServicePlaybo
 export function playbookById(serviceId: string): ServicePlaybook | undefined {
   return BY_ID.get(serviceId as PlaybookServiceId);
 }
+
+/** Grounded catalog answer — used when the customer asks what we do, not what to book. */
+export function serviceCatalogCustomerReply(): string {
+  const labels = SERVICE_PLAYBOOKS.filter((item) => item.serviceId !== "other").map((item) => item.label);
+  return `Trabajamos ${labels.join(", ").toLowerCase()} en Panamá. Si me cuentas qué está pasando en tu espacio, te oriento en el siguiente paso.`;
+}

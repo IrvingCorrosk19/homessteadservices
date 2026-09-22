@@ -1,5 +1,5 @@
 import { RequestForm } from "@/components/contact/RequestForm";
-import { contact, emailHref, isPublicWhatsAppEnabled, phoneHref, whatsappHref } from "@/lib/site";
+import { contact, emailHref, phoneHref, whatsappHref } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 type ContactDetail = {
@@ -18,10 +18,7 @@ export function ContactSection({
   const dictionary = getDictionary();
   const phone = phoneHref();
   const email = emailHref();
-  const whatsapp =
-    isPublicWhatsAppEnabled() && contact.whatsapp.isConfigured
-      ? whatsappHref(dictionary.whatsapp.defaultMessage)
-      : null;
+  const whatsapp = whatsappHref(dictionary.whatsapp.defaultMessage);
 
   // Only real, usable public contact data — never placeholders.
   const details: ContactDetail[] = [];

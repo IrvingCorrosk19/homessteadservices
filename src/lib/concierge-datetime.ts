@@ -1,4 +1,5 @@
 import { businessHoursRange, businessTimezone, businessYmd } from "@/lib/appointment-time";
+import { speechAfterSelfCorrection } from "@/lib/concierge/speech-act-safety";
 
 const WEEKDAYS: Array<{ re: RegExp; index: number }> = [
   { re: /\bdomingos?\b/, index: 0 },
@@ -59,7 +60,7 @@ function padTime(hours: number, minutes = 0) {
 }
 
 export function parseClock(text: string) {
-  const lower = text.toLowerCase();
+  const lower = speechAfterSelfCorrection(text).toLowerCase();
   const hmAmpm = lower.match(/\b(\d{1,2}):(\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)\b/);
   if (hmAmpm) {
     let hours = Number(hmAmpm[1]);
@@ -83,11 +84,26 @@ export function parseClock(text: string) {
     else if (afternoon) hours += 12;
     if (hours >= 0 && hours <= 23) return padTime(hours);
   }
-  const las = lower.match(/\ba las\s+(\d{1,2})\b/);
+  const morningClock = lower.match(/\b(?:a\s+las\s+|las\s+)?(\d{1,2})(?::(\d{2}))?\s+de\s+la\s+ma[ñn]ana\b/);
+  if (morningClock) {
+    const hours = Number(morningClock[1]);
+    const minutes = Number(morningClock[2] || 0);
+    if (hours >= 1 && hours <= 12 && minutes >= 0 && minutes <= 59) {
+      return padTime(hours === 12 ? 0 : hours, minutes);
+    }
+  }
+  const las = lower.match(/\b(?:como|tipo|alrededor de|a eso de)?\s*(?:a\s+)?las\s+(\d{1,2})\b/);
   if (las) {
     let hours = Number(las[1]);
     if (hours >= 1 && hours <= 7) hours += 12;
     if (hours >= 0 && hours <= 23) return padTime(hours);
+  }
+  const hedge = lower.match(/\b(?:como|tipo|alrededor de|a eso de)\s+(?:las\s+)?(\d{1,2})(?::(\d{2}))?\b/);
+  if (hedge) {
+    let hours = Number(hedge[1]);
+    const minutes = Number(hedge[2] || 0);
+    if (hours >= 1 && hours <= 7) hours += 12;
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) return padTime(hours, minutes);
   }
   return "";
 }
@@ -183,11 +199,22 @@ export function parseExactCalendarDay(text: string, todayYmd: string): string {
   return "";
 }
 
+export function isDeferredCustomerReplyTime(text: string) {
+  const blob = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(puedo|me sirve|me funciona|vengan|agendar|tipo|como a las)\b/.test(blob)) return false;
+  return /\b(te (digo|confirmo|aviso|escribo)|luego te (digo|confirmo)|ma[nñ]ana te (digo|confirmo|aviso)|el \w+ te (digo|confirmo))\b/.test(
+    blob,
+  );
+}
+
 export function parseNaturalDateTime(text: string, now = new Date()): ParsedVisitWhen {
   // Parse on FULL message — truncating before parse dropped "mañana a las 2 pm"
   // when packed into long multi-fact messages (P0 Case B).
   const full = text.trim().replace(/\s+/g, " ").slice(0, 2000);
   const lower = full.toLowerCase();
+  if (isDeferredCustomerReplyTime(full)) {
+    return { date: "", time: "", window: "", raw: full.slice(0, 160), exactDay: false };
+  }
   const today = panamaParts(now).ymd;
   let date = "";
   let exactDay = false;

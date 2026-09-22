@@ -11,6 +11,7 @@ import {
   type ServicePlaybook,
 } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage, serviceNeedDetail } from "@/lib/concierge/service-intent";
+import { aliasHits, foldLex } from "@/lib/concierge/lexical-match";
 import type { ConversationState } from "@/lib/concierge-store";
 
 const PHONE_MASK = /\+?\d[\d\s\-()]{6,}\d/g;
@@ -39,17 +40,7 @@ export function emptyIntel(): ServiceIntel {
 }
 
 function fold(value: string) {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-function aliasHits(blob: string, alias: string) {
-  const needle = fold(alias);
-  if (!needle) return false;
-  if (needle.length <= 4) {
-    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?:^|[^a-z0-9])${escaped}`).test(blob);
-  }
-  return blob.includes(needle);
+  return foldLex(value);
 }
 
 export function detectServices(text: string): PlaybookServiceId[] {
@@ -132,6 +123,9 @@ export function detectUrgency(text: string, playbook: ServicePlaybook): ServiceI
   const blob = text.toLowerCase();
   if (/chispa|humo|olor a quemado|electroc|incendio|gas(olina)?\s*(fug|olor)|inundaci[oó]n grave/.test(blob)) {
     return "safety";
+  }
+  if (/empeor|urgente|se pone peor|cada vez peor|no puede esperar|se est[aá] agrav/.test(blob)) {
+    return "elevated";
   }
   if (playbook.urgencySignals.some((signal) => blob.includes(signal.toLowerCase()))) return "elevated";
   return "normal";

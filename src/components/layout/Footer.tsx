@@ -18,7 +18,7 @@ export function Footer() {
       key: "whatsapp",
       node: (
         <a href={whatsapp} target="_blank" rel="noopener noreferrer">
-          WhatsApp
+          WhatsApp: {contact.whatsapp.value}
         </a>
       ),
     });

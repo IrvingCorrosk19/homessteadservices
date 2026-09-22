@@ -668,6 +668,18 @@ export function getAppointment(appointmentId: string) {
   return row ? mapAppointment(row) : null;
 }
 
+export function getActiveAppointmentIdForLead(leadId: string) {
+  if (!leadId) return "";
+  const row = getHomesteadDb()
+    .prepare(
+      `SELECT appointment_id FROM revenue_appointments
+       WHERE lead_id = ? AND status IN ('REQUESTED','PROPOSED','CONFIRMED','RESCHEDULED','PENDING')
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(leadId) as { appointment_id: string } | undefined;
+  return row?.appointment_id || "";
+}
+
 export function listAppointments(input: { from?: string; to?: string; status?: string; service?: string; assignedTo?: string } = {}) {
   const clauses = ["1=1"];
   const params: Array<string> = [];

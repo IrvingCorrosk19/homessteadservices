@@ -11,7 +11,11 @@ export function answerOperationsQuestion(text: string): { handled: boolean; repl
         "El costo depende del diagnóstico en sitio; no hay una tarifa publicada. El técnico te confirma el alcance antes de trabajar.",
     };
   }
-  if (!/\b(trabajan|atienden|domingo|s[aá]bado|festivo|horario de atenci[oó]n)\b/i.test(text)) {
+  const hoursFrame =
+    /\b(horario(?:es)?(?:\s+de\s+atenci[oó]n)?|domingos?|s[aá]bados?|festivos?|d[ií]as?\s+de\s+atenci|a\s+qu[eé]\s+hora|cu[aá]ndo\s+(atienden|trabajan|abren)|abren|cierran)\b/i.test(
+      text,
+    );
+  if (!hoursFrame) {
     return { handled: false, reply: "" };
   }
   return {

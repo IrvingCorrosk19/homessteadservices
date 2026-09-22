@@ -21,19 +21,46 @@ function envOrEmpty(value: string | undefined): {
   return { value: trimmed, isConfigured: trimmed.length > 0 };
 }
 
+/** Official Homestead WhatsApp — single source of truth for public CTAs. */
+export const OFFICIAL_WHATSAPP = {
+  display: "+507 6661-6580",
+  localDisplay: "6661-6580",
+  destination: "50766616580",
+} as const;
+
+const HS_PUBLIC_ID = /^HS-\d{4}-\d{6}$/;
+const HA_PUBLIC_ID = /^HA-[a-f0-9]{8}$/i;
+
 export const contact = {
   phone: envOrEmpty(process.env.NEXT_PUBLIC_PHONE),
   email: envOrEmpty(process.env.NEXT_PUBLIC_EMAIL),
-  whatsapp: envOrEmpty(process.env.NEXT_PUBLIC_WHATSAPP),
+  whatsapp: { value: OFFICIAL_WHATSAPP.display, isConfigured: true },
   hours: envOrEmpty(process.env.NEXT_PUBLIC_HOURS),
   serviceArea: envOrEmpty(process.env.NEXT_PUBLIC_SERVICE_AREA),
   instagram: envOrEmpty(process.env.NEXT_PUBLIC_INSTAGRAM),
   facebook: envOrEmpty(process.env.NEXT_PUBLIC_FACEBOOK),
 };
 
-/** Public website WhatsApp CTAs. Off by default; set NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED=true to re-enable. */
+/** Telegram/ops customer WhatsApp buttons. Unchanged: opt-in only. */
 export function isPublicWhatsAppEnabled() {
   return process.env.NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true";
+}
+
+/** Official Homestead WhatsApp on the public site. Kill switch: NEXT_PUBLIC_OFFICIAL_WHATSAPP=false. */
+export function isOfficialWhatsAppEnabled() {
+  return process.env.NEXT_PUBLIC_OFFICIAL_WHATSAPP !== "false";
+}
+
+export function officialWhatsAppDestination() {
+  return OFFICIAL_WHATSAPP.destination;
+}
+
+/** Always official Homestead destination. Does not use customer/technician phones. */
+export function buildWhatsAppUrl(message?: string) {
+  const text = message?.trim()
+    ? `?text=${encodeURIComponent(message.trim())}`
+    : "";
+  return `https://wa.me/${OFFICIAL_WHATSAPP.destination}${text}`;
 }
 
 export function phoneHref() {
@@ -47,17 +74,33 @@ export function emailHref() {
 }
 
 export function whatsappHref(message?: string) {
-  if (!isPublicWhatsAppEnabled()) return null;
-  if (!contact.whatsapp.isConfigured) return null;
-  const number = contact.whatsapp.value.replace(/\D/g, "");
-  if (!number) return null;
-  const text = message ? `?text=${encodeURIComponent(message)}` : "";
-  return `https://wa.me/${number}${text}`;
+  if (!isOfficialWhatsAppEnabled()) return null;
+  return buildWhatsAppUrl(message);
+}
+
+export function whatsappDefaultMessage() {
+  return "Hola, quisiera información sobre los servicios de Homestead.";
 }
 
 export function whatsappServiceMessage(serviceLabel?: string) {
-  if (!serviceLabel) return "Hola Homestead Services. Necesito ayuda.";
-  return `Hola Homestead Services. Necesito ayuda con ${serviceLabel.toLowerCase()}.`;
+  if (!serviceLabel?.trim()) return whatsappDefaultMessage();
+  return `Hola, quisiera información sobre el servicio de ${serviceLabel.trim().toLowerCase()} de Homestead.`;
+}
+
+export function whatsappRequestMessage(publicId?: string) {
+  const id = publicId?.trim().toUpperCase() || "";
+  if (HS_PUBLIC_ID.test(id)) {
+    return `Hola, quisiera consultar sobre mi solicitud ${id}.`;
+  }
+  return whatsappDefaultMessage();
+}
+
+export function whatsappAppointmentMessage(appointmentId?: string) {
+  const id = appointmentId?.trim() || "";
+  if (HA_PUBLIC_ID.test(id)) {
+    return `Hola, quisiera consultar sobre mi cita ${id.startsWith("HA-") ? id : `HA-${id}`}.`;
+  }
+  return "Hola, quisiera consultar sobre mi cita de Homestead.";
 }
 
 export function instagramHref() {
@@ -87,7 +130,7 @@ export function getSocialPlatforms(): SocialPlatform[] {
     { id: "instagram", label: "Instagram", href: instagramHref() },
     { id: "facebook", label: "Facebook", href: facebookHref() },
   ];
-  if (isPublicWhatsAppEnabled()) {
+  if (isOfficialWhatsAppEnabled()) {
     platforms.push({ id: "whatsapp", label: "WhatsApp", href: whatsappHref() });
   }
   return platforms;

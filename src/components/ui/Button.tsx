@@ -21,6 +21,8 @@ type Common = {
   children: ReactNode;
   className?: string;
   variant?: Variant;
+  "aria-label"?: string;
+  onClick?: () => void;
 };
 
 export function ButtonLink({
@@ -30,6 +32,8 @@ export function ButtonLink({
   variant = "primary",
   target,
   rel,
+  "aria-label": ariaLabel,
+  onClick,
 }: Common & { href: string; target?: string; rel?: string }) {
   const external = href.startsWith("http") || href.startsWith("tel:") || href.startsWith("mailto:");
   if (external) {
@@ -38,6 +42,8 @@ export function ButtonLink({
         href={href}
         target={target}
         rel={rel}
+        aria-label={ariaLabel}
+        onClick={onClick}
         className={`${base} ${variants[variant]} ${className}`}
       >
         {children}
@@ -46,7 +52,7 @@ export function ButtonLink({
   }
 
   return (
-    <Link href={href} className={`${base} ${variants[variant]} ${className}`}>
+    <Link href={href} aria-label={ariaLabel} onClick={onClick} className={`${base} ${variants[variant]} ${className}`}>
       {children}
     </Link>
   );

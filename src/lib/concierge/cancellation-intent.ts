@@ -12,6 +12,12 @@ import {
   getRequestByPublicId,
   listCancellableRequestsForCustomer,
 } from "@/lib/service-requests";
+import {
+  classifyExistingRequestOperation,
+  hasSpecificRequestReferent,
+  operationClauseText,
+  resolveReferencedRequest,
+} from "@/lib/concierge/existing-request-operation";
 import { resolveShortReplyIntent } from "@/lib/concierge/affirmative-context";
 
 export const CANCELLATION_REASON_CATEGORIES = [
@@ -157,6 +163,20 @@ export function detectCustomerCancellationIntent(
     return { kind: "DELETE_DATA_REQUEST", ...base, confidence: "high" };
   }
 
+  const existingOp = classifyExistingRequestOperation(trimmed);
+  if (existingOp.primaryAction === "CANCEL_APPOINTMENT_ONLY") {
+    return { kind: "CANCEL_APPOINTMENT_ONLY", ...base, confidence: "high" };
+  }
+  if (existingOp.primaryAction === "CANCEL_REQUEST") {
+    return {
+      kind: "CANCEL_REQUEST",
+      ...base,
+      explicitRequestId: existingOp.explicitRequestIds[0] || explicitRequestId,
+      explainedAsDelete: /\belimin/.test(blob),
+      confidence: "high",
+    };
+  }
+
   if (END_CHAT_RE.test(trimmed) && !CANCEL_REQUEST_RE.test(blob) && !CANCEL_APPOINTMENT_RE.test(blob)) {
     return { kind: "END_CONVERSATION", ...base, confidence: "high" };
   }
@@ -274,7 +294,62 @@ export function resolveCancellationTarget(
   intent: CustomerCancellationIntent,
   state: ConversationState,
   conversationLeadId = "",
+  sourceText = "",
 ): CancellationTarget {
+  const authorized = (() => {
+    const rows =
+      state.contactStatus === "VALID" && state.phone
+        ? listCancellableRequestsForCustomer(state.phone)
+        : [];
+    const seen = new Set(rows.map((row) => row.publicId));
+    const extra = [intent.explicitRequestId, state.activeLeadId, conversationLeadId].filter(Boolean);
+    for (const id of extra) {
+      if (seen.has(id)) continue;
+      const request = getRequestByPublicId(id);
+      if (request && requestOwnedByConversation(id, state, conversationLeadId)) {
+        rows.push(request);
+        seen.add(id);
+      }
+    }
+    return rows.map((row) => ({
+      publicId: row.publicId,
+      service: row.service,
+      createdAt: row.createdAt,
+    }));
+  })();
+  const listedIds = (state.facts?.listedRequestIds || "")
+    .split("|")
+    .map((id) => id.trim().toUpperCase())
+    .filter((id) => PUBLIC_ID_PATTERN.test(id));
+
+  const utterance = (sourceText || intent.reason || intent.explicitRequestId || "").trim();
+  const resolved = resolveReferencedRequest({
+    text: utterance,
+    authorized,
+    listedIds,
+    activeRequestId: state.activeLeadId || conversationLeadId,
+  });
+  if (resolved.ok) {
+    if (!requestOwnedByConversation(resolved.requestId, state, conversationLeadId) && resolved.requestId !== state.activeLeadId) {
+      return { ok: false, errorCode: "NOT_AUTHORIZED" };
+    }
+    return { ok: true, requestId: resolved.requestId };
+  }
+  if (resolved.errorCode === "NOT_AUTHORIZED") {
+    return { ok: false, errorCode: "NOT_AUTHORIZED" };
+  }
+  if (resolved.errorCode === "NEEDS_CLARIFICATION") {
+    return {
+      ok: false,
+      errorCode: "NEEDS_CLARIFICATION",
+      options: authorized.slice(0, 4).map((row) => ({ publicId: row.publicId, service: row.service })),
+    };
+  }
+
+  if (hasSpecificRequestReferent(utterance || operationClauseText(utterance))) {
+    return { ok: false, errorCode: resolved.errorCode || "NOT_FOUND" };
+  }
+
   const explicit = intent.explicitRequestId;
   if (explicit) {
     const request = getRequestByPublicId(explicit);

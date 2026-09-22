@@ -1,6 +1,6 @@
 import { conciergeKnowledge } from "@/lib/concierge-knowledge";
 import { checkAvailability, isSlotStillOpen, type AvailabilitySlot } from "@/lib/concierge-availability";
-import { parseNaturalDateTime } from "@/lib/concierge-datetime";
+import { parseNaturalDateTime, isDeferredCustomerReplyTime } from "@/lib/concierge-datetime";
 import { canHandoffLead, createLeadFromConcierge } from "@/lib/concierge-handoff";
 import { recordFunnelEvent } from "@/lib/concierge-intelligence";
 import { classifyPhone } from "@/lib/phone";
@@ -32,6 +32,7 @@ import {
 import { applyTurnIntelligence, parseTurnIntelligence } from "@/lib/concierge/turn-intelligence";
 import { getAppointmentReadiness, firstMissingQuestion } from "@/lib/concierge/appointment-readiness";
 import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { authorizeConversationAction } from "@/lib/concierge/conversation-action-gate";
 import { hasValidServiceIntent } from "@/lib/concierge/service-request-lifecycle";
 import { logInfo } from "@/lib/log";
 import {
@@ -388,6 +389,20 @@ export async function executeConciergeTool(
         leadId,
       };
     }
+    if (!state.activeLeadId) {
+      const auth = authorizeConversationAction("CREATE_REQUEST", {
+        text: userText,
+        state,
+        conversationId: ctx.conversationId,
+      });
+      if (!auth.allowed) {
+        return {
+          result: { ok: false, reason: auth.reason, orphanTool: true },
+          state,
+          leadId,
+        };
+      }
+    }
     const targetLead = state.activeLeadId || leadId;
     const created = await createLeadFromConcierge({
       conversationId: ctx.conversationId,
@@ -395,6 +410,7 @@ export async function executeConciergeTool(
       summary: ctx.summary,
       existingLeadId: targetLead,
       utm: ctx.utm,
+      userText,
     });
     leadId = created || targetLead;
     if (leadId) state.activeLeadId = leadId;
@@ -504,6 +520,14 @@ export async function executeConciergeTool(
   }
 
   if (name === "create_appointment") {
+    const bookAuth = authorizeConversationAction("CREATE_APPOINTMENT", {
+      text: ctx.userText || "",
+      state,
+      conversationId: ctx.conversationId,
+    });
+    if (!bookAuth.allowed) {
+      return { result: { ok: false, reason: bookAuth.reason, orphanTool: true }, state, leadId };
+    }
     const date = asString(args.date);
     const time = asString(args.time);
     const confirmed = Boolean(args.customerConfirmed);
@@ -780,14 +804,22 @@ export async function executeConciergeTool(
     state.humanRequested = true;
     state.humanHandoffRequested = true;
     if (!leadId && canHandoffLead(state)) {
-      leadId = await createLeadFromConcierge({
-        conversationId: ctx.conversationId,
+      const auth = authorizeConversationAction("CREATE_REQUEST", {
+        text: ctx.userText || ctx.summary || "",
         state,
-        summary: ctx.summary,
-        existingLeadId: "",
-        utm: ctx.utm,
-        escalate: true,
+        conversationId: ctx.conversationId,
       });
+      if (auth.allowed) {
+        leadId = await createLeadFromConcierge({
+          conversationId: ctx.conversationId,
+          state,
+          summary: ctx.summary,
+          existingLeadId: "",
+          utm: ctx.utm,
+          escalate: true,
+          userText: ctx.userText || ctx.summary || "",
+        });
+      }
     }
     return { result: { ok: true, handoff: true, reason: asString(args.reason) || "human" }, state, leadId };
   }
@@ -796,6 +828,7 @@ export async function executeConciergeTool(
 }
 
 export function mergeParsedWhen(state: ConversationState, text: string) {
+  if (isDeferredCustomerReplyTime(text)) return state;
   const parsed = parseNaturalDateTime(text);
   const locked = isSlotConfirmed(state);
   const reschedule = hasRescheduleSignal(text);
@@ -820,5 +853,15 @@ export function mergeParsedWhen(state: ConversationState, text: string) {
     }
   }
   if (parsed.time && (!locked || reschedule)) state.preferredTime = parsed.time;
+  if (parsed.date || parsed.time) {
+    state = {
+      ...state,
+      facts: {
+        ...(state.facts || {}),
+        ...(parsed.raw ? { originalWhenExpression: parsed.raw.slice(0, 160) } : {}),
+        ...(parsed.date ? { resolvedLocalDate: parsed.date } : {}),
+      },
+    };
+  }
   return state;
 }

@@ -162,12 +162,12 @@ export function lockPhotoReplyIncompatibleWithState(reply: string, state: Conver
   const lock = getDigitalLockChecklist(state);
   const abandoned = state.facts?.digitalLockAbandoned === "1";
   const lockSpeech =
-    /esta imagen no muestra|foto de frente de la puerta|solo me falta.*(frente|interior|canto|pestillo)|me sirve como|canto donde|cerradura digital|pestillo/i.test(
+    /esta imagen no muestra|foto de frente de la puerta|solo me falta.*(frente|interior|canto|pestillo)|me sirve como|canto donde/i.test(
       reply,
     );
   if (!lockSpeech) return false;
   if (abandoned) return true;
   if (service && service !== "locksmith") return true;
-  if (!lock.active && lockSpeech) return true;
+  if (service === "locksmith" && !lock.active) return true;
   return false;
 }

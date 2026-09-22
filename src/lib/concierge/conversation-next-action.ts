@@ -15,6 +15,7 @@ import { isSlotConfirmed, shouldBlockDuplicateAsk } from "@/lib/concierge/canoni
 import { detectReprogramAppointmentIntent } from "@/lib/concierge/appointment-reprogram";
 import { classifyPhone } from "@/lib/phone";
 import { logInfo } from "@/lib/log";
+import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
 import type { ConversationState } from "@/lib/concierge-store";
 
 export type ConciergeNextAction =
@@ -167,6 +168,28 @@ export function determineNextAction(
       reason: "appointment_exists",
       cannedQuestion: "",
       readiness: { ...readiness, missingFields: [], ready: true },
+      locationSufficient,
+      blockInventedAsks: true,
+    };
+  }
+
+  const turnIntent = classifyActionableServiceIntent(opts.userText || "", state);
+  if (
+    !state.activeLeadId &&
+    !turnIntent.createServiceRequest &&
+    (turnIntent.actionability === "POSSIBLE" ||
+      turnIntent.primaryIntent === "PROBLEM_MENTION" ||
+      turnIntent.primaryIntent === "DIAGNOSTIC_QUESTION" ||
+      turnIntent.informationalOnly)
+  ) {
+    return {
+      action: "CONTINUE",
+      missingFields: missing,
+      requiredMissing: [],
+      askField: "",
+      reason: "understand_need_before_request",
+      cannedQuestion: "",
+      readiness: { ...readiness, missingFields: missing, ready: false },
       locationSufficient,
       blockInventedAsks: true,
     };
@@ -353,6 +376,23 @@ export function enforceDeterministicAsk(
   } else if ((inventingLocation || inventingVague) && decision.requiredMissing.length === 0) {
     text =
       "Listo. Si quieres confirmamos el horario que elegiste; no necesito más detalles de ubicación.";
+    rewritten = true;
+  }
+
+  if (
+    hasRequestedExactWhen(state) &&
+    /qu[eé]\s+d[ií]a(?:\s+y\s+hora)?|d[ií]a y hora te conviene|horario te (queda|conviene)|qu[eé] d[ií]a te gustar/i.test(
+      text,
+    ) &&
+    decision.action !== "ASK_SLOT_SELECTION"
+  ) {
+    text =
+      decision.action === "CHECK_AVAILABILITY"
+        ? "Voy a revisar el calendario con el horario que ya me diste."
+        : text.replace(
+            /[¿?]?\s*(Gracias, ya tengo lo esencial\.\s*)?¿?Qu[eé] d[ií]a y hora te conviene para la visita\??/gi,
+            "",
+          ).trim() || "Voy a revisar el calendario con lo que ya me indicaste.";
     rewritten = true;
   }
 

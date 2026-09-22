@@ -6,6 +6,7 @@
 import type { ConversationState } from "@/lib/concierge-store";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { classifyExistingRequestOperation, serviceAfterNewRequestOperator } from "@/lib/concierge/existing-request-operation";
 import {
   emptyDigitalLockChecklist,
   getDigitalLockChecklist,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/concierge/digital-lock-vision";
 import { logInfo } from "@/lib/log";
 import { cancelServiceRequest } from "@/lib/service-request-cancellation";
+import { authorizeConversationAction } from "@/lib/concierge/conversation-action-gate";
 
 export type TransitionKind =
   | "CONTINUE_CURRENT_SERVICE"
@@ -111,7 +113,31 @@ export function detectConversationTransition(
   text: string,
 ): ConversationTransition {
   const previousService = state.primaryService || state.service || "";
-  const nextFromMessage = resolvePrimaryFromMessage(text);
+  const existingOp = classifyExistingRequestOperation(text);
+  if (existingOp.blocksServiceSwitch) {
+    return {
+      kind: "CONTINUE_CURRENT_SERVICE",
+      previousService,
+      nextService: previousService,
+      abandonSignal: false,
+      addSignal: false,
+      ack: "",
+    };
+  }
+  if (existingOp.primaryAction === "CANCEL_REQUEST" && existingOp.hasExplicitNewRequestOperator) {
+    const next = serviceAfterNewRequestOperator(text);
+    return {
+      kind: "CONTINUE_CURRENT_SERVICE",
+      previousService,
+      nextService: next || previousService,
+      abandonSignal: false,
+      addSignal: false,
+      ack: "",
+    };
+  }
+  const nextFromMessage = existingOp.hasExplicitNewRequestOperator
+    ? serviceAfterNewRequestOperator(text)
+    : resolvePrimaryFromMessage(text);
   const abandonSignal = ABANDON_RE.test(text);
   const addSignal = ADD_RE.test(text) && !abandonSignal;
   const switchPhrase = SWITCH_TO_RE.test(text);
@@ -122,6 +148,30 @@ export function detectConversationTransition(
     if (intent.informationalOnly) return true;
     return false;
   })();
+  const turnIntent = classifyActionableServiceIntent(text, state);
+  const otherTradeSwitchCue =
+    Boolean(nextFromMessage && previousService && nextFromMessage !== previousService) &&
+    /\b(mejor|primero|en vez|en lugar)\b/i.test(text);
+  if (
+    !turnIntent.createServiceRequest &&
+    (turnIntent.actionability === "POSSIBLE" ||
+      turnIntent.primaryIntent === "PROBLEM_MENTION" ||
+      turnIntent.primaryIntent === "DIAGNOSTIC_QUESTION") &&
+    !abandonSignal &&
+    !switchPhrase &&
+    !otherTradeSwitchCue &&
+    !(nextFromMessage && isRefinement(previousService, nextFromMessage)) &&
+    !existingOp.hasExplicitNewRequestOperator
+  ) {
+    return {
+      kind: "CONTINUE_CURRENT_SERVICE",
+      previousService,
+      nextService: previousService || nextFromMessage || "",
+      abandonSignal: false,
+      addSignal: false,
+      ack: "",
+    };
+  }
   if (capabilityQuestion) {
     return {
       kind: "GENERAL_QUESTION",
@@ -149,6 +199,16 @@ export function detectConversationTransition(
 
   // ADD another service (keep current; do not cancel)
   if (addSignal && nextFromMessage && previousService && nextFromMessage !== previousService) {
+    if (!turnIntent.createServiceRequest) {
+      return {
+        kind: "CONTINUE_CURRENT_SERVICE",
+        previousService,
+        nextService: previousService,
+        abandonSignal: false,
+        addSignal: false,
+        ack: "",
+      };
+    }
     return {
       kind: "ADD_ANOTHER_SERVICE",
       previousService,
@@ -286,7 +346,7 @@ export function clearServiceScopedState(state: ConversationState): ConversationS
 export function applyConversationTransition(
   state: ConversationState,
   transition: ConversationTransition,
-  opts: { cancelExistingHs?: boolean } = {},
+  opts: { cancelExistingHs?: boolean; userText?: string } = {},
 ): ConversationState {
   const { kind, previousService, nextService } = transition;
 
@@ -337,6 +397,11 @@ export function applyConversationTransition(
   if (kind === "CANCEL_CURRENT_SERVICE" || kind === "SWITCH_SERVICE") {
     const oldHs = state.activeLeadId || "";
     if (opts.cancelExistingHs !== false && oldHs && !oldHs.startsWith("DRY-")) {
+      const switchAuth = authorizeConversationAction(
+        kind === "SWITCH_SERVICE" ? "SWITCH_SERVICE" : "CANCEL_REQUEST",
+        { text: opts.userText || "", state, targetId: oldHs },
+      );
+      if (switchAuth.allowed) {
       try {
         cancelServiceRequest({
           requestId: oldHs,
@@ -352,6 +417,7 @@ export function applyConversationTransition(
         });
       } catch {
         // best-effort cancel
+      }
       }
     }
 
@@ -418,17 +484,19 @@ export function isPendingActionStillValid(pendingAction: string, state: Conversa
   return true;
 }
 
+/** Lock-photo validation speech — not catalog nouns like "pintura interior" or "cerradura digital". */
+const LOCK_PHOTO_VALIDATION_SPEECH =
+  /esta imagen no muestra|foto del canto|foto de frente de la puerta|me sirve como|solo me falta|canto\s*\/\s*pestillo|parte interior|frente de la puerta|canto de la (puerta|cerradura)/i;
+
 export function responseReferencesStaleService(reply: string, state: ConversationState): boolean {
   if (!reply.trim()) return false;
   const service = state.primaryService || state.service || "";
-  const lockSpeech =
-    /esta imagen no muestra|canto|pestillo|frente|interior|cerradura digital|foto del canto|me sirve como|solo me falta/i.test(
-      reply,
-    );
-  if (state.facts?.digitalLockAbandoned === "1" || (service && service !== "locksmith")) {
+  const lockSpeech = LOCK_PHOTO_VALIDATION_SPEECH.test(reply);
+  if (!service) return false;
+  if (state.facts?.digitalLockAbandoned === "1" || service !== "locksmith") {
     if (lockSpeech) return true;
   }
-  if (!getDigitalLockChecklist(state).active && lockSpeech && service !== "locksmith") {
+  if (service && service !== "locksmith" && !getDigitalLockChecklist(state).active && lockSpeech) {
     return true;
   }
   if (service === "painting" && /cerradura|canto|pestillo|aire acondicionado|fuga|plomer/i.test(reply)) {

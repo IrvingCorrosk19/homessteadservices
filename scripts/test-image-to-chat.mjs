@@ -21,7 +21,7 @@ const ac = readFileSync(join(root, "src/components/home/ACMaintenance.tsx"), "ut
 const hero = readFileSync(join(root, "src/components/home/Hero.tsx"), "utf8");
 const finalCta = readFileSync(join(root, "src/components/home/FinalCTA.tsx"), "utf8");
 const mobileBar = readFileSync(join(root, "src/components/layout/MobileBar.tsx"), "utf8");
-const waHeader = readFileSync(join(root, "src/components/brand/WhatsAppHeaderButton.tsx"), "utf8");
+const waHeaderCta = readFileSync(join(root, "src/components/brand/WhatsAppHeaderCta.tsx"), "utf8");
 const contact = readFileSync(join(root, "src/components/contact/ContactSection.tsx"), "utf8");
 const chatRoute = readFileSync(join(root, "src/app/api/concierge/chat/route.ts"), "utf8");
 const handoff = readFileSync(join(root, "src/lib/concierge-handoff.ts"), "utf8");
@@ -29,10 +29,10 @@ const intel = readFileSync(join(root, "src/lib/concierge-intelligence.ts"), "utf
 const consultBtn = readFileSync(join(root, "src/components/concierge/ServiceConsultButton.tsx"), "utf8");
 const es = readFileSync(join(root, "src/i18n/es.ts"), "utf8");
 
-ok("WA-01 public flag off by default", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true"/.test(site));
-ok("WA-02 whatsappHref gated", /isPublicWhatsAppEnabled\(\)/.test(site) && /return null/.test(site));
-ok("WA-03 header returns null when off", /!isPublicWhatsAppEnabled\(\)\) return null/.test(waHeader));
-ok("WA-04 contact gated", /isPublicWhatsAppEnabled/.test(contact));
+ok("WA-01 Telegram/ops WA still opt-in", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true"/.test(site));
+ok("WA-02 official href gated", /isOfficialWhatsAppEnabled\(\)/.test(site) && /return null/.test(site));
+ok("WA-03 header CTA returns null when official off", /!isOfficialWhatsAppEnabled\(\)\) return null/.test(waHeaderCta));
+ok("WA-04 contact uses official helper", /whatsappHref/.test(contact));
 ok("WA-05 hero no WhatsApp CTA", !/WhatsApp|wa\.me/.test(hero));
 ok("WA-06 final CTA no WhatsApp", !/WhatsApp|wa\.me/.test(finalCta));
 ok("WA-07 mobile bar uses chat", /OpenChatButton/.test(mobileBar) && !/wa\.me|WhatsApp/.test(mobileBar));

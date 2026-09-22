@@ -1,5 +1,6 @@
 import { classifyPhone, extractEmbeddedPhone, looksLikePhoneAttempt } from "@/lib/phone";
 import type { ConversationState } from "@/lib/concierge-store";
+import { parseClock } from "@/lib/concierge-datetime";
 import {
   detectExplicitCorrection,
   isValidPersonName,
@@ -22,6 +23,8 @@ import {
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { resolvePrimaryFromMessage } from "@/lib/concierge/service-intent";
 import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { classifyExistingRequestOperation, speechTextForNewWork } from "@/lib/concierge/existing-request-operation";
+import { isLastMomentBookingWithdrawal, speechAfterSelfCorrection } from "@/lib/concierge/speech-act-safety";
 
 export type FactConfidence = "EXPLICIT" | "HIGH_CONFIDENCE" | "UNCERTAIN";
 
@@ -82,7 +85,11 @@ function trimNameAtBoundary(raw: string) {
 }
 
 function extractName(text: string) {
-  const normalized = normalizeNameMarkers(text);
+  const corrected = speechAfterSelfCorrection(text);
+  const normalized = normalizeNameMarkers(corrected);
+  if (corrected !== (text || "") && isValidPersonName(normalized.trim())) {
+    return trimNameAtBoundary(normalized);
+  }
   const explicitPatterns = [
     /\bmi\s+nombre\s+es\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i,
     /\ba\s+nombre\s+de\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+(?:\s+[A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ]+){0,2})/i,
@@ -132,7 +139,8 @@ function extractHouseFacts(text: string): { unit?: string; reference?: string } 
   };
 }
 
-/** Bare "Juan Alberto" when the bot just asked for the customer name. */
+/** Bare "Juan Alberto" when the bot just asked for the customer name.
+ * lastAskedField disambiguates a *bare* reply; it is not an extraction filter. */
 function extractBareNameReply(text: string, state: ConversationState) {
   const awaitingName =
     state.facts?.lastAskedField === "customer_name" ||
@@ -232,6 +240,8 @@ function extractLocation(text: string, state?: ConversationState) {
     awaitingLocation &&
     trimmed.length >= 3 &&
     trimmed.length <= 80 &&
+    trimmed.split(/\s+/).length <= 4 &&
+    !detectServices(trimmed).length &&
     !looksLikePhoneAttempt(trimmed) &&
     !/^\d+$/.test(trimmed) &&
     !/^(si|sí|no|ok|hola|gracias)$/i.test(trimmed)
@@ -307,13 +317,14 @@ function extractDuration(text: string) {
 }
 
 function extractContactPreference(text: string) {
+  if (parseClock(text)) return "";
   const blob = fold(text);
   if (/despues de las\s+\d{1,2}/.test(blob) || /después de las\s+\d{1,2}/i.test(text)) {
     const match = text.match(/despu[eé]s de las\s+(\d{1,2}(?::\d{2})?)/i);
     return match ? `después de las ${match[1]}` : "después de las 17:00";
   }
   if (/\ben la tarde\b/.test(blob)) return "en la tarde";
-  if (/\ben la ma[nñ]ana\b/.test(blob)) return "en la mañana";
+  if (/\ben la ma[nñ]ana\b/.test(blob) && !/\b(?:a\s+las|tipo|como)\s+\d/.test(blob)) return "en la mañana";
   if (/\bll[aá]mame\b/.test(blob) && /tarde|ma[nñ]ana|noche/.test(blob)) {
     const match = text.match(/ll[aá]mame\s+(?:en\s+)?(la tarde|la ma[nñ]ana|despu[eé]s de las \d{1,2}(?::\d{2})?)/i);
     return match?.[1]?.trim() || "preferencia de contacto indicada";
@@ -347,6 +358,9 @@ function extractSymptoms(text: string): { symptom: string; negated: string[] } {
 
 function extractPlumbing(text: string): { activeLeak?: string } {
   const blob = fold(text);
+  if (/empeor|se pone peor|cada vez peor/.test(blob) && /fuga|agua|gote/.test(blob)) {
+    return { activeLeak: "empeorando" };
+  }
   if (/sigue\s+sal(iendo|e)|fuga\s+activa|bastante\s+agua|mucha\s+agua/.test(blob)) {
     return { activeLeak: "sí, activa" };
   }
@@ -398,8 +412,8 @@ function extractBuildingFacts(text: string): {
     };
   }
   const building =
-    text.match(/\b(?:ph|edificio|residencial)\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40}?)(?:\s*,|\s*$|\s+(?:apto|apartamento|unidad))/i)?.[1]?.trim() ||
-    text.match(/\ben\s+(?:el\s+)?ph\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{1,40})/i)?.[1]?.trim() ||
+    text.match(/\b(?:ph|edificio|residencial)\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{0,40}?)(?:\s*,|\s*$|\s+(?:apto|apartamento|unidad))/i)?.[1]?.trim() ||
+    text.match(/\ben\s+(?:el\s+)?ph\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{0,40})/i)?.[1]?.trim() ||
     "";
   const tower = text.match(/\btorre\s+([A-Za-z0-9ÁÉÍÓÚáéíóúñÑ]+)/i)?.[1] || "";
   const unit =
@@ -457,6 +471,8 @@ function setConfidence(
 }
 
 export function applyPackedExtraction(state: ConversationState, text: string): ConversationState {
+  // Inspect the whole message for every relevant fact. Pending question never
+  // restricts extractors to a single field — lastAskedField only helps bare replies.
   const packed = extractPackedMessage(text);
   const explicitCorrection = detectExplicitCorrection(text);
   let next: ConversationState = mergeConfirmedFacts(state, {}, { explicitCorrection });
@@ -507,7 +523,6 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
     }
   }
   if (packed.contactPreference) {
-    next.preferredTime = packed.contactPreference;
     next.facts.contactPreference = packed.contactPreference;
     next.factConfidence = setConfidence(next.factConfidence || {}, "contactPreference", "EXPLICIT");
   }
@@ -608,12 +623,18 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
     next.facts.unitType = "split";
   }
 
-  const detected = detectServices(text);
   const intent = classifyActionableServiceIntent(text, next);
+  const existingOp = classifyExistingRequestOperation(text);
+  const newWorkText = speechTextForNewWork(text);
+  const detected = existingOp.hasExplicitNewRequestOperator
+    ? newWorkText
+      ? detectServices(newWorkText)
+      : []
+    : detectServices(text);
   next.detectedServices = mergeDetectedServices(next.detectedServices || [], detected);
   const previousPrimary = next.primaryService || next.service || "";
-  if (!intent.informationalOnly) {
-    next.primaryService = choosePrimary(next.detectedServices, previousPrimary, text);
+  if (!intent.informationalOnly && !existingOp.blocksRequestCreation && newWorkText) {
+    next.primaryService = choosePrimary(next.detectedServices, previousPrimary, newWorkText);
     if (previousPrimary && next.primaryService && previousPrimary !== next.primaryService) {
       next.facts = {
         ...(next.facts || {}),
@@ -622,24 +643,33 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
       };
     }
     if (next.primaryService) next.service = next.primaryService;
-  } else {
+  } else if (intent.informationalOnly) {
     next.facts = { ...(next.facts || {}), catalogInquiry: "1" };
   }
   next.secondaryServices = next.detectedServices.filter((id) => id !== next.primaryService);
 
   const playbook = getPlaybook(next.primaryService || next.service);
   next.bookingStrategy = playbook.bookingStrategy;
-  if (!intent.informationalOnly && (detectUnknownOpportunity(text) || next.primaryService === "other")) {
+  if (!intent.informationalOnly && !existingOp.blocksRequestCreation && newWorkText && (detectUnknownOpportunity(newWorkText) || next.primaryService === "other")) {
     next.needsReview = true;
   }
 
   const urgency = detectUrgency(text, playbook);
   if (urgency !== "normal" || !next.urgency) next.urgency = urgency;
-  if (/agend|cita|visita|disponib/i.test(text) && !intent.informationalOnly) next.bookingIntent = true;
+  if (/agend|cita|visita|disponib|pueden\s+venir|estoy disponible|me funciona/i.test(text) && !intent.informationalOnly && !existingOp.blocksRequestCreation && !isLastMomentBookingWithdrawal(text)) {
+    next.bookingIntent = true;
+  }
 
-  if (intent.createServiceRequest && text.trim().length > 8 && !/^te envi[eé] una foto/i.test(text)) {
-    const intentFromMessage = resolvePrimaryFromMessage(text);
-    if (intentFromMessage || !next.problem) {
+  if (
+    (intent.createServiceRequest || intent.actionability === "POSSIBLE") &&
+    !existingOp.blocksRequestCreation &&
+    text.trim().length > 8 &&
+    !/^te envi[eé] una foto/i.test(text)
+  ) {
+    const intentFromMessage = resolvePrimaryFromMessage(speechTextForNewWork(text) || text);
+    if (intent.createServiceRequest && (intentFromMessage || !next.problem)) {
+      next.problem = text.trim().slice(0, 500);
+    } else if (!next.problem && intent.actionability === "POSSIBLE") {
       next.problem = text.trim().slice(0, 500);
     }
   }

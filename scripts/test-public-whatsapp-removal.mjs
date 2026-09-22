@@ -18,17 +18,17 @@ const hero = readFileSync(join(root, "src/components/home/Hero.tsx"), "utf8");
 const finalCta = readFileSync(join(root, "src/components/home/FinalCTA.tsx"), "utf8");
 const mobileBar = readFileSync(join(root, "src/components/layout/MobileBar.tsx"), "utf8");
 const social = readFileSync(join(root, "src/components/brand/SocialIcons.tsx"), "utf8");
-const waHeader = readFileSync(join(root, "src/components/brand/WhatsAppHeaderButton.tsx"), "utf8");
+const waHeaderCta = readFileSync(join(root, "src/components/brand/WhatsAppHeaderCta.tsx"), "utf8");
 const site = readFileSync(join(root, "src/lib/site.ts"), "utf8");
 const knowledge = readFileSync(join(root, "src/lib/concierge-knowledge.ts"), "utf8");
 const envExample = readFileSync(join(root, ".env.example"), "utf8");
 
-ok("HDR-01 no WhatsAppHeaderButton mount", !/WhatsAppHeaderButton/.test(header));
+ok("HDR-01 header groups official WhatsApp CTA", /WhatsAppHeaderCta/.test(header) && /dictionary\.common\.request/.test(header));
 ok("HDR-02 solicitar CTA retained", /dictionary\.common\.request/.test(header));
 
 ok("CONTACT-01 no pending placeholder render", !/dictionary\.contact\.pending/.test(contact));
 ok("CONTACT-02 only configured rows", /contact\.email\.isConfigured/.test(contact) && /contact\.phone\.isConfigured/.test(contact));
-ok("CONTACT-03 whatsapp only if public flag + configured", /isPublicWhatsAppEnabled\(\)/.test(contact));
+ok("CONTACT-03 official WhatsApp via helper", /whatsappHref\(/.test(contact));
 
 ok("FOOTER-01 no pending placeholder", !/dictionary\.contact\.pending/.test(footer));
 ok("FOOTER-02 whatsapp gated via whatsappHref", /whatsappHref/.test(footer));
@@ -40,11 +40,11 @@ ok("CTA-03 mobile bar chat not WA", /OpenChatButton/.test(mobileBar) && !/WhatsA
 ok("SOCIAL-01 only platforms with href", /filter\(\(platform\) => Boolean\(platform\.href\)\)/.test(social));
 ok("SOCIAL-02 no próximamente buttons", !/is-soon/.test(social) && !/social\.soon/.test(social));
 
-ok("FLAG-01 public WA off by default", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true"/.test(site));
-ok("FLAG-02 whatsappHref returns null when off", /isPublicWhatsAppEnabled\(\)/.test(site));
-ok("FLAG-03 header button null when off", /!isPublicWhatsAppEnabled\(\)\) return null/.test(waHeader));
-ok("FLAG-04 env example documents flag", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED=false/.test(envExample));
-ok("FLAG-05 concierge knowledge respects flag", /isPublicWhatsAppEnabled\(\) && contact\.whatsapp\.isConfigured/.test(knowledge));
+ok("FLAG-01 Telegram/ops WA still opt-in", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED === "true"/.test(site));
+ok("FLAG-02 official public WA has kill switch", /isOfficialWhatsAppEnabled\(\)/.test(site) && /return null/.test(site));
+ok("FLAG-03 header CTA hidden when official off", /!isOfficialWhatsAppEnabled\(\)\) return null/.test(waHeaderCta));
+ok("FLAG-04 env example keeps Telegram flag off", /NEXT_PUBLIC_WHATSAPP_PUBLIC_ENABLED=false/.test(envExample));
+ok("FLAG-05 concierge knowledge uses official WA", /isOfficialWhatsAppEnabled\(\) && contact\.whatsapp\.isConfigured/.test(knowledge));
 
 const publicSurfaces = [header, contact, footer, hero, finalCta, mobileBar, social].join("\n");
 ok("PUBLIC-01 no wa.me in public components", !/wa\.me/.test(publicSurfaces));

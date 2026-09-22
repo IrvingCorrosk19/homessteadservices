@@ -5,7 +5,7 @@ import { Reveal } from "@/components/ui/Reveal";
 import { ServiceIcon } from "@/components/brand/ServiceIcon";
 import { ServiceConsultButton } from "@/components/concierge/ServiceConsultButton";
 import { images, imageAlts } from "@/data/images";
-import { serviceSlugs } from "@/lib/site";
+import { serviceSlugs, whatsappHref, whatsappServiceMessage } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
 
 export function Services({
@@ -33,6 +33,7 @@ export function Services({
           {serviceSlugs.map((slug, index) => {
             const item = dictionary.services.items[slug];
             const imageSrc = images.services[slug];
+            const serviceWhatsApp = whatsappHref(whatsappServiceMessage(item.title));
             return (
               <Reveal
                 key={slug}
@@ -72,19 +73,32 @@ export function Services({
                   <p className="mt-3 text-sm leading-6 text-navy-soft">
                     {item.description}
                   </p>
-                  <ServiceConsultButton
-                    serviceId={slug}
-                    serviceName={item.title}
-                    imageId={`service-${slug}`}
-                    imageSrc={imageSrc}
-                    itemId={slug}
-                    itemTitle={item.title}
-                    contextLabel={item.title}
-                    intentHint=""
-                    className="mt-5 inline-flex text-sm font-medium text-navy underline-offset-4 hover:underline"
-                  >
-                    {item.cta}
-                  </ServiceConsultButton>
+                  <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <ServiceConsultButton
+                      serviceId={slug}
+                      serviceName={item.title}
+                      imageId={`service-${slug}`}
+                      imageSrc={imageSrc}
+                      itemId={slug}
+                      itemTitle={item.title}
+                      contextLabel={item.title}
+                      intentHint=""
+                      className="inline-flex text-sm font-medium text-navy underline-offset-4 hover:underline"
+                    >
+                      {item.cta}
+                    </ServiceConsultButton>
+                    {serviceWhatsApp ? (
+                      <a
+                        href={serviceWhatsApp}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Consultar ${item.title} por WhatsApp`}
+                        className="inline-flex min-h-11 items-center text-sm text-navy-soft underline-offset-4 hover:text-navy hover:underline"
+                      >
+                        WhatsApp
+                      </a>
+                    ) : null}
+                  </div>
                 </div>
               </Reveal>
             );

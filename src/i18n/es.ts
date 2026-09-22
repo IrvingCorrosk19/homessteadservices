@@ -18,6 +18,7 @@ export type Dictionary = {
   common: {
     request: string;
     whatsapp: string;
+    consultWhatsApp: string;
     call: string;
     representativeNote: string;
     comingSoon: string;
@@ -120,6 +121,7 @@ export type Dictionary = {
     defaultMessage: string;
     headerMessage: string;
     serviceMessage: string;
+    floatLabel: string;
   };
   social: {
     follow: string;
@@ -157,6 +159,7 @@ export const es: Dictionary = {
   common: {
     request: "Solicitar servicio",
     whatsapp: "Escríbenos por WhatsApp",
+    consultWhatsApp: "Consultar por WhatsApp",
     call: "Llamar",
     representativeNote: "Imagen representativa del servicio",
     comingSoon: "Por confirmar",
@@ -371,9 +374,10 @@ export const es: Dictionary = {
   },
   whatsapp: {
     label: "WhatsApp",
-    defaultMessage: "Hola Homestead Services. Necesito ayuda.",
-    headerMessage: "Hola Homestead Services, necesito ayuda con un servicio.",
-    serviceMessage: "Hola Homestead Services. Necesito ayuda con {service}.",
+    defaultMessage: "Hola, quisiera información sobre los servicios de Homestead.",
+    headerMessage: "Hola, quisiera información sobre los servicios de Homestead.",
+    serviceMessage: "Hola, quisiera información sobre el servicio de {service} de Homestead.",
+    floatLabel: "Contactar a Homestead por WhatsApp",
   },
   social: {
     follow: "Síguenos",

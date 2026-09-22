@@ -12,18 +12,25 @@ import { recordFunnelEvent } from "@/lib/concierge-intelligence";
 import { getPlaybook, playbookById } from "@/lib/concierge/service-playbooks";
 import { detectServices, formatRequestBrief } from "@/lib/concierge/playbook-engine";
 import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
-import { getHomesteadDb } from "@/lib/service-requests";
+import { getHomesteadDb, getRequestByPublicId } from "@/lib/service-requests";
 import { ingestCanonicalLead, saveLeadPreference } from "@/lib/revenue-store";
 import { isTestHandoff, shouldCreateCanonicalLead } from "@/lib/concierge-handoff";
 import {
   classifyActionableServiceIntent,
   isNonDemandTurn,
 } from "@/lib/concierge/actionable-intent";
+import { classifyExistingRequestOperation, serviceAfterNewRequestOperator } from "@/lib/concierge/existing-request-operation";
 import {
   hasActiveBookedAppointment,
   rehydrateRequestFromAppointment,
   resolveAuthoritativeRequestId,
 } from "@/lib/concierge/appointment-reprogram";
+import {
+  buildTurnActionPlan,
+  logTurnLedger,
+  resolveTurnIntent,
+  type ConversationActionAuthorization,
+} from "@/lib/concierge/conversation-action-gate";
 
 export type EnsureRequestResult = {
   publicId: string;
@@ -225,6 +232,7 @@ export async function ensureActiveServiceRequest(input: {
   conversationLeadId?: string;
   utm?: Record<string, string>;
   userText?: string;
+  authorization?: ConversationActionAuthorization;
 }): Promise<EnsureRequestResult | null> {
   if (!shouldCreateCanonicalLead()) return null;
 
@@ -235,6 +243,21 @@ export async function ensureActiveServiceRequest(input: {
   }
 
   const userText = (input.userText || "").trim();
+  const resolved = resolveTurnIntent(userText, state);
+  const plan = buildTurnActionPlan(resolved, state);
+  logTurnLedger({ conversationId: input.conversationId, resolved, plan });
+  if (classifyExistingRequestOperation(userText).blocksRequestCreation) {
+    const keep = String(state.activeLeadId || authoritative || "");
+    if (keep && !keep.startsWith("DRY-")) {
+      return {
+        publicId: keep,
+        created: false,
+        updated: false,
+        announce: false,
+      };
+    }
+    return null;
+  }
   const intent = userText ? classifyActionableServiceIntent(userText, state) : null;
   if (intent?.informationalOnly && !hasActiveBookedAppointment(state)) {
     if (authoritative || state.activeLeadId) {
@@ -248,16 +271,29 @@ export async function ensureActiveServiceRequest(input: {
     return null;
   }
 
-  if (!hasValidServiceIntent(state, userText) && !hasActiveBookedAppointment(state)) return null;
+  if (
+    !hasValidServiceIntent(state, userText) &&
+    !hasActiveBookedAppointment(state) &&
+    !(state.activeLeadId || authoritative)
+  ) {
+    return null;
+  }
 
   const existing = state.activeLeadId || authoritative || "";
+  const remainderService = userText ? serviceAfterNewRequestOperator(userText) : "";
 
   // Never create a new HS while an active appointment exists for this conversation.
-  if (!existing && hasActiveBookedAppointment(state)) {
+  if (!existing && hasActiveBookedAppointment(state) && !remainderService) {
     state = rehydrateRequestFromAppointment(state);
   }
 
-  const finalExisting = state.activeLeadId || resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
+  let finalExisting = state.activeLeadId || resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
+  if (remainderService && finalExisting && !finalExisting.startsWith("DRY-")) {
+    const existingRow = getRequestByPublicId(finalExisting);
+    if (existingRow && existingRow.service !== remainderService) {
+      finalExisting = "";
+    }
+  }
 
   if (finalExisting && !finalExisting.startsWith("DRY-")) {
     syncServiceRequestFromState(finalExisting, state, input.summary, input.conversationId);
@@ -265,7 +301,7 @@ export async function ensureActiveServiceRequest(input: {
     return { publicId: finalExisting, created: false, updated: true, announce: false };
   }
 
-  if (hasActiveBookedAppointment(state)) {
+  if (hasActiveBookedAppointment(state) && !remainderService) {
     const fromAppt = resolveAuthoritativeRequestId(state, input.conversationLeadId || "");
     if (fromAppt) {
       syncServiceRequestFromState(fromAppt, state, input.summary, input.conversationId);
@@ -275,13 +311,16 @@ export async function ensureActiveServiceRequest(input: {
 
   if (!hasValidServiceIntent(state, userText)) return null;
 
+  if (!input.authorization) return null;
+  if (!input.authorization.allowed) return null;
+
   const created = await createEarlyRequest({ ...input, state });
   return { publicId: created, created: true, updated: false, announce: true };
 }
 
 export function requestFolioIntro(publicId: string, serviceLabel: string) {
-  const label = serviceLabel ? ` para ${serviceLabel.toLowerCase()}` : "";
-  return `Listo, ya abrí tu solicitud ${publicId}${label}. Ahora seguimos completando los detalles para ayudarte.`;
+  const label = serviceLabel ? ` de ${serviceLabel.toLowerCase()}` : "";
+  return `Quedó registrada ${publicId}${label}. Seguimos con lo que haga falta.`;
 }
 
 export function requestFolioBookingConfirm(publicId: string, when: string, serviceLabel: string) {

@@ -20,7 +20,9 @@ const COMMITMENT_RE =
   /\b(cre[eé]|registr[eé]|agend|cancel[eé]|reprogram[eé]|envi[eé]|qued[oó]\s+confirmad|ya\s+est[aá]\s+agendad|visita\s+qued[oó]|est[aá]\s+disponible)\b/i;
 
 const INTERNAL_RE =
-  /\b(nextAction|ASK_PHONE|CONFIRM_OR_BOOK|playbook|tool_call|HS creation|state machine|pipeline_stage)\b/i;
+  /\b(nextAction|ASK_PHONE|CONFIRM_OR_BOOK|playbook|tool_call|HS creation|state machine|pipeline_stage|actionability|pendingQuestion|outbox|tenant|semantic confidence|TurnActionPlan)\b/i;
+
+const MALFORMED_COMPOSITION = /\bpara\s+por\b/i;
 
 export function validateNaturalResponse(
   reply: string,
@@ -50,6 +52,12 @@ export function validateNaturalResponse(
 
   const internalTerminology = INTERNAL_RE.test(reply);
   if (internalTerminology) reasons.push("internal_terminology");
+  if (MALFORMED_COMPOSITION.test(reply)) reasons.push("malformed_composition");
+  if (!reply.trim()) reasons.push("empty_response");
+  if (/^\s*[{[]/.test(reply) || /"tool_call"\s*:/.test(reply)) reasons.push("raw_json");
+  if (/\b(at\s+\w+\.\w+|TypeError:|ReferenceError:|stack trace)\b/i.test(reply)) reasons.push("stack_trace");
+  const dupPara = reply.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (dupPara.length >= 2 && dupPara[0] === dupPara[1]) reasons.push("duplicate_paragraph");
 
   if (opts.offeredSlots?.length && /est[aá]n? disponibles?:/i.test(reply)) {
     const blob = reply.toLowerCase();
@@ -82,6 +90,15 @@ export function repairNaturalResponse(
     text =
       "Todavía no confirmo la operación hasta dejarla registrada. " +
       (isPresent(state.location) ? "Sigo con lo que ya me diste." : "Cuéntame lo que falte para avanzar.");
+  }
+  if (validation.knownFactReasks.includes("slot")) {
+    text = "Voy a revisar el calendario con el horario que ya me diste.";
+  }
+  text = text.replace(/\bpara\s+por\b/gi, "para");
+  if (validation.reasons.includes("empty_response") || validation.reasons.includes("raw_json") || validation.reasons.includes("stack_trace")) {
+    text = isPresent(state.activeLeadId)
+      ? "Sigo con tu solicitud. Dime cómo quieres continuar."
+      : "Cuéntame qué necesitas y te ayudo.";
   }
   return text.replace(/\s{2,}/g, " ").trim();
 }

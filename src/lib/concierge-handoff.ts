@@ -7,6 +7,7 @@ import { dispatchServiceRequest, persistServiceRequest } from "@/lib/service-req
 import { isConciergeDryRun } from "@/lib/concierge-flags";
 import type { ConversationState } from "@/lib/concierge-store";
 import { recordFunnelEvent } from "@/lib/concierge-intelligence";
+import { authorizeConversationAction } from "@/lib/concierge/conversation-action-gate";
 import { getPlaybook, playbookById } from "@/lib/concierge/service-playbooks";
 import { detectServices, formatRequestBrief } from "@/lib/concierge/playbook-engine";
 import { conciergePhotoBuffers, copyConciergePhotosToRequest } from "@/lib/concierge/photo-link";
@@ -37,6 +38,7 @@ export async function createLeadFromConcierge(input: {
   existingLeadId: string;
   utm?: Record<string, string>;
   escalate?: boolean;
+  userText?: string;
 }) {
   if (input.existingLeadId && !input.existingLeadId.startsWith("DRY-")) {
     const row = getHomesteadDb()
@@ -58,6 +60,12 @@ export async function createLeadFromConcierge(input: {
       return input.existingLeadId;
     }
   }
+  const auth = authorizeConversationAction("CREATE_REQUEST", {
+    text: input.userText || input.summary || "",
+    state: input.state,
+    conversationId: input.conversationId,
+  });
+  if (!auth.allowed) return "";
   if (!canHandoffLead(input.state)) return "";
   if (!shouldCreateCanonicalLead()) return "";
   const phone = classifyPhone(input.state.phone);

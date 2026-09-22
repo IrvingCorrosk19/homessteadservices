@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/brand/Logo";
 import { SocialIcons } from "@/components/brand/SocialIcons";
+import { WhatsAppHeaderCta } from "@/components/brand/WhatsAppHeaderCta";
 import { ButtonLink } from "@/components/ui/Button";
 import { navItems } from "@/lib/site";
 import { getDictionary } from "@/i18n/get-dictionary";
@@ -45,7 +46,7 @@ export function Header() {
       <div className="container-home flex h-[72px] items-center justify-between gap-3 md:h-[80px] md:gap-4">
         <Logo href="/" variant="header" />
 
-        <nav className="hidden items-center gap-8 lg:flex" aria-label="Principal">
+        <nav className="hidden items-center gap-6 xl:gap-8 lg:flex" aria-label="Principal">
           {navItems.map((item) => {
             const to = navHref(item);
             const current =
@@ -66,23 +67,27 @@ export function Header() {
           })}
         </nav>
 
-        <div className="flex items-center gap-3">
-          <ButtonLink
-            href="/contact"
-            variant="primary"
-            className="hidden min-h-12 px-5 text-[0.72rem] md:inline-flex"
-          >
-            {dictionary.common.request}
-          </ButtonLink>
+        <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
+          <div className="header-cta-group" role="group" aria-label="Acciones de contacto">
+            <WhatsAppHeaderCta />
+            <ButtonLink
+              href="/contact"
+              variant="primary"
+              className="header-request-cta"
+              aria-label={dictionary.common.request}
+            >
+              {dictionary.common.request}
+            </ButtonLink>
+          </div>
           <button
             type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-navy lg:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-navy lg:hidden"
             aria-expanded={open}
+            aria-controls="mobile-nav"
             aria-label={open ? "Cerrar menú" : "Abrir menú"}
             onClick={() => setOpen((value) => !value)}
           >
-            <span className="sr-only">Menú</span>
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
               {open ? (
                 <path d="M6 6l12 12M18 6L6 18" />
               ) : (
@@ -94,25 +99,30 @@ export function Header() {
       </div>
 
       {open && (
-        <div className="border-t border-line bg-cream px-5 py-6 lg:hidden">
+        <div id="mobile-nav" className="border-t border-line bg-cream px-5 py-6 lg:hidden">
           <nav className="flex flex-col gap-4" aria-label="Móvil">
             {navItems.map((item) => (
               <Link
                 key={item.key}
                 href={navHref(item)}
-                className="text-lg text-navy"
+                className="min-h-11 text-lg text-navy"
                 onClick={() => setOpen(false)}
               >
                 {dictionary.nav[item.key]}
               </Link>
             ))}
-            <ButtonLink
-              href="/contact"
-              variant="primary"
-              className="mt-1 min-h-12 px-5 text-[0.72rem] md:hidden"
-            >
-              {dictionary.common.request}
-            </ButtonLink>
+            <div className="mt-2 flex flex-col gap-3" role="group" aria-label="Acciones de contacto">
+              <WhatsAppHeaderCta placement="menu" />
+              <ButtonLink
+                href="/contact"
+                variant="primary"
+                className="header-request-cta header-request-cta-menu"
+                aria-label={dictionary.common.request}
+                onClick={() => setOpen(false)}
+              >
+                {dictionary.common.request}
+              </ButtonLink>
+            </div>
           </nav>
           <div className="mt-6 border-t border-line pt-5">
             <SocialIcons variant="menu" />

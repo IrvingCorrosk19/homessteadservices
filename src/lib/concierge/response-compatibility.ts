@@ -13,7 +13,7 @@ export type ResponseCompatibility = {
 };
 
 const LOCK_PHOTO_SPEECH =
-  /esta imagen no muestra|foto de frente de la puerta|solo me falta.*(frente|interior|canto|pestillo)|me sirve como|canto donde|cerradura digital|pestillo/i;
+  /esta imagen no muestra|foto de frente de la puerta|solo me falta.*(frente|interior|canto|pestillo)|me sirve como|canto donde/i;
 
 export function validateResponseCompatibility(
   reply: string,
@@ -27,7 +27,7 @@ export function validateResponseCompatibility(
   const abandoned = state.facts?.digitalLockAbandoned === "1";
 
   if ((opts.attachmentCount ?? 0) === 0 && LOCK_PHOTO_SPEECH.test(reply)) {
-    if (abandoned || service !== "locksmith" || !lock.active) {
+    if (abandoned || (service && service !== "locksmith") || (service === "locksmith" && !lock.active)) {
       return {
         compatible: false,
         reason: "NO_CURRENT_IMAGE_PHOTO_REPLY",

@@ -13,6 +13,7 @@ import { isScheduleOrTimeOnlyMessage, isQualityFeedbackNotSchedule } from "@/lib
 import { classifyPhone } from "@/lib/phone";
 import { isPresent } from "@/lib/concierge/canonical-state";
 import { classifyActionableServiceIntent } from "@/lib/concierge/actionable-intent";
+import { classifyExistingRequestOperation, speechTextForNewWork } from "@/lib/concierge/existing-request-operation";
 
 export type ConversationPerception = {
   userIntent: string;
@@ -59,14 +60,34 @@ export function perceiveTurn(
   transition: ConversationTransition,
 ): ConversationPerception {
   const route = interpretTurnRoute(text, state);
-  const services = detectServices(text);
-  const primaryHint = resolvePrimaryFromMessage(text) || state.primaryService || "";
+  const existingOp = classifyExistingRequestOperation(text);
   const actionable = classifyActionableServiceIntent(text, state);
+  const workText = speechTextForNewWork(text) || text;
+  const services = existingOp.hasExplicitNewRequestOperator
+    ? detectServices(workText)
+    : existingOp.blocksRequestCreation
+      ? []
+      : detectServices(text);
+  const primaryHint = existingOp.hasExplicitNewRequestOperator
+    ? resolvePrimaryFromMessage(workText) || state.primaryService || ""
+    : existingOp.blocksRequestCreation
+      ? state.primaryService || ""
+      : resolvePrimaryFromMessage(text) || state.primaryService || "";
   const secondaryIntents: string[] = [];
   let userIntent = "CONTINUE";
   let relationship: ConversationPerception["transactionRelationship"] = "CONTINUE";
 
-  if (transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE") {
+  if (existingOp.primaryAction === "CANCEL_REQUEST") {
+    userIntent = "CANCEL_REQUEST";
+    relationship = "CANCEL";
+    if (existingOp.hasExplicitNewRequestOperator) secondaryIntents.push("REQUEST_SERVICE");
+  } else if (existingOp.primaryAction === "CANCEL_APPOINTMENT_ONLY") {
+    userIntent = "CANCEL_VISIT";
+    relationship = "CANCEL";
+  } else if (existingOp.primaryAction === "RESCHEDULE_APPOINTMENT") {
+    userIntent = "REPROGRAM_APPOINTMENT";
+    relationship = "REPROGRAM";
+  } else if (transition.kind === "SWITCH_SERVICE" || transition.kind === "CANCEL_CURRENT_SERVICE") {
     userIntent = CANCEL_RE.test(text) ? "CANCEL_VISIT" : "CHANGE_SERVICE";
     relationship = "SWITCH";
   } else if (actionable.primaryIntent === "MIXED_QUESTION_AND_REQUEST") {
@@ -122,7 +143,7 @@ export function perceiveTurn(
     userIntent = "CANCEL_REQUEST";
   } else if (CANCEL_RE.test(text)) {
     userIntent = "CANCEL_VISIT";
-  } else if (STATUS_RE.test(text)) {
+  } else if (existingOp.primaryAction === "CHECK_STATUS" || STATUS_RE.test(text)) {
     userIntent = "CHECK_STATUS";
   } else if (INFO_ONLY_RE.test(text) && !services.length) {
     userIntent = "ASK_GENERAL_QUESTION";

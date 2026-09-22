@@ -6,6 +6,7 @@ import type { ConversationState, OfferedSlot } from "@/lib/concierge-store";
 import { formatPanamaSlot } from "@/lib/concierge-datetime";
 import { logInfo } from "@/lib/log";
 import { isSlotConfirmed } from "@/lib/concierge/canonical-state";
+import { isLastMomentBookingWithdrawal } from "@/lib/concierge/speech-act-safety";
 
 export const PENDING_QUERY_AVAILABILITY = "QUERY_AVAILABILITY";
 
@@ -111,6 +112,9 @@ export function decideCalendarExecution(
 ): CalendarExecuteDecision {
   if (opts.bookingSuspended) {
     return { execute: false, needDate: false, reason: "booking_suspended", affirmedPending: false, directRequest: false };
+  }
+  if (isLastMomentBookingWithdrawal(text)) {
+    return { execute: false, needDate: false, reason: "booking_withdrawn", affirmedPending: false, directRequest: false };
   }
   if (isSlotConfirmed(state) && !/\b(otro|cambiar|reprogram|mejor)\b/i.test(text)) {
     return { execute: false, needDate: false, reason: "slot_already_selected", affirmedPending: false, directRequest: false };

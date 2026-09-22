@@ -141,9 +141,11 @@ export function ConciergeWidget() {
 
   useEffect(() => {
     if (sessionStorage.getItem(GREET_KEY)) return;
+    const desktop = window.matchMedia("(min-width: 768px)");
+    if (!desktop.matches) return;
     const timer = window.setTimeout(() => {
-      if (!sessionStorage.getItem(GREET_KEY)) setInvite(true);
-    }, 8000);
+      if (!sessionStorage.getItem(GREET_KEY) && desktop.matches) setInvite(true);
+    }, 14000);
     return () => window.clearTimeout(timer);
   }, []);
 
