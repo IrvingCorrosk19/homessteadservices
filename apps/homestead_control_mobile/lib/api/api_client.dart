@@ -62,8 +62,11 @@ class HomesteadApi {
     Map<String, dynamic> body = {};
     if (response.body.isNotEmpty) {
       final parsed = jsonDecode(response.body);
-      if (parsed is Map<String, dynamic>) body = parsed;
-      else if (parsed is Map) body = Map<String, dynamic>.from(parsed);
+      if (parsed is Map<String, dynamic>) {
+        body = parsed;
+      } else if (parsed is Map) {
+        body = Map<String, dynamic>.from(parsed);
+      }
     }
     if (response.statusCode >= 400) {
       throw ApiException(
@@ -164,12 +167,16 @@ class HomesteadApi {
     required int version,
     bool confirm = false,
     String? idempotencyKey,
+    String? copy,
+    String? note,
   }) {
     return _post("/api/admin/content/jobs/$publicId/action", {
       "action": action,
       "version": version,
       "confirm": confirm,
       "idempotencyKey": idempotencyKey ?? const Uuid().v4(),
+      if (copy != null) "copy": copy,
+      if (note != null) "note": note,
     });
   }
 
@@ -197,12 +204,18 @@ class HomesteadApi {
   Future<Map<String, dynamic>> ingestPhotos({
     required List<File> files,
     String note = "",
+    String publishMode = PublishMode.separate,
+    String? batchKey,
     void Function(int sent, int total)? onProgress,
   }) async {
     try {
       final request = http.MultipartRequest("POST", _u("/api/admin/content/intake"));
       request.headers.addAll(await _headers(mutating: true, json: false));
       request.fields["note"] = note;
+      request.fields["publishMode"] = publishMode;
+      if (batchKey != null && batchKey.isNotEmpty) {
+        request.fields["batchKey"] = batchKey;
+      }
       for (final file in files) {
         final bytes = await file.readAsBytes();
         request.files.add(
@@ -224,6 +237,18 @@ class HomesteadApi {
     } on TimeoutException {
       throw ApiException("Tiempo de espera agotado al subir. Revisa el lote antes de repetir.", code: "timeout");
     }
+  }
+
+  /// Reorder / remove photos on a job. Invalidates approval on the server.
+  Future<Map<String, dynamic>> updateJobMedia({
+    required String publicId,
+    required List<int> order,
+    List<int>? remove,
+  }) {
+    return _post("/api/admin/content/jobs/$publicId/media", {
+      "order": order,
+      if (remove != null && remove.isNotEmpty) "remove": remove,
+    });
   }
 
   Future<Map<String, dynamic>> studio() => _get("/api/admin/content/studio");
@@ -260,11 +285,58 @@ class HomesteadApi {
     return list.whereType<Map>().map((e) => ServiceRequestItem(Map<String, dynamic>.from(e))).toList();
   }
 
+  Future<ServiceRequestItem> serviceRequestDetail(String publicId) async {
+    final body = await _get("/api/admin/service-requests/$publicId");
+    final req = body["request"] ?? body["serviceRequest"] ?? body;
+    if (req is! Map) {
+      throw ApiException("Respuesta de solicitud inválida");
+    }
+    return ServiceRequestItem(Map<String, dynamic>.from(req));
+  }
+
   Future<Map<String, dynamic>> patchRequestStatus(String publicId, String status) =>
       _patch("/api/admin/service-requests/$publicId", {"status": status});
 
-  Future<List<AppointmentItem>> appointments() async {
-    final body = await _get("/api/admin/appointments");
+  Future<Map<String, dynamic>> disposeServiceRequest({
+    required String publicId,
+    required String action,
+    required String reasonCategory,
+    String? reason,
+    String? internalNote,
+    String? customerMessage,
+    bool sendCustomerMessage = false,
+    String? idempotencyKey,
+  }) {
+    return _post("/api/admin/service-requests/$publicId/disposition", {
+      "action": action,
+      "reasonCategory": reasonCategory,
+      if (reason != null && reason.isNotEmpty) "reason": reason,
+      if (internalNote != null && internalNote.isNotEmpty) "internalNote": internalNote,
+      if (customerMessage != null && customerMessage.isNotEmpty) "customerMessage": customerMessage,
+      "sendCustomerMessage": sendCustomerMessage,
+      "confirm": true,
+      "idempotencyKey": idempotencyKey ?? const Uuid().v4(),
+    });
+  }
+
+  Future<Map<String, dynamic>> securityReviewServiceRequest({
+    required String publicId,
+    required String action,
+    String? reason,
+  }) {
+    return _post("/api/admin/service-requests/$publicId/security-review", {
+      "action": action,
+      if (reason != null && reason.isNotEmpty) "reason": reason,
+      "confirm": true,
+    });
+  }
+
+  Future<List<AppointmentItem>> appointments({String? from, String? to, String status = "ALL"}) async {
+    final query = <String, String>{};
+    if (from != null && from.isNotEmpty) query["from"] = from;
+    if (to != null && to.isNotEmpty) query["to"] = to;
+    if (status.isNotEmpty && status != "ALL") query["status"] = status;
+    final body = await _get("/api/admin/appointments", query.isEmpty ? null : query);
     final list = body["appointments"];
     if (list is! List) return const [];
     return list.whereType<Map>().map((e) => AppointmentItem(Map<String, dynamic>.from(e))).toList();

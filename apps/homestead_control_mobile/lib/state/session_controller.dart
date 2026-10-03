@@ -1,3 +1,4 @@
+import "package:connectivity_plus/connectivity_plus.dart";
 import "package:flutter/foundation.dart";
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 
@@ -101,5 +102,32 @@ class SessionController extends ChangeNotifier {
     if (online == value) return;
     online = value;
     notifyListeners();
+  }
+
+  /// Re-check connectivity and session after returning from background.
+  Future<void> resumeFromBackground() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      setOnline(results.any((r) => r != ConnectivityResult.none));
+    } catch (_) {}
+    if (!isAuthenticated || !online) return;
+    try {
+      final probe = await _api.sessionProbe();
+      if (probe["csrf"] is String && (probe["csrf"] as String).isNotEmpty) {
+        csrf = probe["csrf"] as String;
+        await _storage.write(key: _kCsrf, value: csrf);
+      }
+      lastError = null;
+      notifyListeners();
+    } on ApiException catch (e) {
+      if (e.isUnauthorized) {
+        await clearLocal();
+      } else if (e.isOffline) {
+        setOnline(false);
+      } else {
+        lastError = e.message;
+        notifyListeners();
+      }
+    }
   }
 }

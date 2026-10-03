@@ -3,6 +3,7 @@ import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
 import "../state/session_controller.dart";
+import "../config.dart";
 import "appointments_screen.dart";
 import "content_queue_screen.dart";
 import "home_screen.dart";
@@ -16,16 +17,30 @@ class ShellScreen extends StatefulWidget {
   State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   int _index = 0;
   late final Stream<List<ConnectivityResult>> _connectivity;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _connectivity = Connectivity().onConnectivityChanged;
     Connectivity().checkConnectivity().then(_applyConnectivity);
     _connectivity.listen(_applyConnectivity);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<SessionController>().resumeFromBackground();
+    }
   }
 
   void _applyConnectivity(List<ConnectivityResult> results) {
@@ -47,6 +62,20 @@ class _ShellScreenState extends State<ShellScreen> {
     return Scaffold(
       body: Column(
         children: [
+          if (kApiEnvironmentLabel.isNotEmpty)
+            Material(
+              color: const Color(0xFF7A2E0B),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Text(
+                    kApiEnvironmentLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
           if (!online)
             Material(
               color: const Color(0xFF9B1C1C),
