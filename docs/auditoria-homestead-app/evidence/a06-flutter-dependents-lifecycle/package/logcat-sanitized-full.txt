@@ -1,0 +1,99 @@
+10-03 17:43:39.652 29308 29337 D FlutterJNI: Beginning load of flutter...
+10-03 17:43:39.696 29308 29337 D nativeloader: Load /data/app/~~dac5Ecz3_QbJpaB9vBQQRw==/lat.homestead.control-eNLJwwB7mlofc-mqFNcXbg==/base.apk!/lib/arm64-v8a/libflutter.so using class loader ns clns-7 (caller=/data/app/~~dac5Ecz3_QbJpaB9vBQQRw==/lat.homestead.control-eNLJwwB7mlofc-mqFNcXbg==/base.apk): ok
+10-03 17:43:39.699 29308 29337 D FlutterJNI: flutter (null) was loaded normally!
+10-03 17:43:39.988 29308 29341 I flutter : [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+10-03 17:43:40.100 29308 29353 I flutter : The Dart VM service is listening on http://127.0.0.1:41823/IQz5muSspSc=/
+10-03 17:43:40.667 29308 29308 I mestead.control: hiddenapi: Accessing hidden method Landroid/view/accessibility/AccessibilityNodeInfo;->getSourceNodeId()J (runtime_flags=0, domain=platform, api=unsupported,test-api) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+10-03 17:43:40.667 29308 29308 I mestead.control: hiddenapi: Accessing hidden method Landroid/view/accessibility/AccessibilityRecord;->getSourceNodeId()J (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+10-03 17:43:40.667 29308 29308 I mestead.control: hiddenapi: Accessing hidden field Landroid/view/accessibility/AccessibilityNodeInfo;->mChildNodeIds:Landroid/util/LongArray; (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+10-03 17:43:40.668 29308 29308 I mestead.control: hiddenapi: Accessing hidden method Landroid/util/LongArray;->get(I)J (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+10-03 17:43:42.658 29308 29308 I WindowExtensionsImpl: Initializing Window Extensions, vendor API level=6, activity embedding enabled=true
+10-03 17:43:42.695 29308 29308 I SurfaceView@83ce9c9: onWindowVisibilityChanged(0) true io.flutter.embedding.android.FlutterSurfaceView{83ce9c9 V.E...... ......I. 0,0-0,0} of VRI[MainActivity]@ef41218
+10-03 17:43:42.715 29308 29308 D BufferQueueConsumer: [](id:727c00000000,api:0,p:-1,c:29308) connect: controlledByApp=false
+10-03 17:43:42.740 29308 29308 I SurfaceView@83ce9c9: windowStopped(false) true io.flutter.embedding.android.FlutterSurfaceView{83ce9c9 V.E...... ......ID 0,0-720,1600} of VRI[MainActivity]@ef41218
+10-03 17:43:42.746 29308 29308 D BufferQueueConsumer: [](id:727c00000001,api:0,p:-1,c:29308) connect: controlledByApp=false
+10-03 17:43:42.748 29308 29308 I SurfaceView@83ce9c9: surfaceCreated 1 #8 io.flutter.embedding.android.FlutterSurfaceView{83ce9c9 V.E...... ......ID 0,0-720,1600}
+10-03 17:43:42.995 29308 29308 I SurfaceView@83ce9c9: surfaceChanged (720,1600) 1 #8 io.flutter.embedding.android.FlutterSurfaceView{83ce9c9 V.E...... ......ID 0,0-720,1600}
+10-03 17:43:43.695 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:43:43.695 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:43:46.105 29308 29308 D ConnectivityManager: StackLog: [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4698)] [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4867)] [android.net.ConnectivityManager.registerDefaultNetworkCallbackForUid(ConnectivityManager.java:5427)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5395)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5369)] [dev.fluttercommunity.plus.connectivity.ConnectivityBroadcastReceiver.onListen(ConnectivityBroadcastReceiver.java:77)] [io.flutter.plugin.common.EventChannel$IncomingStreamRequestHandler.onListen(EventChannel.java:218)] [io.flutter.plugin.common.EventChannel$IncomingStreamRequestHandler.onMessage(EventChannel.java:197)] [io.flutter.embedding.engine.dart.DartMessenger.invokeHandler(DartMessenger.java:292)] [io.flutter.embedding.engine.dart.DartMessenger.lambda$dispatchMessageToQueue$0$io-flutter-embedding-engine-dart-DartMessenger(DartMessenger.java:319)] [io.flutter.embedding.engine.dart.DartMessenger$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)]
+10-03 17:43:52.233 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:43:52.244 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:43:52.244 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:43:52.255 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:43:52.255 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:43:52.256 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F....ID 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:43:53.018 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:44:06.850 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:44:06.850 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:44:07.459 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:44:16.602 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:44:16.602 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:44:16.605 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:44:16.607 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:44:16.607 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:44:16.607 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:44:24.749 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:44:38.369 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:44:38.369 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:44:38.839 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:44:41.823 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:44:41.823 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:44:41.825 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:44:41.826 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:44:41.826 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:44:41.826 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:44:49.484 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:45:02.807 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:45:02.807 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:45:03.239 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:45:08.942 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:45:08.942 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:45:08.944 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:45:08.945 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:45:08.945 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:45:08.946 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:45:09.845 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10685 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:45:11.765 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:45:11.765 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:45:12.273 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:45:16.327 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:45:16.327 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:45:16.330 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:45:16.331 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:45:16.331 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:45:16.332 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:45:24.367 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:45:37.629 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:45:37.629 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:45:38.045 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:45:41.254 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:45:41.254 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:45:41.256 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:45:41.258 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:45:41.258 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:45:41.258 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:45:48.931 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:46:02.153 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:46:02.153 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:46:02.572 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:46:05.649 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:46:05.649 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:46:05.651 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:46:05.652 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:46:05.652 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:46:05.652 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:46:13.299 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10678 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:46:26.569 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:46:26.569 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput
+10-03 17:46:27.018 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:46:33.633 29308 29308 D InputMethodManagerUtils: startInputInner - Id : 0
+10-03 17:46:33.633 29308 29308 I InputMethodManager: startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+10-03 17:46:33.635 29308 29308 I InputMethodManager_LC: showSoftInput(View,I)
+10-03 17:46:33.635 29308 29308 I InputMethodManager_LC: ssi(): flags=0 view=lat.homestead.control reason=SHOW_SOFT_INPUT
+10-03 17:46:33.635 29308 29308 I InputMethodManager_LC: ssi() view is not EditText
+10-03 17:46:33.635 29308 29308 D InputMethodManager: showSoftInput() view=io.flutter.embedding.android.FlutterView{56a3dcc VFE...... .F...... 0,0-720,1600 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+10-03 17:46:34.584 29308 29308 I VRI[MainActivity]@ef41218: setInTouchMode(false), android.view.ViewRootImpl.checkForLeavingTouchModeAndConsume:10685 android.view.ViewRootImpl.-$$Nest$mcheckForLeavingTouchModeAndConsume:0 android.view.ViewRootImpl$EarlyPostImeInputStage.processKeyEvent:9134 android.view.ViewRootImpl$EarlyPostImeInputStage.onProcess:9118 android.view.ViewRootImpl$InputStage.deliver:8590 android.view.ViewRootImpl$InputStage.onDeliverToNext:8647 android.view.ViewRootImpl$InputStage.forward:8613 android.view.ViewRootImpl$AsyncInputStage.forward:8846 android.view.ViewRootImpl$ImeInputStage.onFinishedInputEvent:9103 android.view.inputmethod.InputMethodManager$PendingEvent.run:5181 
+10-03 17:46:36.234 29308 29308 I InputMethodManager_LC: notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+10-03 17:46:44.729 29308 29308 I InputMethodManager_LC: hsifw() - flag : 0
+10-03 17:46:44.729 29308 29308 I InputMethodManager_LC: hsifw() - mService.hideSoftInput

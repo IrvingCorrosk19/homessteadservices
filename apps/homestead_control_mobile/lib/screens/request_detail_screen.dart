@@ -81,18 +81,25 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       _ => "Disposición",
     };
 
-    final payload = await showModalBottomSheet<_DispositionPayload>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
+    // Push the sheet route explicitly and await [TransitionRoute.completed]
+    // (not just popped): showModalBottomSheet returns on pop while the exit
+    // animation / overlay may still hold InheritedWidget dependents.
+    final navigator = Navigator.of(context);
+    final localizations = MaterialLocalizations.of(context);
+    final sheetRoute = ModalBottomSheetRoute<_DispositionPayload>(
       builder: (ctx) => _DispositionSheet(
         title: title,
         publicId: item.publicId,
         customerMessageDraft: item.customerMessageDraft,
       ),
+      isScrollControlled: true,
+      showDragHandle: true,
+      capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
+      barrierLabel: localizations.scrimLabel,
+      barrierOnTapHint: localizations.scrimOnTapHint(localizations.bottomSheetLabel),
     );
-    // Wait for sheet route + keyboard MediaQuery dependents to clear.
-    await _awaitRouteTeardown();
+    navigator.push(sheetRoute);
+    final payload = await sheetRoute.completed;
     if (payload == null || !mounted) return;
 
     setState(() => _busy = true);
@@ -130,13 +137,20 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
   Future<void> _securityReview(String action) async {
     final item = _item;
     if (item == null || _busy) return;
-    final reason = await showDialog<String>(
+    // Await [TransitionRoute.completed] so overlay entries are removed and
+    // InheritedElement dependents are cleared before this page rebuilds.
+    // showDialog's Future completes on pop — before the exit transition ends.
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final dialogRoute = DialogRoute<String>(
       context: context,
       builder: (ctx) => _SecurityReviewDialog(action: action),
+      barrierColor: Theme.of(context).dialogTheme.barrierColor ?? Colors.black54,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
     );
-    // showDialog completes on pop while the route may still be deactivating
-    // InheritedWidgets (MediaQuery/keyboard). Rebuild only after teardown.
-    await _awaitRouteTeardown();
+    navigator.push(dialogRoute);
+    final reason = await dialogRoute.completed;
     if (reason == null || !mounted) return;
 
     setState(() => _busy = true);
@@ -155,15 +169,6 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  /// Yield until modal route exit + a frame so InheritedElement dependents clear.
-  Future<void> _awaitRouteTeardown() async {
-    await Future<void>.delayed(Duration.zero);
-    if (!mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
   @override
