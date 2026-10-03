@@ -21,7 +21,7 @@ controllers/`setState` durante teardown del route + teclado (MediaQuery dependen
 | Backend en corrida | 8f47eae (session.isolated=true) |
 | Commit código backend r3b | 57246ec (selection/conflict/security proof) |
 | Commit harness r3 | 2a91b7e |
-| Commit este fix Flutter | 0dca002 |
+| Commit este fix Flutter | c32ee30 |
 
 ## Relación 2a91b7e ? 57246ec ? corrida
 - `2a91b7e`: harness/evidencia A06 r3 (no el fix Flutter).
@@ -30,4 +30,5 @@ controllers/`setState` durante teardown del route + teclado (MediaQuery dependen
 - La corrida de este fix Flutter se ejecutó contra backend `8f47eae` + cambios locales Flutter (luego fijados en el commit de este paquete). **No** se atribuye la ejecución del APK 1.1.10+12 a `57246ec` ni a `2a91b7e`; equivalencia backend = `8f47eae` (descendente de `57246ec`).
 
 Producción intacta.
+
 

@@ -24,5 +24,5 @@
                },
     "noRealCustomerMessages":  true,
     "assertFixed":  "_dependents.isEmpty on security dialog confirm",
-    "flutterFixCommit":  "0dca002b31a8c0477e7fed34cdfc3a7199b72ccc"
+    "flutterFixCommit":  "c32ee309423d7f2e6de78b34d117edba344111dd"
 }
