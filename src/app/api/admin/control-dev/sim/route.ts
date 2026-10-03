@@ -20,6 +20,9 @@ const GRAPH: SimulatedGraphScenario[] = [
   "fail_instagram",
   "fail_all",
   "uncertain_facebook",
+  "fail_ig_second_child",
+  "fail_ig_child_wait",
+  "fail_ig_carousel_parent",
 ];
 const NOTIFY: SimulatedNotifyScenario[] = ["ok", "fail_once", "fail"];
 

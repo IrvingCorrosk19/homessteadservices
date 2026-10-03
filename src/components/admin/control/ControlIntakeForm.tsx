@@ -82,12 +82,18 @@ export function ControlIntakeForm() {
         />
       </label>
       <label className="block text-sm text-navy">
-        Nota para todas las piezas
-        <textarea name="note" rows={3} className="mt-2 w-full min-w-0 rounded-2xl border border-navy/15 px-3 py-2" />
+        Contexto para la IA
+        <textarea
+          name="note"
+          rows={3}
+          placeholder="Ej.: Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves"
+          className="mt-2 w-full min-w-0 rounded-2xl border border-navy/15 px-3 py-2"
+        />
       </label>
       <p className="text-xs text-mist">
-        Cada archivo válido crea una propuesta HC-. Cargar seis fotos no las publica a la vez. Video y carrusel no
-        están soportados.
+        Orienta el generador de texto del proyecto (no se publica literalmente). Si falla el modelo, se usa
+        plantilla marcada para revisión. Las ediciones manuales del caption se conservan hasta que regeneres.
+        El servidor no hace visión de las fotos. Video no soportado.
       </p>
       <button type="submit" disabled={busy} className="min-h-11 rounded-full bg-navy px-5 text-sm text-cream disabled:opacity-50">
         {busy ? "Procesando…" : "Crear propuestas"}

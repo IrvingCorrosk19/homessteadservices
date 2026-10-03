@@ -15,11 +15,13 @@ import {
   storeDerivedAsset,
   storeOriginal,
   updateJob,
+  nextVersionNumber,
 } from "@/lib/content-catalog";
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import { nextBatchPublicId } from "@/lib/content-photo-batch";
 import { brandedSocialSet, metadataOf, toJpeg } from "@/lib/content-images";
-import { isControlIsolated, isolatedCopyFallback } from "@/lib/control-isolation";
+import { isControlIsolated } from "@/lib/control-isolation";
+import { rewriteCopyOnly } from "@/lib/content-openai";
 import { validatePublishImage } from "@/lib/content-media-url";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { sniffImage } from "@/lib/photos";
@@ -57,48 +59,65 @@ function sanitizeAiContext(note: string) {
   return note.replace(/\s+/g, " ").trim().slice(0, 800);
 }
 
-/**
- * Text for Control pieces. Uses the operator note as orientation only —
- * does not invent work, locations, prices, or features beyond that note.
- * Control intake does not run vision models on the photos.
- */
-function controlCopyFromContext(publicId: string, note: string) {
-  const context = sanitizeAiContext(note);
-  const isolated = isControlIsolated();
-  if (!context) {
-    if (isolated) return isolatedCopyFallback(publicId);
-    return {
-      serviceGuess: "servicio del hogar",
-      ratings: [{ index: 1, label: "PRIMARY" as const, notes: "Imagen recibida." }],
-      privacy: { people: false, plates: false, documents: false, warning: "" },
-      copy: {
-        full: `Trabajo documentado por Homestead. Folio ${publicId}. Revisa la foto y el texto antes de publicar.`,
-        commercial: `Homestead Services. Folio ${publicId}. Confirma el texto antes de publicar.`,
-        warm: `Así llegó este trabajo a Homestead. Folio ${publicId}.`,
-        educational: `Mantenimiento y reparaciones en Panamá. Folio ${publicId}.`,
-        cta: "Agenda en homestead.lat",
-        hashtags: ["#HomesteadServices", "#Panama"],
-      },
-    };
-  }
-  const body = context;
+/** Safe baseline when the copy generator is unavailable — never the operator note verbatim. */
+function templateCopyBaseline(publicId: string) {
   return {
     serviceGuess: "servicio del hogar",
-    ratings: [{ index: 1, label: "PRIMARY" as const, notes: "Texto orientado por contexto del operador (sin visión de IA)." }],
+    ratings: [{ index: 1, label: "PRIMARY" as const, notes: "Plantilla local; requiere revisión humana." }],
     privacy: { people: false, plates: false, documents: false, warning: "" },
     copy: {
-      full: `${body}\n\nFolio ${publicId}. Homestead Services — agenda en homestead.lat`,
-      commercial: `${body}\n\nHomestead Services. Folio ${publicId}.`,
-      warm: `${body}\n\nFolio ${publicId}.`,
-      educational: `${body}\n\nMantenimiento y reparaciones en Panamá. Folio ${publicId}.`,
+      full: `Trabajo documentado por Homestead. Folio ${publicId}. Revisa la foto y el texto antes de publicar.`,
+      commercial: `Homestead Services. Folio ${publicId}. Confirma el texto antes de publicar.`,
+      warm: `Así llegó este trabajo a Homestead. Folio ${publicId}.`,
+      educational: `Mantenimiento y reparaciones en Panamá. Folio ${publicId}.`,
       cta: "Agenda en homestead.lat",
       hashtags: ["#HomesteadServices", "#Panama"],
     },
   };
 }
 
-function controlCopyFallback(publicId: string, note = "") {
-  return controlCopyFromContext(publicId, note);
+/**
+ * Builds Control captions via the project copy generator (`rewriteCopyOnly`).
+ * Operator note is orientation only — never published as the caption body.
+ * Template/isolated fallback is labeled and requires review.
+ */
+async function controlCopyFromContext(publicId: string, note: string) {
+  const context = sanitizeAiContext(note);
+  const baseline = templateCopyBaseline(publicId);
+  try {
+    const rewritten = await rewriteCopyOnly({
+      publicId,
+      description: context || "(sin nota de contexto)",
+      previousCopy: baseline.copy.full,
+      instruction:
+        "Usa la nota solo como orientación de tono/hecho. No copies las instrucciones del operador literalmente en el caption. No inventes precios, ubicaciones ni resultados no mencionados.",
+    });
+    // Isolated transport returns local fallback copy; treat as review-required.
+    const usedFallback = isControlIsolated();
+    return {
+      serviceGuess: baseline.serviceGuess,
+      ratings: baseline.ratings,
+      privacy: baseline.privacy,
+      copy: {
+        full: rewritten.full,
+        commercial: rewritten.full,
+        warm: rewritten.full,
+        educational: rewritten.full,
+        cta: rewritten.cta,
+        hashtags: rewritten.hashtags,
+      },
+      usedFallback: usedFallback as boolean,
+      needsReview: usedFallback,
+      prompt: usedFallback ? "rewriteCopyOnly:isolated-fallback" : "rewriteCopyOnly",
+    };
+  } catch {
+    return {
+      ...baseline,
+      usedFallback: true as const,
+      needsReview: true as const,
+      prompt: "control-template-fallback",
+    };
+  }
 }
 
 /**
@@ -157,7 +176,7 @@ export async function brandControlJob(
   );
   if (!options?.skipCopy) {
     const note = options?.note || job.description || "";
-    const copy = controlCopyFallback(publicId, note);
+    const copy = await controlCopyFromContext(publicId, note);
     if (!latestVersion(publicId)) {
       saveVersion({
         job,
@@ -166,18 +185,23 @@ export async function brandControlJob(
         copy: copy.copy.full,
         cta: copy.copy.cta,
         hashtags: copy.copy.hashtags.join(" "),
-        prompt: isControlIsolated() ? "control-isolated" : "control-local",
-        privacyNote: copy.privacy.warning,
+        prompt: copy.prompt,
+        privacyNote: copy.privacy.warning || (copy.needsReview ? "needs_review:template_fallback" : ""),
       });
     }
     updateJob(publicId, {
       status: "AWAITING_APPROVAL",
       description: note.slice(0, 2000),
       selectedCaption: copy.copy.full,
-      captionsJson: JSON.stringify(copy.copy),
+      captionsJson: JSON.stringify({
+        ...copy.copy,
+        usedFallback: copy.usedFallback,
+        needsReview: copy.needsReview,
+        prompt: copy.prompt,
+      }),
       lastError: null,
     });
-    recordContentEvent(publicId, "CONTENT_READY", "control-intake");
+    recordContentEvent(publicId, "CONTENT_READY", copy.usedFallback ? "control-intake-fallback" : "control-intake");
   }
   return { ok: true as const, assetId: asset?.id || 0 };
 }
@@ -233,12 +257,12 @@ export async function reprocessControlBrand(publicId: string) {
   }
 }
 
-/** Rebuild caption from stored AI context (job.description). Invalidates approval. */
-export function regenerateControlCopy(publicId: string, noteOverride?: string) {
+/** Rebuild caption via rewriteCopyOnly from stored AI context. Invalidates approval. Preserves manual edits unless regenerating. */
+export async function regenerateControlCopy(publicId: string, noteOverride?: string) {
   const job = getJobByPublicId(publicId);
   if (!job) return { ok: false as const, error: "missing" as const };
   const note = (noteOverride ?? job.description ?? "").trim();
-  const copy = controlCopyFromContext(publicId, note);
+  const copy = await controlCopyFromContext(publicId, note);
   const nextStatus =
     job.status === "APPROVED" || job.status === "SCHEDULED" || job.status === "NEEDS_REVIEW"
       ? ("AWAITING_APPROVAL" as const)
@@ -246,13 +270,35 @@ export function regenerateControlCopy(publicId: string, noteOverride?: string) {
   updateJob(publicId, {
     description: note.slice(0, 2000),
     selectedCaption: copy.copy.full,
-    captionsJson: JSON.stringify(copy.copy),
+    captionsJson: JSON.stringify({
+      ...copy.copy,
+      usedFallback: copy.usedFallback,
+      needsReview: copy.needsReview,
+      prompt: copy.prompt,
+    }),
     approvedVersion: null,
     status: nextStatus,
     lastError: null,
   });
-  recordContentEvent(publicId, "CONTENT_READY", "regenerate-copy");
-  return { ok: true as const, copy: copy.copy.full, invalidatedApproval: true as const };
+  const nextVer = nextVersionNumber(publicId);
+  saveVersion({
+      job,
+      version: nextVer,
+      kind: "copy",
+      copy: copy.copy.full,
+      cta: copy.copy.cta,
+      hashtags: copy.copy.hashtags.join(" "),
+      prompt: copy.prompt,
+      privacyNote: copy.needsReview ? "needs_review:template_or_isolated_fallback" : "",
+    });
+  recordContentEvent(publicId, "CONTENT_READY", copy.usedFallback ? "regenerate-copy-fallback" : "regenerate-copy");
+  return {
+    ok: true as const,
+    copy: copy.copy.full,
+    invalidatedApproval: true as const,
+    usedFallback: copy.usedFallback,
+    needsReview: copy.needsReview,
+  };
 }
 
 /** Persist operator-edited caption. Invalidates approval. */
@@ -826,7 +872,7 @@ async function ingestControlAlbum(input: {
   // Resolve branded asset ids if storeDerivedAsset didn't return them reliably.
   const feeds = listAssets(job.publicId, "BRANDED", 1).filter((a) => a.storedFilename.includes("-feed"));
   const order = brandedIds.length ? brandedIds : feeds.map((a) => a.id);
-  const copy = controlCopyFallback(job.publicId, input.note);
+  const copy = await controlCopyFromContext(job.publicId, input.note);
   if (!latestVersion(job.publicId)) {
     saveVersion({
       job,
@@ -835,8 +881,8 @@ async function ingestControlAlbum(input: {
       copy: copy.copy.full,
       cta: copy.copy.cta,
       hashtags: copy.copy.hashtags.join(" "),
-      prompt: isControlIsolated() ? "control-isolated-album" : "control-local-album",
-      privacyNote: copy.privacy.warning,
+      prompt: copy.prompt || (isControlIsolated() ? "control-isolated-album" : "control-local-album"),
+      privacyNote: copy.privacy.warning || (copy.needsReview ? "needs_review:template_or_isolated_fallback" : ""),
     });
   }
   updateJob(job.publicId, {
@@ -846,10 +892,15 @@ async function ingestControlAlbum(input: {
     publishMode: "album",
     mediaOrderJson: JSON.stringify(order),
     selectedCaption: copy.copy.full,
-    captionsJson: JSON.stringify(copy.copy),
+    captionsJson: JSON.stringify({
+      ...copy.copy,
+      usedFallback: copy.usedFallback,
+      needsReview: copy.needsReview,
+      prompt: copy.prompt,
+    }),
     lastError: null,
   });
-  recordContentEvent(job.publicId, "CONTENT_READY", "control-intake-album");
+  recordContentEvent(job.publicId, "CONTENT_READY", copy.usedFallback ? "control-intake-album-fallback" : "control-intake-album");
   getHomesteadDb()
     .prepare(
       `UPDATE control_intake_items SET status = 'ready', public_id = ?, updated_at = ? WHERE batch_key = ? AND filename = '__album_claim__'`,

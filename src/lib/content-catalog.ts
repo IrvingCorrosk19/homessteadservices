@@ -747,7 +747,7 @@ export function listContentEvents(publicId: string, limit = 40) {
 export function listPublicationsForJob(publicId: string) {
   return getHomesteadDb()
     .prepare(
-      `SELECT public_id, platform, status, dry_run, error, permalink, external_post_id, published_at, version, created_at
+      `SELECT public_id, platform, status, dry_run, error, permalink, external_post_id, container_id, published_at, version, created_at
        FROM content_publications WHERE public_id = ? ORDER BY id ASC`,
     )
     .all(publicId) as Array<{
@@ -758,6 +758,7 @@ export function listPublicationsForJob(publicId: string) {
     error: string;
     permalink: string;
     external_post_id: string;
+    container_id: string;
     published_at: string | null;
     version: number;
     created_at: string;

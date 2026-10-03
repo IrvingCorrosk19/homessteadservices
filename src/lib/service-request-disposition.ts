@@ -197,27 +197,54 @@ function enqueueCustomerNotify(input: {
 }
 
 export async function drainCustomerNotifyOutbox(limit = 20) {
-  const rows = getHomesteadDb()
+  const SENDING_STALE_MS = 5 * 60 * 1000;
+  const nowIso = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - SENDING_STALE_MS).toISOString();
+  // Recover crash mid-send: SENDING older than TTL returns to PENDING (at-least-once; not exactly-once SMTP).
+  getHomesteadDb()
     .prepare(
-      `SELECT id, public_id, kind, channel, payload_json, attempts, idempotency_key
-       FROM service_request_notify_outbox WHERE status = 'PENDING' ORDER BY id ASC LIMIT ?`,
+      `UPDATE service_request_notify_outbox
+       SET status = 'PENDING', last_error = 'reclaimed_stale_sending', updated_at = ?
+       WHERE status = 'SENDING' AND updated_at <= ?`,
     )
-    .all(limit) as Array<{
-    id: number;
-    public_id: string;
-    kind: string;
-    channel: string;
-    payload_json: string;
-    attempts: number;
-    idempotency_key: string;
-  }>;
+    .run(nowIso, staleBefore);
+
+  const candidates = getHomesteadDb()
+    .prepare(
+      `SELECT id FROM service_request_notify_outbox WHERE status = 'PENDING' ORDER BY id ASC LIMIT ?`,
+    )
+    .all(limit) as Array<{ id: number }>;
+
   const results: Array<{ id: number; ok: boolean; status: string }> = [];
-  for (const row of rows) {
+  for (const candidate of candidates) {
+    const claimed = getHomesteadDb()
+      .prepare(
+        `UPDATE service_request_notify_outbox
+         SET status = 'SENDING', updated_at = ?
+         WHERE id = ? AND status = 'PENDING'`,
+      )
+      .run(new Date().toISOString(), candidate.id);
+    if (claimed.changes !== 1) continue;
+
+    const row = getHomesteadDb()
+      .prepare(
+        `SELECT id, public_id, kind, channel, payload_json, attempts, idempotency_key
+         FROM service_request_notify_outbox WHERE id = ?`,
+      )
+      .get(candidate.id) as {
+      id: number;
+      public_id: string;
+      kind: string;
+      channel: string;
+      payload_json: string;
+      attempts: number;
+      idempotency_key: string;
+    };
+
     const now = new Date().toISOString();
     try {
       const payload = JSON.parse(row.payload_json || "{}") as { message?: string };
-      // Never log the full message body with PII in production paths beyond short hash.
-      if (row.channel === "SIMULATED" || isControlIsolated()) {
+      if (row.channel === "SIMULATED" || (isControlIsolated() && row.channel !== "WHATSAPP_LINK")) {
         maybeThrowSimulatedNotifyFailure();
         recordSimulatedCall("smtp", `customer_notify:${row.public_id}:${row.kind}`);
       } else if (row.channel === "EMAIL") {
@@ -226,15 +253,32 @@ export async function drainCustomerNotifyOutbox(limit = 20) {
         if (!req?.email || !mail.isMailConfigured()) {
           throw new Error(req?.email ? "smtp_unavailable" : "no_email");
         }
-        // Customer notify uses the same SMTP transport as admin replies, without internal notes.
         await mail.sendCustomerDispositionEmail({
           to: req.email,
           publicId: row.public_id,
           body: String(payload.message || ""),
         });
+      } else if (row.channel === "WHATSAPP_LINK") {
+        // Assisted WhatsApp: generating/storing a deep-link draft is NOT delivery.
+        recordSimulatedCall("telegram", `customer_wa_link_draft:${row.public_id}`);
+        getHomesteadDb()
+          .prepare(
+            `UPDATE service_request_notify_outbox
+             SET status = 'NEEDS_ACTION', attempts = attempts + 1, updated_at = ?, last_error = 'whatsapp_assisted_pending'
+             WHERE id = ?`,
+          )
+          .run(now, row.id);
+        getHomesteadDb()
+          .prepare(
+            `UPDATE service_requests
+             SET customer_notify_status = 'NEEDS_ACTION', customer_notify_last_error = 'whatsapp_assisted_pending', updated_at = ?
+             WHERE public_id = ?`,
+          )
+          .run(now, row.public_id);
+        results.push({ id: row.id, ok: true, status: "NEEDS_ACTION" });
+        continue;
       } else {
-        // WhatsApp remains human-assisted deep link; draft is ready for ops.
-        recordSimulatedCall("telegram", `customer_wa_link:${row.public_id}`);
+        throw new Error(`unsupported_channel:${row.channel}`);
       }
       getHomesteadDb()
         .prepare(
@@ -251,6 +295,7 @@ export async function drainCustomerNotifyOutbox(limit = 20) {
     } catch (error) {
       const cause = error instanceof Error ? error.message : "notify_failed";
       const attempts = row.attempts + 1;
+      // Uncertain SMTP: keep PENDING for retry; after budget → FAILED. Never claim exactly-once.
       const status = attempts >= 5 ? "FAILED" : "PENDING";
       getHomesteadDb()
         .prepare(

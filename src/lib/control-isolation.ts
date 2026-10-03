@@ -6,7 +6,10 @@ export type SimulatedGraphScenario =
   | "fail_facebook"
   | "fail_instagram"
   | "fail_all"
-  | "uncertain_facebook";
+  | "uncertain_facebook"
+  | "fail_ig_second_child"
+  | "fail_ig_child_wait"
+  | "fail_ig_carousel_parent";
 export type SimulatedNotifyScenario = "ok" | "fail_once" | "fail";
 
 export type SimulatedCallRecord = {
@@ -30,6 +33,8 @@ const calls: SimulatedCallRecord[] = [];
 let graphScenario: SimulatedGraphScenario = "ok";
 let notifyScenario: SimulatedNotifyScenario = "ok";
 let notifyFailBudget = 0;
+/** Counts IG carousel children created in the current scenario (process-local). */
+let igCarouselChildCreates = 0;
 
 export function isControlIsolated() {
   return process.env.HOMESTEAD_CONTROL_ISOLATED === "true";
@@ -99,6 +104,16 @@ export function resetSimulatedCalls() {
 
 export function setSimulatedGraphScenario(scenario: SimulatedGraphScenario) {
   graphScenario = scenario;
+  igCarouselChildCreates = 0;
+}
+
+export function noteIgCarouselChildCreated() {
+  igCarouselChildCreates += 1;
+  return igCarouselChildCreates;
+}
+
+export function getIgCarouselChildCreateCount() {
+  return igCarouselChildCreates;
 }
 
 export function getSimulatedGraphScenario() {

@@ -143,30 +143,33 @@ async function publishInstagram(input: {
   id?: string;
   permalink?: string;
   cause?: string;
+  /** Only the reusable parent (or single-image) creation container — never a carousel child. */
   containerId?: string;
+  childContainerIds?: string[];
 }> {
   const ig = instagramAccountId();
   if (!ig) return { ok: false, status: "FAILED", cause: "instagram_unconfigured" };
   const urls = input.imageUrls.filter(Boolean);
   if (!urls.length) return { ok: false, status: "FAILED", cause: "image_missing" };
 
-  let containerId = input.existing?.containerId || "";
-  if (!containerId) {
+  // existing.containerId must be a parent/single container. Child IDs are never persisted here.
+  let parentContainerId = input.existing?.containerId || "";
+  const childIds: string[] = [];
+  if (!parentContainerId) {
     if (urls.length === 1) {
       const created = await input.transport.request({
         method: "POST",
         path: `${ig}/media`,
         body: { image_url: urls[0], caption: input.caption },
       });
-      containerId = created.json.id || "";
-      if (!containerId) {
+      parentContainerId = created.json.id || "";
+      if (!parentContainerId) {
         const cause = graphErrorMessage(created.json, "instagram_create_failed");
         const uncertain = created.status === 0 || /timeout|network/i.test(cause);
         return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
       }
     } else {
       // Official IG carousel: children with is_carousel_item=true, then parent media_type=CAROUSEL.
-      const childIds: string[] = [];
       for (const imageUrl of urls.slice(0, 10)) {
         const child = await input.transport.request({
           method: "POST",
@@ -177,11 +180,22 @@ async function publishInstagram(input: {
         if (!childId) {
           const cause = graphErrorMessage(child.json, "instagram_carousel_child_failed");
           const uncertain = child.status === 0 || /timeout|network/i.test(cause);
-          return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause, containerId: childIds[0] };
+          // Do not return a child id as containerId — recovery must not reuse a child as parent.
+          return {
+            ok: false,
+            status: uncertain ? "UNCERTAIN" : "FAILED",
+            cause,
+            childContainerIds: [...childIds],
+          };
         }
         const readyChild = await waitInstagramContainer(childId, input.transport);
         if (!readyChild.ok && readyChild.code !== "IN_PROGRESS") {
-          return { ok: false, status: "FAILED", cause: readyChild.cause, containerId: childId };
+          return {
+            ok: false,
+            status: "FAILED",
+            cause: readyChild.cause,
+            childContainerIds: [...childIds, childId],
+          };
         }
         childIds.push(childId);
       }
@@ -194,44 +208,87 @@ async function publishInstagram(input: {
           caption: input.caption,
         },
       });
-      containerId = carousel.json.id || "";
-      if (!containerId) {
+      parentContainerId = carousel.json.id || "";
+      if (!parentContainerId) {
         const cause = graphErrorMessage(carousel.json, "instagram_carousel_create_failed");
         const uncertain = carousel.status === 0 || /timeout|network/i.test(cause);
-        return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+        return {
+          ok: false,
+          status: uncertain ? "UNCERTAIN" : "FAILED",
+          cause,
+          childContainerIds: childIds,
+        };
       }
     }
   }
-  const ready = await waitInstagramContainer(containerId, input.transport);
+  const ready = await waitInstagramContainer(parentContainerId, input.transport);
   if (ready.ok && ready.code === "PUBLISHED") {
-    const id = containerId;
-    const permalink = await getInstagramPermalink(id, input.transport);
-    return { ok: true, status: "PUBLISHED", id, permalink, containerId };
+    const permalink = await getInstagramPermalink(parentContainerId, input.transport);
+    return {
+      ok: true,
+      status: "PUBLISHED",
+      id: parentContainerId,
+      permalink,
+      containerId: parentContainerId,
+      childContainerIds: childIds,
+    };
   }
   if (!ready.ok && ready.code !== "IN_PROGRESS") {
-    return { ok: false, status: "FAILED", cause: ready.cause, containerId };
+    return {
+      ok: false,
+      status: "FAILED",
+      cause: ready.cause,
+      containerId: parentContainerId,
+      childContainerIds: childIds,
+    };
   }
   const published = await input.transport.request({
     method: "POST",
     path: `${ig}/media_publish`,
-    body: { creation_id: containerId },
+    body: { creation_id: parentContainerId },
   });
   const id = published.json.id || "";
   if (!id) {
     const cause = graphErrorMessage(published.json, "instagram_publish_failed");
     const uncertain = published.status === 0 || /timeout|network/i.test(cause);
     if (uncertain) {
-      const again = await waitInstagramContainer(containerId, input.transport);
+      const again = await waitInstagramContainer(parentContainerId, input.transport);
       if (again.ok && again.code === "PUBLISHED") {
-        const permalink = await getInstagramPermalink(containerId, input.transport);
-        return { ok: true, status: "PUBLISHED", id: containerId, permalink, containerId };
+        const permalink = await getInstagramPermalink(parentContainerId, input.transport);
+        return {
+          ok: true,
+          status: "PUBLISHED",
+          id: parentContainerId,
+          permalink,
+          containerId: parentContainerId,
+          childContainerIds: childIds,
+        };
       }
-      return { ok: false, status: "UNCERTAIN", cause, containerId };
+      return {
+        ok: false,
+        status: "UNCERTAIN",
+        cause,
+        containerId: parentContainerId,
+        childContainerIds: childIds,
+      };
     }
-    return { ok: false, status: "FAILED", cause, containerId };
+    return {
+      ok: false,
+      status: "FAILED",
+      cause,
+      containerId: parentContainerId,
+      childContainerIds: childIds,
+    };
   }
   const permalink = (await getInstagramPermalink(id, input.transport)) || "";
-  return { ok: true, status: "PUBLISHED", id, permalink, containerId };
+  return {
+    ok: true,
+    status: "PUBLISHED",
+    id,
+    permalink,
+    containerId: parentContainerId,
+    childContainerIds: childIds,
+  };
 }
 
 async function lookupFacebookPost(postId: string, transport: GraphTransport) {

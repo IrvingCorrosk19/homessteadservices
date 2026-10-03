@@ -73,6 +73,8 @@ function assessPublishImage(publicId: string) {
   return { ready: true as const, cause: "", branded, original };
 }
 
+const PENDING_RECEIPT_TTL_MS = 5 * 60 * 1000;
+
 function receiptHash(input: {
   key: string;
   publicId: string;
@@ -80,12 +82,35 @@ function receiptHash(input: {
   actor: string;
   version: number;
   confirm?: boolean;
+  copy?: string;
+  note?: string;
 }) {
   return createHash("sha256")
     .update(
-      [input.key, input.publicId, input.action, input.actor, String(input.version), input.confirm ? "1" : "0"].join("|"),
+      [
+        input.key,
+        input.publicId,
+        input.action,
+        input.actor,
+        String(input.version),
+        input.confirm ? "1" : "0",
+        String(input.copy ?? ""),
+        String(input.note ?? ""),
+      ].join("|"),
     )
     .digest("hex");
+}
+
+/** Reclaim stuck __pending receipts after crash/restart so the same key can resume. */
+function reclaimStalePendingReceipts() {
+  const cutoff = new Date(Date.now() - PENDING_RECEIPT_TTL_MS).toISOString();
+  getHomesteadDb()
+    .prepare(
+      `DELETE FROM control_action_receipts
+       WHERE result_json LIKE '%"__pending":true%'
+         AND created_at <= ?`,
+    )
+    .run(cutoff);
 }
 
 function publicationsView(publicId: string): PlatformPublicationView[] {
@@ -126,6 +151,7 @@ function claimReceipt(input: {
   hash: string;
 }): { ok: true } | { conflict: true } | { inflight: true } | { payload: Record<string, unknown> } {
   if (!input.key) return { ok: true };
+  reclaimStalePendingReceipts();
   const existing = readReceipt(input.key, input.hash);
   if (existing?.conflict) return { conflict: true };
   if (existing?.inflight) return { inflight: true };
@@ -573,6 +599,8 @@ export async function runControlJobAction(input: {
     actor: input.actor,
     version: input.version,
     confirm: input.confirm,
+    copy: input.copy,
+    note: input.note,
   });
   const claimed = claimReceipt({
     key: input.idempotencyKey || "",
@@ -603,15 +631,26 @@ export async function runControlJobAction(input: {
   if (!job) return finish({ ok: false, error: "missing" });
 
   const versionGate = assertVersion(input.publicId, input.version);
-  if (
-    !versionGate.ok &&
-    input.action !== "reschedule" &&
-    input.action !== "reprocess_media" &&
-    input.action !== "regenerate_copy" &&
-    input.action !== "save_copy" &&
-    input.action !== "update_ai_context"
-  ) {
+  const editActions = new Set([
+    "reprocess_media",
+    "regenerate_copy",
+    "save_copy",
+    "update_ai_context",
+  ]);
+  if (!versionGate.ok && !editActions.has(input.action) && input.action !== "reschedule") {
     return finish({ ok: false, error: versionGate.error, current: versionGate.current });
+  }
+
+  if (editActions.has(input.action)) {
+    const { assertContentJobEditable, assertExpectedContentVersion } = await import("@/lib/content-edit-guard");
+    const editable = assertContentJobEditable(input.publicId);
+    if (!editable.ok) {
+      return finish({ ok: false, error: editable.error, version: editable.version });
+    }
+    const expected = assertExpectedContentVersion(input.publicId, input.version);
+    if (!expected.ok) {
+      return finish({ ok: false, error: expected.error, current: expected.current });
+    }
   }
 
   if (input.action === "reject") {
@@ -650,11 +689,13 @@ export async function runControlJobAction(input: {
 
   if (input.action === "regenerate_copy") {
     const { regenerateControlCopy } = await import("@/lib/control-intake");
-    const result = regenerateControlCopy(input.publicId, input.note);
+    const result = await regenerateControlCopy(input.publicId, input.note);
     const payload = {
       ok: result.ok,
       error: result.ok ? "" : result.error,
       invalidatedApproval: result.ok ? true : false,
+      usedFallback: result.ok ? result.usedFallback : false,
+      needsReview: result.ok ? result.needsReview : false,
       job: getControlJobDetail(input.publicId),
     };
     writeReceipt({

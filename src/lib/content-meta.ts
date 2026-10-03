@@ -2,6 +2,7 @@ import { logError, logInfo } from "@/lib/log";
 import {
   getSimulatedGraphScenario,
   isControlIsolated,
+  noteIgCarouselChildCreated,
   recordSimulatedCall,
 } from "@/lib/control-isolation";
 
@@ -144,7 +145,11 @@ function createIsolatedGraphTransport(): GraphTransport {
         return { status: 0, json: { error: { message: "timeout" } } };
       }
       if (input.method === "GET" && path.includes("fields=status_code")) {
-        return { status: 200, json: { id: "sim-container", status_code: "FINISHED" } };
+        const idMatch = path.split("?")[0] || "sim-container";
+        if (scenario === "fail_ig_child_wait" && idMatch.includes("sim-child")) {
+          return { status: 200, json: { id: idMatch, status_code: "ERROR", error: { message: "simulated_child_wait_failed" } } };
+        }
+        return { status: 200, json: { id: idMatch, status_code: "FINISHED" } };
       }
       if (input.method === "GET") {
         return {
@@ -153,9 +158,16 @@ function createIsolatedGraphTransport(): GraphTransport {
         };
       }
       if (isIgCreate && String(input.body?.is_carousel_item || "") === "true") {
-        return { status: 200, json: { id: `sim-child-${Date.now()}-${Math.floor(Math.random() * 999)}` } };
+        const n = noteIgCarouselChildCreated();
+        if (scenario === "fail_ig_second_child" && n >= 2) {
+          return { status: 400, json: { error: { message: "simulated_second_child_denied" } } };
+        }
+        return { status: 200, json: { id: `sim-child-${n}-${Date.now()}` } };
       }
       if (isIgCreate && String(input.body?.media_type || "") === "CAROUSEL") {
+        if (scenario === "fail_ig_carousel_parent") {
+          return { status: 400, json: { error: { message: "simulated_carousel_parent_denied" } } };
+        }
         return { status: 200, json: { id: `sim-carousel-${Date.now()}` } };
       }
       if (isFacebookFeed) {
