@@ -123,4 +123,6 @@ Contra un backend aislado (`npm run control:dev`) se puede ejercitar login/mutac
 
 ## Rama / commit
 
-Ver historial git del commit que incluye esta carpeta y el doc 13.
+- Rama: `main`
+- Commit: `b23699d5af1c8a10b8ddd68c3a0ed53f7a7d1dbe` (`feat(control): add Flutter Android app and mobile admin auth`)
+- Remote: `origin/main` (pushed)
