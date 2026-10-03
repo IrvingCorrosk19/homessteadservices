@@ -1,0 +1,292 @@
+import { logError, logInfo } from "@/lib/log";
+import {
+  getSimulatedGraphScenario,
+  isControlIsolated,
+  noteIgCarouselChildCreated,
+  recordSimulatedCall,
+} from "@/lib/control-isolation";
+
+export const DEFAULT_META_GRAPH_VERSION = "v22.0";
+
+export type MetaPlatform = "instagram" | "facebook";
+
+export type GraphJson = {
+  id?: string;
+  post_id?: string;
+  permalink?: string;
+  permalink_url?: string;
+  link?: string;
+  status_code?: string;
+  status?: string;
+  name?: string;
+  username?: string;
+  instagram_business_account?: { id?: string };
+  data?: unknown;
+  error?: { message?: string; code?: number; error_subcode?: number; type?: string };
+};
+
+export type GraphTransport = {
+  request(input: {
+    method: "GET" | "POST";
+    path: string;
+    body?: Record<string, string>;
+  }): Promise<{ status: number; json: GraphJson }>;
+};
+
+function graphVersion() {
+  const raw = process.env.META_GRAPH_VERSION?.trim() || DEFAULT_META_GRAPH_VERSION;
+  return raw.startsWith("v") ? raw : `v${raw}`;
+}
+
+export function resolveFacebookPageId() {
+  if (isControlIsolated()) {
+    return {
+      id: process.env.FACEBOOK_PAGE_ID?.trim() || "sim-facebook-page",
+      source: "FACEBOOK_PAGE_ID" as const,
+      conflict: false,
+    };
+  }
+  const facebook = process.env.FACEBOOK_PAGE_ID?.trim() || "";
+  const legacy = process.env.META_PAGE_ID?.trim() || "";
+  if (facebook && legacy && facebook !== legacy) {
+    logError("MetaPageIdConflict", {
+      cause: "FACEBOOK_PAGE_ID_and_META_PAGE_ID_differ",
+      stage: "FACEBOOK_PAGE_ID_wins",
+    });
+    return { id: facebook, source: "FACEBOOK_PAGE_ID" as const, conflict: true };
+  }
+  if (facebook) return { id: facebook, source: "FACEBOOK_PAGE_ID" as const, conflict: false };
+  if (legacy) return { id: legacy, source: "META_PAGE_ID" as const, conflict: false };
+  return { id: "", source: "" as const, conflict: false };
+}
+
+export function metaPageAccessToken() {
+  return process.env.META_PAGE_ACCESS_TOKEN?.trim() || "";
+}
+
+export function instagramAccountId() {
+  if (isControlIsolated()) {
+    return process.env.INSTAGRAM_ACCOUNT_ID?.trim() || "sim-instagram-account";
+  }
+  return process.env.INSTAGRAM_ACCOUNT_ID?.trim() || "";
+}
+
+export function metaTokenConfigured() {
+  if (isControlIsolated()) return true;
+  return Boolean(metaPageAccessToken());
+}
+
+export function platformConfigured(platform: MetaPlatform) {
+  if (isControlIsolated()) return true;
+  if (!metaTokenConfigured()) return false;
+  if (platform === "instagram") return Boolean(instagramAccountId());
+  return Boolean(resolveFacebookPageId().id);
+}
+
+export function anyMetaPlatformConfigured() {
+  return platformConfigured("instagram") || platformConfigured("facebook");
+}
+
+function summarizeGraphError(json: GraphJson, fallback: string) {
+  const message = json.error?.message || fallback;
+  return message.replace(/access_token=[^&\s]+/gi, "access_token=[REDACTED]").slice(0, 180);
+}
+
+function summarizeIsolatedGraphBody(body?: Record<string, string>) {
+  if (!body) return undefined;
+  const keys = Object.keys(body).filter((k) => k !== "access_token").sort();
+  const attached = keys.filter((k) => k.startsWith("attached_media")).length;
+  const children = String(body.children || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    method: "POST" as const,
+    path: "",
+    bodyKeys: keys,
+    imageUrlCount: body.image_url ? 1 : 0,
+    childrenCount: children.length,
+    mediaType: body.media_type || "",
+    isCarouselItem: String(body.is_carousel_item || "") === "true",
+    attachedMediaCount: attached,
+  };
+}
+
+function createIsolatedGraphTransport(): GraphTransport {
+  return {
+    async request(input) {
+      const path = input.path;
+      const snap = summarizeIsolatedGraphBody(input.body);
+      recordSimulatedCall("meta", `${input.method} ${path}`, {
+        method: input.method,
+        path,
+        bodyKeys: snap?.bodyKeys,
+        imageUrlCount: snap?.imageUrlCount,
+        childrenCount: snap?.childrenCount,
+        mediaType: snap?.mediaType,
+        isCarouselItem: snap?.isCarouselItem,
+        attachedMediaCount: snap?.attachedMediaCount,
+      });
+      const scenario = getSimulatedGraphScenario();
+      const isFacebookPhoto = path.includes("/photos");
+      const isFacebookFeed = path.includes("/feed");
+      const isIgCreate = path.includes("/media") && !path.includes("media_publish") && input.method === "POST";
+      const isIgPublish = path.includes("media_publish");
+      if (scenario === "fail_all") {
+        return { status: 400, json: { error: { message: "simulated_graph_denied" } } };
+      }
+      if (scenario === "fail_facebook" && (isFacebookPhoto || isFacebookFeed)) {
+        return { status: 400, json: { error: { message: "simulated_facebook_denied" } } };
+      }
+      if (scenario === "fail_instagram" && (isIgCreate || isIgPublish)) {
+        return { status: 400, json: { error: { message: "simulated_instagram_denied" } } };
+      }
+      if (scenario === "uncertain_facebook" && (isFacebookPhoto || isFacebookFeed)) {
+        return { status: 0, json: { error: { message: "timeout" } } };
+      }
+      if (input.method === "GET" && path.includes("fields=status_code")) {
+        const idMatch = path.split("?")[0] || "sim-container";
+        if (scenario === "fail_ig_child_wait" && idMatch.includes("sim-child")) {
+          return { status: 200, json: { id: idMatch, status_code: "ERROR", error: { message: "simulated_child_wait_failed" } } };
+        }
+        return { status: 200, json: { id: idMatch, status_code: "FINISHED" } };
+      }
+      if (input.method === "GET") {
+        return {
+          status: 200,
+          json: { id: "sim-post", permalink: "https://example.invalid/sim", permalink_url: "https://example.invalid/sim" },
+        };
+      }
+      if (isIgCreate && String(input.body?.is_carousel_item || "") === "true") {
+        const n = noteIgCarouselChildCreated();
+        if (scenario === "fail_ig_second_child" && n >= 2) {
+          return { status: 400, json: { error: { message: "simulated_second_child_denied" } } };
+        }
+        return { status: 200, json: { id: `sim-child-${n}-${Date.now()}` } };
+      }
+      if (isIgCreate && String(input.body?.media_type || "") === "CAROUSEL") {
+        if (scenario === "fail_ig_carousel_parent") {
+          return { status: 400, json: { error: { message: "simulated_carousel_parent_denied" } } };
+        }
+        return { status: 200, json: { id: `sim-carousel-${Date.now()}` } };
+      }
+      if (isFacebookFeed) {
+        return { status: 200, json: { id: `sim-feed-${Date.now()}` } };
+      }
+      return {
+        status: 200,
+        json: { id: `sim-${Date.now()}`, post_id: `sim-post-${Date.now()}` },
+      };
+    },
+  };
+}
+
+export function createGraphTransport(token = metaPageAccessToken()): GraphTransport {
+  if (isControlIsolated()) return createIsolatedGraphTransport();
+  return {
+    async request(input) {
+      if (!token) {
+        return {
+          status: 0,
+          json: { error: { message: "meta_token_unconfigured" } },
+        };
+      }
+      const url = new URL(`https://graph.facebook.com/${graphVersion()}/${input.path.replace(/^\//, "")}`);
+      const init: RequestInit = { method: input.method };
+      if (input.method === "GET") {
+        url.searchParams.set("access_token", token);
+        init.headers = { Accept: "application/json" };
+      } else {
+        const body = new URLSearchParams({ ...(input.body || {}), access_token: token });
+        init.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+        init.body = body.toString();
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 25_000);
+      try {
+        const response = await fetch(url.toString(), { ...init, signal: controller.signal });
+        const json = (await response.json().catch(() => ({}))) as GraphJson;
+        return { status: response.status, json };
+      } catch (error) {
+        const cause = error instanceof Error ? error.name : "unknown";
+        return {
+          status: 0,
+          json: { error: { message: cause === "AbortError" ? "meta_timeout" : "meta_network" } },
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+export async function inspectMetaConnections(transport: GraphTransport = createGraphTransport()) {
+  const token = metaTokenConfigured();
+  const page = resolveFacebookPageId();
+  const ig = instagramAccountId();
+  const result = {
+    tokenConfigured: token,
+    graphVersion: graphVersion(),
+    facebookPageId: page.id ? "SET" : "EMPTY",
+    facebookPageSource: page.source || "none",
+    facebookPageConflict: page.conflict,
+    instagramAccountId: ig ? "SET" : "EMPTY",
+    page: null as { id: string; name: string } | { error: string } | null,
+    instagram: null as { id: string; username: string } | { error: string } | null,
+  };
+  if (!token) return result;
+  if (page.id) {
+    const got = await transport.request({
+      method: "GET",
+      path: `${page.id}?fields=id,name,instagram_business_account`,
+    });
+    if (got.json.id) {
+      result.page = { id: "SET", name: String(got.json.name || "").slice(0, 80) };
+      logInfo("MetaPageInspected", { stage: "ok" });
+    } else {
+      result.page = { error: summarizeGraphError(got.json, "page_lookup_failed") };
+      logError("MetaPageInspectFailed", { cause: result.page.error });
+    }
+  }
+  if (ig) {
+    const got = await transport.request({
+      method: "GET",
+      path: `${ig}?fields=id,username,name`,
+    });
+    if (got.json.id) {
+      result.instagram = { id: "SET", username: String(got.json.username || "").slice(0, 80) };
+      logInfo("MetaInstagramInspected", { stage: "ok" });
+    } else {
+      result.instagram = { error: summarizeGraphError(got.json, "instagram_lookup_failed") };
+      logError("MetaInstagramInspectFailed", { cause: result.instagram.error });
+    }
+  }
+  return result;
+}
+
+export function graphErrorMessage(json: GraphJson, fallback: string) {
+  return summarizeGraphError(json, fallback);
+}
+
+export async function getInstagramPermalink(
+  mediaId: string,
+  transport: GraphTransport,
+) {
+  const got = await transport.request({
+    method: "GET",
+    path: `${mediaId}?fields=id,permalink`,
+  });
+  return got.json.permalink || "";
+}
+
+export async function getFacebookPermalink(
+  postId: string,
+  transport: GraphTransport,
+) {
+  const got = await transport.request({
+    method: "GET",
+    path: `${postId}?fields=id,permalink_url`,
+  });
+  if (got.json.permalink_url) return got.json.permalink_url;
+  return postId ? `https://www.facebook.com/${postId}` : "";
+}
