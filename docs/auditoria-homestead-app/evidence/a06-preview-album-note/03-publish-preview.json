@@ -1,0 +1,21 @@
+﻿{
+    "ok":  true,
+    "publicId":  "HC-2026-000009",
+    "version":  1,
+    "copy":  "Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves.\n\nFolio HC-2026-000009. Homestead Services â agenda en homestead.lat",
+    "platforms":  [
+                      "instagram",
+                      "facebook"
+                  ],
+    "dryRun":  false,
+    "paused":  false,
+    "liveEffect":  "Efecto real (o proveedor simulado si HOMESTEAD_CONTROL_ISOLATED=true): intenta publicar en las redes pendientes.",
+    "alreadyPublished":  [
+
+                         ],
+    "pendingPlatforms":  [
+                             "instagram",
+                             "facebook"
+                         ],
+    "cadenceNote":  "Publicar ahora es una acciÃ³n explÃ­cita. No convierte otras piezas APPROVED a SCHEDULED. La cadencia 1/dÃ­a y 36 h sigue aplicÃ¡ndose al programador automÃ¡tico."
+}

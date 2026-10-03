@@ -1,0 +1,142 @@
+﻿{
+    "ok":  true,
+    "job":  {
+                "publicId":  "HC-2026-000009",
+                "status":  "PUBLISHED",
+                "displayState":  "published",
+                "displayLabel":  "Publicado",
+                "version":  1,
+                "approvedVersion":  1,
+                "copy":  "Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves.\n\nFolio HC-2026-000009. Homestead Services â agenda en homestead.lat",
+                "serviceType":  "",
+                "batchId":  "",
+                "campaignId":  "",
+                "recommendedPublishAt":  null,
+                "recommendedPublishLabel":  "",
+                "lastError":  "",
+                "lastErrorLabel":  "",
+                "publications":  [
+                                     {
+                                         "platform":  "instagram",
+                                         "status":  "PUBLISHED",
+                                         "dryRun":  false,
+                                         "error":  "",
+                                         "permalink":  "https://example.invalid/sim",
+                                         "errorLabel":  ""
+                                     },
+                                     {
+                                         "platform":  "facebook",
+                                         "status":  "PUBLISHED",
+                                         "dryRun":  false,
+                                         "error":  "",
+                                         "permalink":  "https://example.invalid/sim",
+                                         "errorLabel":  ""
+                                     }
+                                 ],
+                "previewAssetId":  39,
+                "originalAssetId":  34,
+                "brandedAssetId":  39,
+                "publishImageReady":  true,
+                "publishImageIssue":  "",
+                "publishImageIssueLabel":  "",
+                "processingPhase":  "ready",
+                "brandedWidth":  1080,
+                "brandedHeight":  1350,
+                "originalWidth":  null,
+                "originalHeight":  null,
+                "updatedAt":  "2026-10-03T14:11:26.896Z",
+                "createdAt":  "2026-10-03T14:09:43.037Z",
+                "paused":  false,
+                "dryRun":  false,
+                "description":  "Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves.",
+                "cta":  "Agenda en homestead.lat",
+                "hashtags":  "#HomesteadServices #Panama",
+                "history":  [
+                                {
+                                    "event":  "CONTENT_PUBLISHED",
+                                    "detail":  "instagram:published,facebook:published",
+                                    "createdAt":  "2026-10-03T14:11:26.897Z"
+                                },
+                                {
+                                    "event":  "CONTENT_PUBLISHING",
+                                    "detail":  "now:live",
+                                    "createdAt":  "2026-10-03T14:11:26.862Z"
+                                },
+                                {
+                                    "event":  "CONTENT_APPROVED",
+                                    "detail":  "control:approve_only",
+                                    "createdAt":  "2026-10-03T14:11:26.786Z"
+                                },
+                                {
+                                    "event":  "CONTENT_APPROVED",
+                                    "detail":  "admin-mobile",
+                                    "createdAt":  "2026-10-03T14:11:26.785Z"
+                                },
+                                {
+                                    "event":  "CONTENT_READY",
+                                    "detail":  "regenerate-copy",
+                                    "createdAt":  "2026-10-03T14:11:26.706Z"
+                                },
+                                {
+                                    "event":  "CONTENT_APPROVED",
+                                    "detail":  "control:approve_only",
+                                    "createdAt":  "2026-10-03T14:10:29.801Z"
+                                },
+                                {
+                                    "event":  "CONTENT_APPROVED",
+                                    "detail":  "admin-mobile",
+                                    "createdAt":  "2026-10-03T14:10:29.801Z"
+                                },
+                                {
+                                    "event":  "CONTENT_READY",
+                                    "detail":  "control-intake-album",
+                                    "createdAt":  "2026-10-03T14:09:44.464Z"
+                                }
+                            ],
+                "format":  "CAROUSEL",
+                "publishMode":  "album",
+                "mediaItems":  [
+                                   {
+                                       "assetId":  35,
+                                       "index":  0,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  15330,
+                                       "role":  "PRIMARY"
+                                   },
+                                   {
+                                       "assetId":  37,
+                                       "index":  1,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  16038,
+                                       "role":  "SECONDARY"
+                                   },
+                                   {
+                                       "assetId":  39,
+                                       "index":  2,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  15748,
+                                       "role":  "SECONDARY"
+                                   }
+                               ],
+                "videoSupported":  false,
+                "carouselSupported":  true,
+                "laterNote":  "Ãlbum: Instagram publica carrusel oficial; Facebook usa multi-foto orgÃ¡nica (fotos no publicadas + attached_media). Video/Reels no soportados.",
+                "actions":  {
+                                "approve":  false,
+                                "approveAndSchedule":  false,
+                                "reschedule":  false,
+                                "reject":  false,
+                                "publishNow":  false,
+                                "retryPlatform":  false,
+                                "retryBlockedByUncertain":  false,
+                                "reprocessMedia":  false,
+                                "regenerateCopy":  false,
+                                "saveCopy":  false,
+                                "updateAiContext":  false,
+                                "blockedByIncompleteImage":  false
+                            }
+            }
+}

@@ -1,0 +1,226 @@
+[
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.041Z",
+    "detail": "POST sim-instagram-account/media",
+    "request": {
+      "method": "POST",
+      "path": "sim-instagram-account/media",
+      "bodyKeys": [
+        "image_url",
+        "is_carousel_item"
+      ],
+      "imageUrlCount": 1,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": true,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.042Z",
+    "detail": "GET sim-child-1791039209042-619?fields=status_code,status",
+    "request": {
+      "method": "GET",
+      "path": "sim-child-1791039209042-619?fields=status_code,status"
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.043Z",
+    "detail": "POST sim-instagram-account/media",
+    "request": {
+      "method": "POST",
+      "path": "sim-instagram-account/media",
+      "bodyKeys": [
+        "image_url",
+        "is_carousel_item"
+      ],
+      "imageUrlCount": 1,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": true,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.043Z",
+    "detail": "GET sim-child-1791039209043-888?fields=status_code,status",
+    "request": {
+      "method": "GET",
+      "path": "sim-child-1791039209043-888?fields=status_code,status"
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.044Z",
+    "detail": "POST sim-instagram-account/media",
+    "request": {
+      "method": "POST",
+      "path": "sim-instagram-account/media",
+      "bodyKeys": [
+        "image_url",
+        "is_carousel_item"
+      ],
+      "imageUrlCount": 1,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": true,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.044Z",
+    "detail": "GET sim-child-1791039209044-831?fields=status_code,status",
+    "request": {
+      "method": "GET",
+      "path": "sim-child-1791039209044-831?fields=status_code,status"
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.045Z",
+    "detail": "POST sim-instagram-account/media",
+    "request": {
+      "method": "POST",
+      "path": "sim-instagram-account/media",
+      "bodyKeys": [
+        "caption",
+        "children",
+        "media_type"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 3,
+      "mediaType": "CAROUSEL",
+      "isCarouselItem": false,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.045Z",
+    "detail": "GET sim-carousel-1791039209045?fields=status_code,status",
+    "request": {
+      "method": "GET",
+      "path": "sim-carousel-1791039209045?fields=status_code,status"
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.045Z",
+    "detail": "POST sim-instagram-account/media_publish",
+    "request": {
+      "method": "POST",
+      "path": "sim-instagram-account/media_publish",
+      "bodyKeys": [
+        "creation_id"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": false,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.046Z",
+    "detail": "GET sim-1791039209046?fields=id,permalink",
+    "request": {
+      "method": "GET",
+      "path": "sim-1791039209046?fields=id,permalink"
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.051Z",
+    "detail": "POST sim-facebook-page/photos",
+    "request": {
+      "method": "POST",
+      "path": "sim-facebook-page/photos",
+      "bodyKeys": [
+        "published",
+        "url"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": false,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.052Z",
+    "detail": "POST sim-facebook-page/photos",
+    "request": {
+      "method": "POST",
+      "path": "sim-facebook-page/photos",
+      "bodyKeys": [
+        "published",
+        "url"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": false,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.052Z",
+    "detail": "POST sim-facebook-page/photos",
+    "request": {
+      "method": "POST",
+      "path": "sim-facebook-page/photos",
+      "bodyKeys": [
+        "published",
+        "url"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": false,
+      "attachedMediaCount": 0
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.053Z",
+    "detail": "POST sim-facebook-page/feed",
+    "request": {
+      "method": "POST",
+      "path": "sim-facebook-page/feed",
+      "bodyKeys": [
+        "attached_media[0]",
+        "attached_media[1]",
+        "attached_media[2]",
+        "message",
+        "published"
+      ],
+      "imageUrlCount": 0,
+      "childrenCount": 0,
+      "mediaType": "",
+      "isCarouselItem": false,
+      "attachedMediaCount": 3
+    }
+  },
+  {
+    "provider": "meta",
+    "at": "2026-10-03T14:53:29.054Z",
+    "detail": "GET sim-feed-1791039209054?fields=id,permalink_url",
+    "request": {
+      "method": "GET",
+      "path": "sim-feed-1791039209054?fields=id,permalink_url"
+    }
+  },
+  {
+    "provider": "telegram",
+    "at": "2026-10-03T14:53:29.060Z",
+    "detail": "sendMessage"
+  }
+]

@@ -1,0 +1,75 @@
+{
+  "publicId": "HC-2026-000016",
+  "pub1": {
+    "ok": true,
+    "error": "",
+    "results": [
+      {
+        "platform": "instagram",
+        "outcome": "published",
+        "id": "sim-1791039209046",
+        "permalink": "https://example.invalid/sim"
+      },
+      {
+        "platform": "facebook",
+        "outcome": "published",
+        "id": "sim-feed-1791039209054",
+        "permalink": "https://example.invalid/sim"
+      }
+    ],
+    "job": {
+      "publicId": "HC-2026-000016",
+      "status": "PUBLISHED",
+      "displayState": "published",
+      "displayLabel": "Publicado",
+      "version": 1,
+      "approvedVersion": 1,
+      "copy": "Contexto prueba estabilización: tres fotos distinguibles A B C. Sin inventar datos.\n\nTexto editado operador. Folio HC-2026-000016.",
+      "serviceType": "",
+      "batchId": "",
+      "campaignId": "",
+      "recommendedPublishAt": null,
+      "recommendedPublishLabel": "",
+      "lastError": "",
+      "lastErrorLabel": "",
+      "publications": [
+        {
+          "platform": "instagram",
+          "status": "PUBLISHED",
+          "dryRun": false,
+          "error": "",
+          "permalink": "https://example.invalid/sim",
+          "errorLabel": ""
+        },
+        {
+          "platform": "facebook",
+          "status": "PUBLISHED",
+          "dryRun": false,
+          "error": "",
+          "permalink": "https://example.invalid/sim",
+          "errorLabel": ""
+        }
+      ],
+      "previewAssetId": 68,
+      "originalAssetId": 63,
+      "brandedAssetId": 68,
+      "publishImageReady": true,
+      "publishImageIssue": "",
+      "publishImageIssueLabel": "",
+      "processingPhase": "ready",
+      "brandedWidth": 1080,
+      "brandedHeight": 1350,
+      "originalWidth": null,
+      "originalHeight": null,
+      "updatedAt": "2026-10-03T14:53:29.059Z",
+      "createdAt": "2026-10-03T14:53:22.703Z",
+      "paused": false,
+      "dryRun": false
+    }
+  },
+  "orderAfter": [
+    68,
+    66,
+    64
+  ]
+}

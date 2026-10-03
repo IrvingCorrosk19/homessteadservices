@@ -1,0 +1,563 @@
+{
+  "failed": 0,
+  "results": [
+    {
+      "name": "login_isolated",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "base": "http://127.0.0.1:3000"
+      },
+      "at": "2026-10-03T14:53:22.373Z"
+    },
+    {
+      "name": "album_create_one_folio",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "status": 202,
+        "publicId": "HC-2026-000016",
+        "publishMode": "album",
+        "itemCount": 3,
+        "uniqueIds": [
+          "HC-2026-000016"
+        ]
+      },
+      "at": "2026-10-03T14:53:24.222Z"
+    },
+    {
+      "name": "context_template_not_model",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "publicId": "HC-2026-000016",
+        "copyStartsWithContext": true,
+        "notePersisted": true,
+        "copyPreview": "Contexto prueba estabilización: tres fotos distinguibles A B C. Sin inventar datos.\n\nFolio HC-2026-000016. Homestead Ser",
+        "doc": "controlCopyFromContext is a local template assembler; OPENAI_API_KEY is cleared in isolated env — no model call."
+      },
+      "at": "2026-10-03T14:53:25.629Z"
+    },
+    {
+      "name": "album_three_assets",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "orderBefore": [
+          64,
+          66,
+          68
+        ],
+        "media": [
+          {
+            "assetId": 64,
+            "index": 0,
+            "width": 1080,
+            "height": 1350,
+            "size": 15919,
+            "sha256": "ef76b1d6a70bd5a3898c04c63f57c41df590e1e48e24f435d0896f86ec3ade3a",
+            "role": "PRIMARY",
+            "filename": "branded-v1-001-feed.jpg"
+          },
+          {
+            "assetId": 66,
+            "index": 1,
+            "width": 1080,
+            "height": 1350,
+            "size": 16122,
+            "sha256": "18b36c4068db6a6c84f302d1a12c725b9021d90aa8f5da5b024e2b9ba0db4d63",
+            "role": "SECONDARY",
+            "filename": "branded-v1-002-feed.jpg"
+          },
+          {
+            "assetId": 68,
+            "index": 2,
+            "width": 1080,
+            "height": 1350,
+            "size": 14984,
+            "sha256": "74bb4cbc134be4ffa6f52f2bed39802063c29d210155a9c22cbbe35174c42b84",
+            "role": "SECONDARY",
+            "filename": "branded-v1-003-feed.jpg"
+          }
+        ]
+      },
+      "at": "2026-10-03T14:53:27.081Z"
+    },
+    {
+      "name": "reorder_clears_approval",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "order": [
+          68,
+          66,
+          64
+        ],
+        "approvalCleared": true
+      },
+      "at": "2026-10-03T14:53:27.115Z"
+    },
+    {
+      "name": "reorder_persists",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "orderAfter": [
+          68,
+          66,
+          64
+        ],
+        "expected": [
+          68,
+          66,
+          64
+        ]
+      },
+      "at": "2026-10-03T14:53:27.133Z"
+    },
+    {
+      "name": "save_copy_invalidates_or_ok",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "invalidatedApproval": true
+      },
+      "at": "2026-10-03T14:53:28.579Z"
+    },
+    {
+      "name": "approve_album",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {},
+      "at": "2026-10-03T14:53:28.638Z"
+    },
+    {
+      "name": "approve_idempotent_replay",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "replayed": true
+      },
+      "at": "2026-10-03T14:53:28.670Z"
+    },
+    {
+      "name": "publish_album_simulated_graph",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "error": "",
+        "results": [
+          {
+            "platform": "instagram",
+            "outcome": "published",
+            "id": "sim-1791039209046",
+            "permalink": "https://example.invalid/sim"
+          },
+          {
+            "platform": "facebook",
+            "outcome": "published",
+            "id": "sim-feed-1791039209054",
+            "permalink": "https://example.invalid/sim"
+          }
+        ]
+      },
+      "at": "2026-10-03T14:53:29.064Z"
+    },
+    {
+      "name": "ig_carousel_three_children_ordered_path",
+      "kind": "simulacion",
+      "result": "PASS",
+      "detail": {
+        "igChildren": 3,
+        "igCarouselParents": 1,
+        "sample": [
+          "POST sim-instagram-account/media",
+          "POST sim-instagram-account/media",
+          "POST sim-instagram-account/media"
+        ],
+        "allMeta": [
+          {
+            "detail": "POST sim-instagram-account/media",
+            "request": {
+              "method": "POST",
+              "path": "sim-instagram-account/media",
+              "bodyKeys": [
+                "image_url",
+                "is_carousel_item"
+              ],
+              "imageUrlCount": 1,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": true,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "GET sim-child-1791039209042-619?fields=status_code,status",
+            "request": {
+              "method": "GET",
+              "path": "sim-child-1791039209042-619?fields=status_code,status"
+            }
+          },
+          {
+            "detail": "POST sim-instagram-account/media",
+            "request": {
+              "method": "POST",
+              "path": "sim-instagram-account/media",
+              "bodyKeys": [
+                "image_url",
+                "is_carousel_item"
+              ],
+              "imageUrlCount": 1,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": true,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "GET sim-child-1791039209043-888?fields=status_code,status",
+            "request": {
+              "method": "GET",
+              "path": "sim-child-1791039209043-888?fields=status_code,status"
+            }
+          },
+          {
+            "detail": "POST sim-instagram-account/media",
+            "request": {
+              "method": "POST",
+              "path": "sim-instagram-account/media",
+              "bodyKeys": [
+                "image_url",
+                "is_carousel_item"
+              ],
+              "imageUrlCount": 1,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": true,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "GET sim-child-1791039209044-831?fields=status_code,status",
+            "request": {
+              "method": "GET",
+              "path": "sim-child-1791039209044-831?fields=status_code,status"
+            }
+          },
+          {
+            "detail": "POST sim-instagram-account/media",
+            "request": {
+              "method": "POST",
+              "path": "sim-instagram-account/media",
+              "bodyKeys": [
+                "caption",
+                "children",
+                "media_type"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 3,
+              "mediaType": "CAROUSEL",
+              "isCarouselItem": false,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "GET sim-carousel-1791039209045?fields=status_code,status",
+            "request": {
+              "method": "GET",
+              "path": "sim-carousel-1791039209045?fields=status_code,status"
+            }
+          },
+          {
+            "detail": "POST sim-instagram-account/media_publish",
+            "request": {
+              "method": "POST",
+              "path": "sim-instagram-account/media_publish",
+              "bodyKeys": [
+                "creation_id"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": false,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "GET sim-1791039209046?fields=id,permalink",
+            "request": {
+              "method": "GET",
+              "path": "sim-1791039209046?fields=id,permalink"
+            }
+          },
+          {
+            "detail": "POST sim-facebook-page/photos",
+            "request": {
+              "method": "POST",
+              "path": "sim-facebook-page/photos",
+              "bodyKeys": [
+                "published",
+                "url"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": false,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "POST sim-facebook-page/photos",
+            "request": {
+              "method": "POST",
+              "path": "sim-facebook-page/photos",
+              "bodyKeys": [
+                "published",
+                "url"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": false,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "POST sim-facebook-page/photos",
+            "request": {
+              "method": "POST",
+              "path": "sim-facebook-page/photos",
+              "bodyKeys": [
+                "published",
+                "url"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": false,
+              "attachedMediaCount": 0
+            }
+          },
+          {
+            "detail": "POST sim-facebook-page/feed",
+            "request": {
+              "method": "POST",
+              "path": "sim-facebook-page/feed",
+              "bodyKeys": [
+                "attached_media[0]",
+                "attached_media[1]",
+                "attached_media[2]",
+                "message",
+                "published"
+              ],
+              "imageUrlCount": 0,
+              "childrenCount": 0,
+              "mediaType": "",
+              "isCarouselItem": false,
+              "attachedMediaCount": 3
+            }
+          },
+          {
+            "detail": "GET sim-feed-1791039209054?fields=id,permalink_url",
+            "request": {
+              "method": "GET",
+              "path": "sim-feed-1791039209054?fields=id,permalink_url"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-03T14:53:29.083Z"
+    },
+    {
+      "name": "fb_multi_photo_attached_media",
+      "kind": "simulacion",
+      "result": "PASS",
+      "detail": {
+        "fbAttached": [
+          {
+            "method": "POST",
+            "path": "sim-facebook-page/feed",
+            "bodyKeys": [
+              "attached_media[0]",
+              "attached_media[1]",
+              "attached_media[2]",
+              "message",
+              "published"
+            ],
+            "imageUrlCount": 0,
+            "childrenCount": 0,
+            "mediaType": "",
+            "isCarouselItem": false,
+            "attachedMediaCount": 3
+          }
+        ],
+        "metaPaths": [
+          "POST sim-instagram-account/media",
+          "GET sim-child-1791039209042-619?fields=status_code,status",
+          "POST sim-instagram-account/media",
+          "GET sim-child-1791039209043-888?fields=status_code,status",
+          "POST sim-instagram-account/media",
+          "GET sim-child-1791039209044-831?fields=status_code,status",
+          "POST sim-instagram-account/media",
+          "GET sim-carousel-1791039209045?fields=status_code,status",
+          "POST sim-instagram-account/media_publish",
+          "GET sim-1791039209046?fields=id,permalink",
+          "POST sim-facebook-page/photos",
+          "POST sim-facebook-page/photos",
+          "POST sim-facebook-page/photos",
+          "POST sim-facebook-page/feed",
+          "GET sim-feed-1791039209054?fields=id,permalink_url"
+        ]
+      },
+      "at": "2026-10-03T14:53:29.084Z"
+    },
+    {
+      "name": "publish_lost_response_replay",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "replayed": true,
+        "error": ""
+      },
+      "at": "2026-10-03T14:53:29.117Z"
+    },
+    {
+      "name": "album_batchkey_no_duplicate_folio",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "original": "HC-2026-000016",
+        "retryId": "HC-2026-000016",
+        "replayed": true
+      },
+      "at": "2026-10-03T14:53:29.149Z"
+    },
+    {
+      "name": "same_hash_new_batch_new_folio",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "publicId": "HC-2026-000016",
+        "id2": "HC-2026-000017"
+      },
+      "at": "2026-10-03T14:53:30.562Z"
+    },
+    {
+      "name": "separate_mode_two_folios",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "sepIds": [
+          "HC-2026-000018",
+          "HC-2026-000019"
+        ],
+        "publishMode": "separate"
+      },
+      "at": "2026-10-03T14:53:31.485Z"
+    },
+    {
+      "name": "branded_feed_1080x1350",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "width": 1080,
+        "height": 1350,
+        "sha16": "74bb4cbc134be4ff"
+      },
+      "at": "2026-10-03T14:53:31.568Z"
+    },
+    {
+      "name": "partial_ig_ok_fb_fail",
+      "kind": "simulacion",
+      "result": "PASS",
+      "detail": {
+        "results": [
+          {
+            "platform": "instagram",
+            "outcome": "published",
+            "id": "sim-1791039213451",
+            "permalink": "https://example.invalid/sim"
+          },
+          {
+            "platform": "facebook",
+            "outcome": "failed",
+            "cause": "simulated_facebook_denied"
+          }
+        ],
+        "ok": false,
+        "error": "publish_failed"
+      },
+      "at": "2026-10-03T14:53:33.464Z"
+    },
+    {
+      "name": "uncertain_blocks_blind_retry",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "publishError": "publish_failed",
+        "results": [
+          {
+            "platform": "instagram",
+            "outcome": "published",
+            "id": "sim-1791039215443",
+            "permalink": "https://example.invalid/sim"
+          },
+          {
+            "platform": "facebook",
+            "outcome": "uncertain",
+            "cause": "timeout"
+          }
+        ],
+        "blockedError": "uncertain_pending",
+        "publications": [
+          {
+            "platform": "instagram",
+            "status": "PUBLISHED",
+            "dryRun": false,
+            "error": "",
+            "permalink": "https://example.invalid/sim",
+            "errorLabel": ""
+          },
+          {
+            "platform": "facebook",
+            "status": "UNCERTAIN",
+            "dryRun": false,
+            "error": "timeout",
+            "permalink": "",
+            "errorLabel": "timeout"
+          }
+        ]
+      },
+      "at": "2026-10-03T14:53:35.604Z"
+    },
+    {
+      "name": "disposition_matrix_delegated",
+      "kind": "implementacion",
+      "result": "PASS",
+      "detail": {
+        "run": "node scripts/control-physical-a06-matrix.mjs",
+        "note": "Reject/cancel/security/notify/auth covered there against same isolated backend"
+      },
+      "at": "2026-10-03T14:53:35.606Z"
+    },
+    {
+      "name": "disposition_unauthorized",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "status": 401
+      },
+      "at": "2026-10-03T14:53:35.620Z"
+    },
+    {
+      "name": "revoked_session_blocked",
+      "kind": "api_aislada",
+      "result": "PASS",
+      "detail": {
+        "status": 401
+      },
+      "at": "2026-10-03T14:53:36.170Z"
+    }
+  ]
+}

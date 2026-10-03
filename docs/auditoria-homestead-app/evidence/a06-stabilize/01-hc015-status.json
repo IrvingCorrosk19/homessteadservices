@@ -1,0 +1,18 @@
+﻿{
+    "publicId":  "HC-2026-000015",
+    "status":  "AWAITING_APPROVAL",
+    "publishMode":  "album",
+    "format":  "CAROUSEL",
+    "mediaCount":  3,
+    "mediaIds":  [
+                     58,
+                     60,
+                     62
+                 ],
+    "previewAssetId":  58,
+    "originalAssetId":  57,
+    "dims":  "1080x1350",
+    "aiContext":  "Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves.",
+    "copyStartsWithContext":  true,
+    "publishImageReady":  true
+}
