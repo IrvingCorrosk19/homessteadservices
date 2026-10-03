@@ -1,0 +1,9 @@
+{
+    "albumId":  "HC-2026-000083",
+    "head":  "2a91b7ec85f30d8f45255e784d74bc0f87e68fe8",
+    "secTestStart":  "2026-10-03T21:23:15.5986767Z",
+    "requestId":  "HS-2026-000035",
+    "rejectRequestId":  "HS-2026-000036",
+    "dirty":  true,
+    "secReason":  "sec-fisica-r3b-eb7efafad8"
+}

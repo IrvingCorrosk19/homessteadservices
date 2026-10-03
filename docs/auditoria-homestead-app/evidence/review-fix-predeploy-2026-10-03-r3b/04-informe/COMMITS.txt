@@ -1,0 +1,4 @@
+backendCommit=57246ec47f4f93c4a588488a40a0a14cc7fb4f28
+APK=1.1.8+10
+SHA256=33C57CCC1561CE9D730CF1B3DCB7C2B42E479BA53922782DDBA7F896C2C96148
+metaNote=transporte Meta simulado dryRun=false + example.invalid (no dry-run)

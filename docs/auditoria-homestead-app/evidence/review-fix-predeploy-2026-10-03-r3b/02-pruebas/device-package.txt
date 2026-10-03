@@ -1,0 +1,5 @@
+versionName=1.1.8
+versionCode=10 minSdk=24 targetSdk=36
+2026-10-03T16:23:13.7647803-05:00
+HEAD=2a91b7ec85f30d8f45255e784d74bc0f87e68fe8
+dirty=True

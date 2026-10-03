@@ -1,0 +1,188 @@
+﻿{
+    "failed":  1,
+    "passed":  10,
+    "total":  11,
+    "albumId":  "HC-2026-000083",
+    "requestId":  "HS-2026-000035",
+    "versionName":  "versionName=1.1.8",
+    "versionCode":  "versionCode=10 minSdk=24 targetSdk=36",
+    "isolated":  true,
+    "backendCommit":  "2a91b7ec85f30d8f45255e784d74bc0f87e68fe8",
+    "workingTreeDirty":  true,
+    "criteria":  [
+                     "PASS requires persisted job/request state after UI action (API corroboration only)",
+                     "UI text verified via OCR when accessibility dump is empty",
+                     "No PASS on opened/focus/screenshot-size alone",
+                     "Publish PASS for Meta-simulated transport (dryRun=false + example.invalid links; not live Meta)",
+                     "Security: prior lookup != activation; unique reason + new SECURITY_REVIEW_SET audit after test start"
+                 ],
+    "results":  [
+                    {
+                        "name":  "Entorno: APK 1.1.8+10 + aislado + commit",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "commit":  "2a91b7ec85f30d8f45255e784d74bc0f87e68fe8",
+                                       "isolated":  true,
+                                       "versionCode":  "versionCode=10 minSdk=24 targetSdk=36",
+                                       "versionName":  "versionName=1.1.8",
+                                       "dirty":  true
+                                   },
+                        "evidence":  "device-package.txt;session-check.json",
+                        "at":  "2026-10-03T21:23:27.5685154Z"
+                    },
+                    {
+                        "name":  "Login UI muestra entorno aislado",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "logged":  true,
+                                       "banner":  true,
+                                       "ocr":  "4:23 E ENTORNO DE PRUEBA • 127.0.0.1:3000 90 Inicio säbado 3 oct 2026 • 1 6:23 (Panamä) Lö Nuevo Inicio Contenido Solicitudes Agenda Mäs"
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\03-wait-home.png",
+                        "at":  "2026-10-03T21:23:27.5747840Z"
+                    },
+                    {
+                        "name":  "Abrir album seed desde lista",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "albumId":  "HC-2026-000083",
+                                       "onDetail":  true,
+                                       "status":  "AWAITING_APPROVAL",
+                                       "ocr":  "4:23 • HC-2026-000083 lmågenes finales (las que se publican) • 3 fotos Recorte 4:5 y marca Homestead. Toca para ampliar. 90 Contiene = sin recortar la marca. 1/3 Feed 1080\u003c1350 Comparar con original Original #506 • Final #507 (archivos distintos) Lista para revisar Versiön 1 AWAITING_APPROVAL Modalidad: Una publicaciön con varias fotos 10 HOMESTE asset 507"
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\07-album-detalle.png",
+                        "at":  "2026-10-03T21:23:41.9809271Z"
+                    },
+                    {
+                        "name":  "UI A06: preview watermark contain + album reorder controls",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "orderBefore":  "507,509,511",
+                                       "ocr":  "4:23 • HC-2026-000083 fisica ui r2 Regenerar texto Texto de publicaciön Puedes editar antes de aprobar. Guardar o regenerar invalida la aprobaciön. Trabajo documentado por Homestead. Folio HC-2026-000083. Texto generado en modo aislado: no describe un resultado que no esté en la foto. Guardar texto editado El video no estä soportado en esta entrega. Fotos (orden de publicaciön) Reordenar o quitar invalida la aprobaciön. 90",
+                                       "hasPreview":  true
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\09-preview-scroll-1.png",
+                        "at":  "2026-10-03T21:23:45.5710343Z"
+                    },
+                    {
+                        "name":  "Reordenar: orden distinto que persiste al salir y volver",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "bajado":  true,
+                                       "before":  "507,509,511",
+                                       "mid":  "509,507,511",
+                                       "after":  "509,507,511"
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\10-despues-reorder.png",
+                        "at":  "2026-10-03T21:24:00.0110125Z"
+                    },
+                    {
+                        "name":  "Quitar: disminuye cantidad y la foto no reaparece en orden",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "hasDlg":  true,
+                                       "removedId":  "511",
+                                       "foundQuitar":  true,
+                                       "beforeCount":  3,
+                                       "afterCount":  2,
+                                       "order":  "509,507"
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\14-quitar-dialog.png",
+                        "at":  "2026-10-03T21:24:22.7365129Z"
+                    },
+                    {
+                        "name":  "Regenerar: resultado y revision actualizados",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "captionChanged":  false,
+                                       "verAfter":  4,
+                                       "verBefore":  3,
+                                       "approvedVersion":  null,
+                                       "status":  "AWAITING_APPROVAL",
+                                       "tapped":  true
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\17-despues-regen.png",
+                        "at":  "2026-10-03T21:24:35.4896509Z"
+                    },
+                    {
+                        "name":  "Publicar simulado: resultado final por ambas plataformas",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "facebook":  "PUBLISHED",
+                                       "isolated":  true,
+                                       "tappedAp":  true,
+                                       "instagram":  "PUBLISHED",
+                                       "tappedPub":  true,
+                                       "instagramPermalink":  "https://example.invalid/sim",
+                                       "facebookPermalink":  "https://example.invalid/sim",
+                                       "note":  "transporte Meta simulado; dryRun=false + example.invalid; no Meta real (llamar dry-run es impreciso)",
+                                       "jobStatus":  "PUBLISHED",
+                                       "confOk":  true,
+                                       "instagramDryRun":  false,
+                                       "facebookDryRun":  false
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\21-despues-aprobar.png;C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\23-despues-publicar.png",
+                        "at":  "2026-10-03T21:25:32.3378345Z"
+                    },
+                    {
+                        "name":  "Seguridad: consulta previa sin marca",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "phase":  "lookup",
+                                       "onDetail":  true,
+                                       "note":  "consulta de estado, no activacion",
+                                       "requestId":  "HS-2026-000035",
+                                       "reason":  "",
+                                       "securityReviewRequired":  false
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\30-sec-before-lookup.png",
+                        "at":  "2026-10-03T21:26:05.1024389Z"
+                    },
+                    {
+                        "name":  "Marcar seguridad: activacion desde A06",
+                        "kind":  "fisica_ui",
+                        "result":  "PASS",
+                        "detail":  {
+                                       "expectedReason":  "sec-fisica-r3b-eb7efafad8",
+                                       "form":  true,
+                                       "testStart":  "2026-10-03T21:23:15.5986767Z",
+                                       "tapped":  true,
+                                       "beforeFlag":  false,
+                                       "auditAt":  "2026-10-03T21:26:41.488Z",
+                                       "requestId":  "HS-2026-000035",
+                                       "reopenDetail":  false,
+                                       "auditAction":  "SECURITY_REVIEW_SET",
+                                       "reasonExact":  true,
+                                       "securityReviewRequired":  true,
+                                       "phase":  "activation",
+                                       "activated":  true,
+                                       "reasonAfter":  "sec-fisica-r3b-eb7efafad8",
+                                       "auditAfterTestStart":  true
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\37-solicitud-detalle-reopen-sec.png",
+                        "at":  "2026-10-03T21:27:09.1327287Z"
+                    },
+                    {
+                        "name":  "Rechazar: guardar con motivo valido y estado persistido",
+                        "kind":  "fisica_ui",
+                        "result":  "FAIL",
+                        "detail":  {
+                                       "status":  "NEW",
+                                       "onDetail":  false,
+                                       "tapped":  false,
+                                       "requestId":  "HS-2026-000036"
+                                   },
+                        "evidence":  "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\25-solicitudes-lista.png;C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\a06-fisica-ui-r3\\phone\\55-solicitud-detalle-reject.png",
+                        "at":  "2026-10-03T21:28:41.5573190Z"
+                    }
+                ]
+}

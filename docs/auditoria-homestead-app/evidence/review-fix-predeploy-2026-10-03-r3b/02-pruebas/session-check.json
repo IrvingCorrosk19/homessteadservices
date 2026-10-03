@@ -1,0 +1,34 @@
+﻿{
+    "ok":  true,
+    "csrf":  "73e53b3dc890bf63396c4d423198ce37372364d18034436a83f10849a1a716ec",
+    "isolated":  true,
+    "backendCommit":  "2a91b7ec85f30d8f45255e784d74bc0f87e68fe8",
+    "dataDirHint":  "control-dev",
+    "settings":  {
+                     "timezone":  "America/Panama",
+                     "daysEnabled":  [
+                                         1,
+                                         2,
+                                         3,
+                                         4,
+                                         5,
+                                         6
+                                     ],
+                     "windows":  [
+                                     {
+                                         "start":  "18:00",
+                                         "end":  "20:00"
+                                     }
+                                 ],
+                     "maxPostsPerDay":  1,
+                     "minHoursBetweenPosts":  36,
+                     "platforms":  [
+                                       "instagram",
+                                       "facebook"
+                                   ],
+                     "approvalRequired":  true,
+                     "mode":  "ASSISTED",
+                     "dryRun":  false,
+                     "paused":  false
+                 }
+}

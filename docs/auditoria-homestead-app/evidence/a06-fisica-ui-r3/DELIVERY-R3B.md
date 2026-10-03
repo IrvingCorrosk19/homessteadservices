@@ -7,10 +7,10 @@ Producción: intacta (sin deploy, sin Meta real, sin mensajes reales al cliente)
 
 | Ítem | Valor |
 |------|--------|
-| Backend HEAD (pre-commit working tree) | ver commits de esta entrega |
+| Backend commit | `57246ec47f4f93c4a588488a40a0a14cc7fb4f28` |
 | APK instalado en A06 | `1.1.8+10` |
 | SHA256 APK debug probado | `33C57CCC1561CE9D730CF1B3DCB7C2B42E479BA53922782DDBA7F896C2C96148` |
-| Ruta APK | `apps/homestead_control_mobile/build/app/outputs/flutter-apk/app-debug.apk` |
+| Ruta APK | `apps/homestead_control_mobile/dist/homestead-control-1.1.8+10-isolated-debug.apk` |
 
 ## Pendientes cerrados
 
