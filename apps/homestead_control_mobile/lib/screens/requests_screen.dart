@@ -5,6 +5,7 @@ import "../api/models.dart";
 import "../state/session_controller.dart";
 import "../theme/homestead_theme.dart";
 import "../util/panama_time.dart";
+import "request_detail_screen.dart";
 
 class RequestsScreen extends StatefulWidget {
   const RequestsScreen({super.key});
@@ -52,18 +53,24 @@ class _RequestsScreenState extends State<RequestsScreen> {
     }
   }
 
-  Future<void> _setStatus(ServiceRequestItem item, String status) async {
-    try {
-      await context.read<SessionController>().api.patchRequestStatus(item.publicId, status);
-      await _load();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+  void _openDetail(ServiceRequestItem item) {
+    final id = item.publicId.trim();
+    if (id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Esta fila no tiene folio HS válido.")),
+      );
+      return;
     }
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(builder: (_) => RequestDetailScreen(publicId: id)),
+        )
+        .then((_) => _load());
   }
 
   @override
   Widget build(BuildContext context) {
+    final online = context.watch<SessionController>().online;
     return Scaffold(
       appBar: AppBar(title: const Text("Solicitudes")),
       body: Column(
@@ -74,13 +81,35 @@ class _RequestsScreenState extends State<RequestsScreen> {
               controller: _q,
               decoration: InputDecoration(
                 hintText: "Buscar HS-…, nombre o teléfono",
-                suffixIcon: IconButton(onPressed: _load, icon: const Icon(Icons.search)),
+                suffixIcon: IconButton(
+                  onPressed: _load,
+                  icon: const Icon(Icons.search),
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                ),
               ),
               onSubmitted: (_) => _load(),
             ),
           ),
+          if (!online)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text("Sin conexión. Mostrando último resultado si hay.", style: TextStyle(color: HomesteadColors.danger)),
+              ),
+            ),
           if (_loading) const LinearProgressIndicator(),
-          if (_error != null) Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: HomesteadColors.danger))),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(_error!, style: const TextStyle(color: HomesteadColors.danger)),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: _load, child: const Text("Reintentar")),
+                ],
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _load,
@@ -93,35 +122,52 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       itemBuilder: (context, index) {
                         final item = _items[index];
                         return Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(item.publicId, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                Text("${item.name} · ${item.phone}"),
-                                Text("${item.service} · ${item.status}"),
-                                Text(formatPanamaIso(item.createdAt), style: const TextStyle(color: HomesteadColors.mist)),
-                                if (item.message.isNotEmpty) Text(item.message, maxLines: 3, overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  children: [
-                                    OutlinedButton(
-                                      onPressed: () => _setStatus(item, "CONTACTED"),
-                                      child: const Text("Contactada"),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => _openDetail(item),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(item.publicId, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                      ),
+                                      if (item.securityReviewRequired)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: HomesteadColors.accent.withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: const Text(
+                                            "Seguridad",
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: HomesteadColors.accentDeep,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  Text("${item.name} · ${item.phone}"),
+                                  Text("${item.service} · ${item.status}"),
+                                  Text(formatPanamaIso(item.createdAt), style: const TextStyle(color: HomesteadColors.mist)),
+                                  if (item.message.isNotEmpty)
+                                    Text(item.message, maxLines: 3, overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton(
+                                      onPressed: () => _openDetail(item),
+                                      child: const Text("Abrir detalle"),
                                     ),
-                                    OutlinedButton(
-                                      onPressed: () => _setStatus(item, "IN_PROGRESS"),
-                                      child: const Text("En curso"),
-                                    ),
-                                    OutlinedButton(
-                                      onPressed: () => _setStatus(item, "COMPLETED"),
-                                      child: const Text("Completada"),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );

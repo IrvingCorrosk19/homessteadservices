@@ -69,11 +69,15 @@ class HomesteadApi {
       }
     }
     if (response.statusCode >= 400) {
-      throw ApiException(
-        "${body["error"] ?? "Error ${response.statusCode}"}",
-        statusCode: response.statusCode,
-        code: "${body["error"] ?? ""}",
-      );
+      final code = "${body["error"] ?? ""}";
+      final friendly = switch (response.statusCode) {
+        404 => "Solicitud no encontrada.",
+        405 => "El servidor no permite leer este detalle (método no soportado).",
+        401 => "Sesión vencida. Vuelve a iniciar sesión.",
+        403 => "No tienes permiso para ver esta solicitud.",
+        _ => code.isNotEmpty ? code : "Error ${response.statusCode}",
+      };
+      throw ApiException(friendly, statusCode: response.statusCode, code: code);
     }
     return body;
   }
@@ -243,10 +247,12 @@ class HomesteadApi {
   Future<Map<String, dynamic>> updateJobMedia({
     required String publicId,
     required List<int> order,
+    required int version,
     List<int>? remove,
   }) {
     return _post("/api/admin/content/jobs/$publicId/media", {
       "order": order,
+      "expectedVersion": version,
       if (remove != null && remove.isNotEmpty) "remove": remove,
     });
   }

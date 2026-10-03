@@ -33,8 +33,16 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       _loading = true;
       _error = null;
     });
+    final id = widget.publicId.trim();
+    if (id.isEmpty) {
+      setState(() {
+        _error = "Identificador de solicitud vacío.";
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final item = await context.read<SessionController>().api.serviceRequestDetail(widget.publicId);
+      final item = await context.read<SessionController>().api.serviceRequestDetail(id);
       if (!mounted) return;
       setState(() {
         _item = item;
@@ -44,6 +52,12 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       if (!mounted) return;
       setState(() {
         _error = e.message;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = "No se pudo cargar el detalle. Reintenta.";
         _loading = false;
       });
     }
