@@ -9,9 +9,13 @@ DEST="$BACKUP_DIR/$STAMP"
 export DATA_DIR
 export BACKUP_RETAIN_COUNT="${BACKUP_RETAIN_COUNT:-7}"
 
+ran=0
 if command -v node >/dev/null 2>&1; then
-  node "$ROOT/scripts/production-backup.mjs" --dest "$DEST"
-else
+  if node "$ROOT/scripts/production-backup.mjs" --dest "$DEST"; then
+    ran=1
+  fi
+fi
+if [ "$ran" -ne 1 ]; then
   python3 -c "
 import sqlite3, shutil, json, os
 from datetime import datetime, timezone
