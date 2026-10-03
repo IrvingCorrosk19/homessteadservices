@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { getDictionary } from "@/i18n/get-dictionary";
 import { site } from "@/lib/site";
 import type { FormService, PropertyType } from "@/lib/site";
@@ -28,6 +29,10 @@ export function isMailConfigured() {
 }
 
 export async function sendContactEmail(payload: ContactPayload) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("smtp", "contact");
+    return { messageId: "sim-contact" };
+  }
   if (!isMailConfigured()) {
     throw new Error("SMTP is not configured");
   }
@@ -93,6 +98,11 @@ export async function sendAdminReply(input: {
   }
   const request = getRequestByPublicId(input.publicId);
   if (!request) return { ok: false as const, error: "not_found" };
+  if (isControlIsolated()) {
+    recordSimulatedCall("smtp", `reply:${input.publicId}`);
+    recordOutboundEmail({ request, subject, body, sent: true });
+    return { ok: true as const, requestId: request.publicId };
+  }
   if (!isMailConfigured()) return { ok: false as const, error: "smtp_not_configured" };
   if (!beginReplyLock(request.publicId)) {
     return { ok: false as const, error: "in_progress" };
@@ -128,6 +138,10 @@ export async function sendTransactionalEmail(input: {
   text: string;
   html: string;
 }) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("smtp", "transactional");
+    return { ok: true as const };
+  }
   if (!isMailConfigured()) return { ok: false as const, error: "smtp_not_configured" };
   const to = input.to.trim();
   if (!to.includes("@")) return { ok: false as const, error: "invalid_email" };

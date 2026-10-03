@@ -136,7 +136,8 @@ function hasContentPermission(operator: TelegramOperator, callbackData: string) 
     callbackData.includes(":reject") ||
     callbackData.includes(":slot") ||
     callbackData.includes(":now") ||
-    callbackData.includes(":live")
+    callbackData.includes(":live") ||
+    callbackData.startsWith("cs:bt:")
   ) {
     return hasTelegramPermission(operator, "content.approve");
   }
@@ -234,6 +235,70 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       });
       return { ok: true };
     }
+    if (callback.data.startsWith("cs:bt:")) {
+      const bits = callback.data.split(":");
+      const batchId = bits[2] || "";
+      const action = bits[3] || "";
+      const {
+        approvePhotoBatch,
+        carouselSuggestionOnly,
+        getPhotoBatch,
+        pickOneNowKeyboard,
+        pickOneNowText,
+      } = await import("@/lib/content-photo-batch");
+      const { formatPanama } = await import("@/lib/content-queue");
+      if (action === "car") {
+        await sendTelegramMessage({ chatId, text: carouselSuggestionOnly(batchId) });
+        return { ok: true };
+      }
+      if (action === "nowpick") {
+        await sendTelegramMessage({
+          chatId,
+          text: pickOneNowText(batchId),
+          keyboard: pickOneNowKeyboard(batchId),
+        });
+        return { ok: true };
+      }
+      if (action === "ok") {
+        if (!hasTelegramPermission(operator, "content.approve")) {
+          await sendTelegramMessage({ chatId, text: accessDeniedText("forbidden") });
+          return { ok: true, denied: true };
+        }
+        const batch = getPhotoBatch(batchId);
+        if (!batch) {
+          await sendTelegramMessage({ chatId, text: "No encuentro ese lote." });
+          return { ok: true };
+        }
+        const result = approvePhotoBatch(batchId, actorLabel(operator));
+        if (!result.ok) {
+          await sendTelegramMessage({ chatId, text: "No pude aprobar ese lote." });
+          return { ok: true };
+        }
+        const settings = getContentSettings();
+        const slotLines = result.slots.map(
+          (slot) => `${slot.publicId}\n${formatPanama(slot.at, settings)}`,
+        );
+        await sendTelegramMessage({
+          chatId,
+          text: [
+            "✅ LOTE APROBADO",
+            "",
+            `Aprobadas: ${result.approved.length || result.already.length}`,
+            result.published.length ? `Ya publicadas (no se republicaron): ${result.published.join(", ")}` : "",
+            result.stale.length ? `Versión distinta, revisa: ${result.stale.join(", ")}` : "",
+            "",
+            "Programadas en espacios de Panamá (no salen todas a la vez):",
+            ...slotLines,
+            "",
+            "Para publicar una ahora, usa PUBLICAR UNA AHORA o /live HC-…",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+        return { ok: true };
+      }
+      return { ok: true };
+    }
     const parsed = parseCallback(callback.data);
     if (!parsed) return { ok: true };
     const job = getJobByPublicId(parsed.publicId);
@@ -263,6 +328,27 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       return { ok: true };
     }
     if (parsed.action === "process" || parsed.action === "retry" || parsed.action === "reimage") {
+      if (parsed.action === "process" || parsed.action === "retry") {
+        const count = originalCount(job.publicId);
+        if (count >= 2) {
+          const { splitMultiOriginalJob, snapshotBatchVersions } = await import("@/lib/content-photo-batch");
+          const split = splitMultiOriginalJob(job.publicId);
+          const ids =
+            split.ok && split.spawned.length ? split.spawned : [job.publicId];
+          await sendTelegramMessage({
+            chatId,
+            text: `Voy a crear ${ids.length} propuestas independientes (una por foto). El publicador no soporta carrusel.`,
+          });
+          void (async () => {
+            for (const id of ids) {
+              if (!beginProcessLock(id)) continue;
+              await processContentJob(id, "full");
+            }
+            if (job.photoBatchId) snapshotBatchVersions(job.photoBatchId);
+          })();
+          return { ok: true };
+        }
+      }
       if (!beginProcessLock(job.publicId)) {
         await sendTelegramMessage({
           chatId,
@@ -1115,7 +1201,8 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
         "",
         "Envíame las fotografías del trabajo realizado.",
         "",
-        "Puedes enviar varias imágenes.",
+        "Cada foto se convierte en una propuesta independiente (código HC).",
+        "Si llegan juntas como álbum, espero a reunirlas y te confirmo cuántas recibí.",
         "Si quieres, escribe una nota corta. Ejemplo:",
         "Mantenimiento de aire acondicionado. No estaba enfriando.",
       ].join("\n"),
@@ -1161,30 +1248,25 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   let job = activeJobForChat(chatId);
   const incomingPhoto = Boolean(message.photo?.length || message.document);
-  if (!job && incomingPhoto) {
-    job = createContentJob({ chatId, userId });
-    logInfo("ContentJobCreated", { contentJobId: job.publicId, stage: "album-auto" });
-    recordContentEvent(job.publicId, "CONTENT_RECEIVED", "auto");
-    updateJob(job.publicId, { status: "RECEIVING" });
-    job = getJobByPublicId(job.publicId) || job;
-  }
-  if (!job) return { ok: true };
-
-  const caption = (message.caption || "").trim();
-  const note = caption || (!message.photo && !message.document ? text : "");
-  if (note && !note.startsWith("/") && (job.status === "DRAFT" || job.status === "RECEIVING")) {
-    const description = [job.description, note].filter(Boolean).join("\n").slice(0, 2000);
-    updateJob(job.publicId, { description, status: "RECEIVING" });
-  }
-
-  const photo = message.photo?.length
-    ? message.photo.reduce((best, item) =>
-        (item.file_size || 0) > (best.file_size || 0) ? item : best,
-      )
-    : null;
-  const fileId = photo?.file_id || (message.document ? message.document.file_id : "");
-  if (fileId) {
-    logInfo("TelegramPhotoReceived", { contentJobId: job.publicId });
+  if (incomingPhoto) {
+    const {
+      abandonEmptyReceivingJob,
+      albumGroupKey,
+      bufferIncomingPhoto,
+      scheduleAlbumFlush,
+      batchReceivedText,
+      batchKeyboard,
+      snapshotBatchVersions,
+    } = await import("@/lib/content-photo-batch");
+    abandonEmptyReceivingJob(chatId);
+    const photo = message.photo?.length
+      ? message.photo.reduce((best, item) =>
+          (item.file_size || 0) > (best.file_size || 0) ? item : best,
+        )
+      : null;
+    const fileId = photo?.file_id || (message.document ? message.document.file_id : "");
+    if (!fileId) return { ok: true };
+    logInfo("TelegramPhotoReceived", { contentJobId: fileId.slice(0, 24) });
     const bytes = await downloadTelegramFile(fileId);
     if (!bytes) {
       await sendTelegramMessage({ chatId, text: "No pude descargar esa fotografía. Intenta de nuevo." });
@@ -1198,35 +1280,90 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       });
       return { ok: true };
     }
-    if (originalCount(job.publicId) >= MAX_CONTENT_PHOTOS) {
-      await sendTelegramMessage({
-        chatId,
-        text: `Máximo ${MAX_CONTENT_PHOTOS} fotografías por publicación.`,
-      });
-      return { ok: true };
-    }
     const meta = await metadataOf(bytes);
-    const stored = storeOriginal({
-      job,
+    const caption = (message.caption || "").trim();
+    const buffered = bufferIncomingPhoto({
+      chatId,
+      userId,
+      updateId: update.update_id,
+      messageId: message.message_id,
+      mediaGroupId: message.media_group_id,
+      telegramFileId: fileId,
+      caption,
       bytes,
       mime: sniffed.mime,
       ext: sniffed.ext,
-      telegramFileId: fileId,
       width: meta.width,
       height: meta.height,
     });
-    if (!stored.ok) {
+    if (!buffered.ok) {
       await sendTelegramMessage({ chatId, text: "No pude guardar esa fotografía." });
       return { ok: true };
     }
-    logInfo("OriginalStored", { contentJobId: job.publicId, stage: stored.asset.storedFilename });
-    updateJob(job.publicId, { status: "RECEIVING" });
-    await remindReceiving(
+    if (buffered.duplicate) {
+      return { ok: true, duplicate: true, publicId: buffered.publicId };
+    }
+    const groupKey = buffered.groupKey;
+    const isAlbum = Boolean(message.media_group_id);
+    if (isAlbum && albumGroupKey(chatId, message.media_group_id) === groupKey) {
+      if (buffered.intakeCount === 1) {
+        await sendTelegramMessage({
+          chatId,
+          text: "Recibiendo álbum de Telegram. Espero a reunir todas las fotos…",
+        });
+      }
+      scheduleAlbumFlush(groupKey, undefined, async (flushed) => {
+        if (!flushed.publicIds.length) return;
+        await sendTelegramMessage({
+          chatId,
+          text: batchReceivedText({
+            publicIds: flushed.publicIds,
+            batchId: flushed.batchId,
+            album: true,
+            missing: flushed.missing,
+          }),
+          keyboard: flushed.batchId ? batchKeyboard(flushed.batchId, flushed.publicIds) : undefined,
+        });
+        for (const id of flushed.publicIds) {
+          if (!beginProcessLock(id)) continue;
+          await processContentJob(id, "full");
+        }
+        if (flushed.batchId) snapshotBatchVersions(flushed.batchId);
+      });
+      return { ok: true, album: true };
+    }
+    const flushed = scheduleAlbumFlush(groupKey, 0);
+    if (!flushed?.publicIds.length) {
+      await sendTelegramMessage({ chatId, text: "No pude crear la propuesta de esa fotografía." });
+      return { ok: true };
+    }
+    await sendTelegramMessage({
       chatId,
-      job.publicId,
-      originalCount(job.publicId),
-      job.telegramStatusMessageId,
-    );
+      text: batchReceivedText({
+        publicIds: flushed.publicIds,
+        batchId: flushed.batchId,
+        album: false,
+        missing: flushed.missing,
+      }),
+      keyboard: flushed.batchId ? batchKeyboard(flushed.batchId, flushed.publicIds) : undefined,
+    });
+    void (async () => {
+      for (const id of flushed.publicIds) {
+        if (!beginProcessLock(id)) continue;
+        await processContentJob(id, "full");
+      }
+      if (flushed.batchId) snapshotBatchVersions(flushed.batchId);
+    })();
+    return { ok: true, publicId: flushed.publicIds[0] };
+  }
+
+  if (!job) return { ok: true };
+
+  const caption = (message.caption || "").trim();
+  const note = caption || (!message.photo && !message.document ? text : "");
+  if (note && !note.startsWith("/") && (job.status === "DRAFT" || job.status === "RECEIVING")) {
+    const description = [job.description, note].filter(Boolean).join("\n").slice(0, 2000);
+    updateJob(job.publicId, { description, status: "RECEIVING" });
   }
 
   return { ok: true, publicId: job.publicId };

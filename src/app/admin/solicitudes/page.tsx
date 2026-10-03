@@ -76,7 +76,7 @@ export default async function SolicitudesPage({
   return (
     <>
       <AdminTopBar />
-      <main className="mx-auto w-[min(1120px,calc(100%-1.5rem))] py-8 md:w-[min(1120px,calc(100%-4rem))] md:py-12">
+      <main className="mx-auto w-[min(1120px,calc(100%-1.5rem))] min-w-0 py-8 md:w-[min(1120px,calc(100%-4rem))] md:py-12">
         <div className="mb-6">
           <p className="text-[0.68rem] tracking-[0.18em] uppercase text-accent">Centro de operaciones</p>
           <h1 className="mt-1 font-display text-3xl text-navy md:text-4xl">Solicitudes</h1>
@@ -85,15 +85,15 @@ export default async function SolicitudesPage({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">
           {REQUEST_STATUSES.filter((item) => item !== "CANCELLED").map((item) => (
             <Link
               key={item}
               href={`/admin/solicitudes?ops=${item === "NEW" ? "NEEDS_ATTENTION" : item === "CONTACTED" ? "ATTENDED" : item === "IN_PROGRESS" ? "IN_PROGRESS" : "ALL"}&status=${item}`}
-              className="rounded-2xl border border-navy/8 bg-white px-4 py-4"
+              className="min-w-0 rounded-2xl border border-navy/8 bg-white px-3 py-4 md:px-4"
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[0.68rem] tracking-[0.14em] uppercase text-mist">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <p className="min-w-0 truncate text-[0.68rem] tracking-[0.08em] uppercase text-mist">
                   {item === "CONTACTED" ? opsStatusLabel(item) : STATUS_LABELS[item]}
                 </p>
                 <StatusPill status={item} compact />
@@ -103,18 +103,18 @@ export default async function SolicitudesPage({
           ))}
         </div>
 
-        <form className="mt-8 grid gap-3 md:grid-cols-[1fr_160px_180px_160px_auto]" action="/admin/solicitudes">
+        <form className="mt-8 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,160px)_minmax(0,180px)_minmax(0,160px)_auto]" action="/admin/solicitudes">
           <input type="hidden" name="ops" value={initialFilter} />
           <input
             name="q"
             defaultValue={q}
             placeholder="Buscar folio, nombre, email o teléfono"
-            className="min-h-11 rounded-xl border border-navy/10 bg-white px-4 py-3 text-sm outline-none focus:border-accent"
+            className="min-h-11 min-w-0 rounded-xl border border-navy/10 bg-white px-4 py-3 text-sm outline-none focus:border-accent"
           />
           <select
             name="status"
             defaultValue={legacyStatus}
-            className="min-h-11 rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
+            className="min-h-11 min-w-0 rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
           >
             <option value="ALL">Todos los estados</option>
             {REQUEST_STATUSES.map((item) => (
@@ -126,7 +126,7 @@ export default async function SolicitudesPage({
           <select
             name="service"
             defaultValue={service}
-            className="min-h-11 rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
+            className="min-h-11 min-w-0 rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
           >
             <option value="">Todos los servicios</option>
             {formServices.map((item) => (
@@ -139,7 +139,7 @@ export default async function SolicitudesPage({
             type="date"
             name="date"
             defaultValue={date}
-            className="min-h-11 rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
+            className="min-h-11 w-full min-w-0 max-w-full rounded-xl border border-navy/10 bg-white px-3 py-3 text-sm"
           />
           <button
             type="submit"

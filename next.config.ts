@@ -3,6 +3,21 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["nodemailer", "better-sqlite3", "sharp"],
+  async headers() {
+    return [
+      {
+        source: "/admin/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/admin/" },
+        ],
+      },
+      {
+        source: "/admin/manifest.webmanifest",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      },
+    ];
+  },
   outputFileTracingIncludes: {
     "/api/contact": ["./node_modules/better-sqlite3/**/*"],
     "/api/admin/**": ["./node_modules/better-sqlite3/**/*"],

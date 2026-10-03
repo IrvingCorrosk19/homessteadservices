@@ -1,4 +1,5 @@
 import { logError, logInfo } from "@/lib/log";
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import {
   eligibleOperatorChatIds,
   isAuthorizedTelegramOperator,
@@ -28,6 +29,10 @@ type TelegramResponse = {
 };
 
 async function telegramCall(method: string, payload: Record<string, unknown>) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("telegram", method);
+    return { ok: true, result: { message_id: 1 } };
+  }
   const token = telegramBotToken();
   if (!token) throw new Error("telegram_unconfigured");
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -81,6 +86,10 @@ export async function sendTelegramPhotos(input: {
   chatId: string;
   photos: Array<{ bytes: Buffer; filename: string }>;
 }) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("telegram", `sendPhotos:${input.photos.length}`);
+    return;
+  }
   const token = telegramBotToken();
   if (!token || !input.photos.length) return;
   if (input.photos.length === 1) {
@@ -112,6 +121,10 @@ export async function sendTelegramPhotos(input: {
 }
 
 export async function downloadTelegramFile(fileId: string) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("telegram", "getFile");
+    return null;
+  }
   const token = telegramBotToken();
   if (!token) return null;
   const infoRes = await fetch(`${TELEGRAM_API}/bot${token}/getFile`, {
@@ -138,6 +151,18 @@ export function expectedTelegramWebhookUrl() {
 }
 
 export async function inspectTelegramWebhook(options: { repair?: boolean } = {}) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("telegram", "getWebhookInfo");
+    return {
+      ok: true as const,
+      match: true,
+      url: expectedTelegramWebhookUrl(),
+      expected: expectedTelegramWebhookUrl(),
+      pending: 0,
+      lastError: null,
+      repaired: false,
+    };
+  }
   const repair = options.repair !== false;
   const token = telegramBotToken();
   const expected = expectedTelegramWebhookUrl();

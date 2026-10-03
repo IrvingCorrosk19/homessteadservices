@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/control-auth";
 import { PUBLIC_ID_PATTERN } from "@/lib/admin-format";
 import { readStoredPhoto } from "@/lib/service-requests";
 
 type Params = { params: Promise<{ requestId: string; file: string }> };
 
 export async function GET(_: Request, { params }: Params) {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { requestId, file } = await params;
   const safeFile = decodeURIComponent(file);
   if (

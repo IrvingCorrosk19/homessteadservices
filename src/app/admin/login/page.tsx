@@ -15,9 +15,9 @@ export default async function AdminLoginPage({
         <p className="text-[0.72rem] tracking-[0.2em] uppercase text-accent">
           Homestead Services
         </p>
-        <h1 className="mt-4 font-display text-4xl text-navy">Solicitudes</h1>
+        <h1 className="mt-4 font-display text-4xl text-navy">Homestead Control</h1>
         <p className="mt-3 text-sm leading-6 text-mist">
-          Acceso privado para responder a los clientes.
+          Acceso privado a solicitudes, citas y contenido.
         </p>
         <div className="mt-8">
           <AdminLoginForm returnUrl={returnUrl} />

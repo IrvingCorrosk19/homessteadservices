@@ -45,7 +45,14 @@ export function campaignDestination(input: {
   const params = new URLSearchParams({
     service: "locksmith",
     intent: input.intent || "digital_lock_purchase_install",
-    utm_source: input.channel === "wa" ? "whatsapp" : input.channel === "fb" ? "facebook" : "instagram",
+    utm_source:
+      input.channel === "wa"
+        ? "whatsapp"
+        : input.channel === "fb"
+          ? "facebook"
+          : input.channel === "ig"
+            ? "instagram"
+            : "website",
     utm_medium: "organic",
     utm_campaign: input.campaignId,
     utm_content: input.pieceId,

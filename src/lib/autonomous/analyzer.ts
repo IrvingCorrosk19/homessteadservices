@@ -1,3 +1,4 @@
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { isCopilotOpenAiConfigured } from "@/lib/copilot/openai";
 import { autonomousConfig } from "@/lib/autonomous/config";
 import { autonomousNow } from "@/lib/autonomous/clock";
@@ -28,6 +29,10 @@ export function deterministicSignalAnalysis(signal: OperationalSignal): SignalAn
 }
 
 export async function enrichSignalWithAi(signal: OperationalSignal): Promise<SignalAnalysis> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", "autonomous");
+    return deterministicSignalAnalysis(signal);
+  }
   const cfg = autonomousConfig();
   if (!cfg.aiEnrichmentEnabled || !isCopilotOpenAiConfigured()) {
     return deterministicSignalAnalysis(signal);

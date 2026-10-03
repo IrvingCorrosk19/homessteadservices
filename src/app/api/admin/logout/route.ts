@@ -1,10 +1,24 @@
 import { NextResponse } from "next/server";
-import { adminCookieName } from "@/lib/admin-auth";
+import { adminCookieName, adminCsrfCookieName } from "@/lib/admin-auth";
+import { revokeAdminSession } from "@/lib/admin-session-store";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const token =
+    request.headers
+      .get("cookie")
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${adminCookieName()}=`))
+      ?.slice(adminCookieName().length + 1) || "";
+  revokeAdminSession(decodeURIComponent(token));
   const response = NextResponse.json({ ok: true });
   response.cookies.set(adminCookieName(), "", {
     httpOnly: true,
+    path: "/",
+    maxAge: 0,
+  });
+  response.cookies.set(adminCsrfCookieName(), "", {
+    httpOnly: false,
     path: "/",
     maxAge: 0,
   });

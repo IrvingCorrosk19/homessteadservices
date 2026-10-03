@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
 import { JOB_ID_PATTERN } from "@/lib/job-config";
 import { approveMarketingUsage, completeServiceJob, getServiceJob, startServiceJob } from "@/lib/job-store";
 import { markRecoveryContacted } from "@/lib/post-service";
@@ -8,6 +9,8 @@ export const runtime = "nodejs";
 type Params = { params: Promise<{ jobId: string }> };
 
 export async function GET(_request: Request, { params }: Params) {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { jobId } = await params;
   if (!JOB_ID_PATTERN.test(jobId)) return NextResponse.json({ ok: false }, { status: 400 });
   const job = getServiceJob(jobId);
@@ -16,6 +19,8 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
+  const gate = await requireAdminMutation(request);
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { jobId } = await params;
   if (!JOB_ID_PATTERN.test(jobId)) return NextResponse.json({ ok: false }, { status: 400 });
   const body = (await request.json().catch(() => null)) as { action?: string } | null;

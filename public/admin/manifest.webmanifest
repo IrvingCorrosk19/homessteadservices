@@ -1,0 +1,40 @@
+{
+  "id": "/admin",
+  "name": "Homestead Control",
+  "short_name": "Control",
+  "description": "Panel operativo de Homestead Services. Requiere sesión. No funciona sin internet para publicar, aprobar o consultar datos actualizados.",
+  "start_url": "/admin",
+  "scope": "/admin",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f6f3ee",
+  "theme_color": "#1f3344",
+  "lang": "es-PA",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/admin/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/admin/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/admin/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/admin/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

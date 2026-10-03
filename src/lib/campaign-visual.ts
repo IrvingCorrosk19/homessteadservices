@@ -44,16 +44,16 @@ export async function composeCampaignFeed(input: {
   const lineSvg = lines
     .map((line, index) => {
       const y = 980 + index * 64;
-      return `<text x="72" y="${y}" font-size="52" font-weight="700" fill="#f4efe6" font-family="Arial, Helvetica, sans-serif">${escapeXml(line)}</text>`;
+      return `<text x="72" y="${y}" font-size="52" font-weight="700" fill="#f4efe6" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${escapeXml(line)}</text>`;
     })
     .join("");
   const svg = Buffer.from(
     `<svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
       <rect width="1080" height="56" fill="#1f3344"/>
-      <text x="540" y="38" text-anchor="middle" font-size="22" fill="#c4a45a" font-family="Arial, Helvetica, sans-serif" letter-spacing="2">IMAGEN ILUSTRATIVA · NO ES UN TRABAJO DOCUMENTADO</text>
+      <text x="540" y="38" text-anchor="middle" font-size="22" fill="#c4a45a" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" letter-spacing="2">IMAGEN ILUSTRATIVA · NO ES UN TRABAJO DOCUMENTADO</text>
       <rect x="0" y="860" width="1080" height="490" fill="rgba(31,51,68,0.88)"/>
       ${lineSvg}
-      <text x="72" y="1248" font-size="28" fill="#c4a45a" font-family="Arial, Helvetica, sans-serif">${escapeXml(input.cta.slice(0, 42))}</text>
+      <text x="72" y="1248" font-size="28" fill="#c4a45a" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${escapeXml(input.cta.slice(0, 42))}</text>
     </svg>`,
   );
 

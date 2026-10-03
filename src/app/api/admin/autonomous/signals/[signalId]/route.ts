@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
 import { getSignalById, acknowledgeSignal, recordSignalFeedback } from "@/lib/autonomous/signal-store";
 import { deliverAutonomousSignalToOpsCenter } from "@/lib/autonomous/notification-router";
 
 export const runtime = "nodejs";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ signalId: string }> }) {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { signalId } = await ctx.params;
   const signal = getSignalById(signalId);
   if (!signal) return NextResponse.json({ ok: false, detail: "not_found" }, { status: 404 });
@@ -12,6 +15,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ signalId: stri
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ signalId: string }> }) {
+  const gate = await requireAdminMutation(req);
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { signalId } = await ctx.params;
   const body = (await req.json().catch(() => ({}))) as { action?: string; feedback?: string };
   const signal = getSignalById(signalId);

@@ -1,4 +1,5 @@
 import { getDictionary } from "@/i18n/get-dictionary";
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { signHomesteadPayload } from "@/lib/homestead-signature";
 import { logError, logInfo } from "@/lib/log";
 import { buildSignedPhotoUrl } from "@/lib/photos";
@@ -118,6 +119,10 @@ export async function postN8nPayload(
   const url = override || configured;
   const secret = process.env.N8N_HOMESTEAD_WEBHOOK_SECRET?.trim();
   const requestId = meta.correlationId;
+  if (isControlIsolated()) {
+    recordSimulatedCall("n8n", meta.idempotencyKey);
+    return { ok: true as const, cause: "isolated", httpStatus: 200, durationMs: 0 };
+  }
   if (!url || !secret) {
     logInfo("N8nNotificationSkipped", { requestId, reason: "not_configured" });
     return { ok: false as const, cause: "not_configured", httpStatus: 0, durationMs: 0 };

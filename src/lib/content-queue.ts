@@ -1,5 +1,6 @@
 import {
   getContentSettings,
+  getJobByPublicId,
   listJobsByStatus,
   recordContentEvent,
   updateJob,
@@ -44,9 +45,17 @@ export function formatPanama(iso: string, settings: ContentSettings) {
   }).format(new Date(iso));
 }
 
-export function recommendPublishAt(job: ContentJob, settings = getContentSettings()) {
+export function recommendPublishAt(
+  job: ContentJob,
+  settings = getContentSettings(),
+  extraOccupied: string[] = [],
+) {
   const now = new Date();
   const scheduled = listJobsByStatus(["SCHEDULED", "PUBLISHING", "PUBLISHED", "AWAITING_APPROVAL"]);
+  const occupied = [
+    ...scheduled.map((item) => item.recommendedPublishAt).filter(Boolean),
+    ...extraOccupied,
+  ] as string[];
   const recentTypes = scheduled
     .map((item) => (item.serviceType || item.mixType || "").toLowerCase())
     .filter(Boolean)
@@ -62,15 +71,10 @@ export function recommendPublishAt(job: ContentJob, settings = getContentSetting
       const [eh, em] = window.end.split(":").map(Number);
       return minutes >= sh * 60 + sm && minutes <= eh * 60 + em;
     });
-    const dayPosts = scheduled.filter((item) => {
-      if (!item.recommendedPublishAt) return false;
-      return partsInZone(new Date(item.recommendedPublishAt), settings.timezone).stamp === local.stamp;
+    const dayPosts = occupied.filter((iso) => {
+      return partsInZone(new Date(iso), settings.timezone).stamp === local.stamp;
     }).length;
-    const last = scheduled
-      .map((item) => item.recommendedPublishAt)
-      .filter(Boolean)
-      .sort()
-      .at(-1);
+    const last = occupied.filter(Boolean).sort().at(-1);
     const gapOk =
       !last ||
       cursor.getTime() - new Date(last).getTime() >= settings.minHoursBetweenPosts * 3600 * 1000;
@@ -92,7 +96,10 @@ export function recommendPublishAt(job: ContentJob, settings = getContentSetting
 
 export function enqueueForApproval(job: ContentJob) {
   const settings = getContentSettings();
-  const slot = recommendPublishAt(job, settings);
+  const keep = job.recommendedPublishAt;
+  const slot = keep
+    ? { at: keep, reason: job.recommendationReason || "Horario ya asignado" }
+    : recommendPublishAt(job, settings);
   updateJob(job.publicId, {
     status: "AWAITING_APPROVAL",
     recommendedPublishAt: slot.at,
@@ -100,6 +107,24 @@ export function enqueueForApproval(job: ContentJob) {
   });
   recordContentEvent(job.publicId, "CONTENT_RECOMMENDED", slot.reason);
   return slot;
+}
+
+export function assignStaggeredSlots(publicIds: string[]) {
+  const settings = getContentSettings();
+  const extra: string[] = [];
+  const assigned: Array<{ publicId: string; at: string; reason: string }> = [];
+  for (const publicId of publicIds) {
+    const job = getJobByPublicId(publicId);
+    if (!job) continue;
+    const slot = recommendPublishAt(job, settings, extra);
+    extra.push(slot.at);
+    updateJob(publicId, {
+      recommendedPublishAt: slot.at,
+      recommendationReason: slot.reason,
+    });
+    assigned.push({ publicId, at: slot.at, reason: slot.reason });
+  }
+  return assigned;
 }
 
 export function parsePanamaDateTime(text: string) {

@@ -6,6 +6,7 @@ import {
   getContentVersion,
   getJobByPublicId,
   latestVersion,
+  isBrandedFeedFilename,
   listAssets,
   readAssetBytes,
   recordContentEvent,
@@ -38,6 +39,8 @@ import {
 } from "@/lib/content-publish-policy";
 import { logError, logInfo } from "@/lib/log";
 import { sendTelegramMessage } from "@/lib/content-telegram";
+import { campaignJobPaused } from "@/lib/campaign-store";
+import { scanCommercialClaims } from "@/lib/campaign-claims";
 import { site } from "@/lib/site";
 import type { ContentAsset, ContentJob } from "@/lib/content-types";
 
@@ -75,6 +78,10 @@ function humanCause(cause: string) {
     meta_token_unconfigured:
       { text: "No hay token de Página de Meta.", action: "Pega META_PAGE_ACCESS_TOKEN en el .env del VPS (no en el chat)." },
     image_missing: { text: "No encontré la imagen aprobada.", action: "Vuelve a generar la pieza y aprueba la versión nueva." },
+    carousel_unsupported: {
+      text: "Esta pieza está marcada como carrusel. El publicador solo envía 1 imagen por publicación.",
+      action: "Deja las propuestas independientes (una foto = una pieza) o publica UNA con PUBLICAR AHORA.",
+    },
     image_url_unconfigured: { text: "No pude firmar la URL de la imagen.", action: "Configura CONTENT_MEDIA_SIGNING_SECRET o N8N_HOMESTEAD_WEBHOOK_SECRET." },
     image_not_jpeg: { text: "La imagen no es JPEG válido.", action: "Reprocesa la pieza." },
     image_too_large: { text: "La imagen supera 8 MB.", action: "Reprocesa la pieza." },
@@ -249,9 +256,9 @@ async function publishFacebook(input: {
 }
 
 function brandedFeed(publicId: string, version: number) {
-  return listAssets(publicId, "BRANDED", version).filter((asset) =>
-    asset.storedFilename.includes("-feed."),
-  )[0] as ContentAsset | undefined;
+  const branded = listAssets(publicId, "BRANDED", version);
+  const matches = branded.filter((asset) => isBrandedFeedFilename(asset.storedFilename));
+  return (matches.at(-1) || branded.at(-1)) as ContentAsset | undefined;
 }
 
 function formatTelegramResult(publicId: string, live: boolean, rows: PlatformPublishResult[]) {
@@ -290,6 +297,17 @@ export async function publishJob(
   if (contentPublishGloballyBlocked()) {
     return { ok: false as const, cause: "publish_disabled" };
   }
+  if (campaignJobPaused(publicId)) {
+    return { ok: false as const, cause: "campaign_paused" };
+  }
+  if ((job.format || "").toUpperCase() === "CAROUSEL") {
+    clearPublishLock(publicId);
+    await sendTelegramMessage({
+      chatId: job.telegramChatId,
+      text: `No publico ${publicId} como carrusel. El publicador actual solo envía 1 imagen por pieza.`,
+    });
+    return { ok: false as const, cause: "carousel_unsupported" };
+  }
   if (settings.mode === "MANUAL" && source === "scheduler") {
     return { ok: false as const, cause: "manual_mode" };
   }
@@ -313,6 +331,18 @@ export async function publishJob(
     return { ok: false as const, cause: "stale_version" };
   }
   const caption = withCanonicalCta(job.selectedCaption || version?.copy || "");
+  if (live) {
+    const claims = scanCommercialClaims(caption);
+    if (!claims.ok) {
+      clearPublishLock(publicId);
+      updateJob(publicId, { status: "NEEDS_REVIEW", lastError: "unconfirmed_claims", liveOnce: 0 });
+      await sendTelegramMessage({
+        chatId: job.telegramChatId,
+        text: `No publico ${publicId}: el texto tiene un claim no confirmado (${claims.hits.join(", ")}).`,
+      });
+      return { ok: false as const, cause: "unconfirmed_claims", hits: claims.hits };
+    }
+  }
   const platforms = (settings.platforms.length ? settings.platforms : ["instagram", "facebook"]).filter(
     (item): item is "instagram" | "facebook" => item === "instagram" || item === "facebook",
   );
@@ -388,7 +418,7 @@ export async function publishJob(
       if (results.some((row) => row.platform === platform)) continue;
       const existing = findPublication(publicId, platform, live);
       const attempt = nextPlatformAttempt(existing, live);
-      if (attempt === "skip_published") {
+      if (attempt === "skip_published" || attempt === "already_simulated") {
         results.push({
           platform,
           outcome: "already",

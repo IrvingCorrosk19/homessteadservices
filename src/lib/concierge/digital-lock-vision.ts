@@ -5,6 +5,7 @@ import {
   detectDigitalLockPurchaseIntent,
   type DigitalLockView,
 } from "@/lib/concierge/digital-lock-intent";
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { homesteadDataDir } from "@/lib/service-requests";
 import { conciergeApiKey, conciergeModel } from "@/lib/concierge-flags";
 import { readVisionAnalysisDelayMs } from "@/lib/concierge/test-injection";
@@ -400,6 +401,10 @@ export async function analyzeDigitalLockPhotoFromBytes(input: {
   cachedByHash?: Record<string, VisionInspectionResult>;
   correlationId?: string;
 }): Promise<{ vision: VisionInspectionResult; sha256: string; cached: boolean } | null> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", "digital-lock-vision");
+    return null;
+  }
   const key = conciergeApiKey();
   if (!key) return null;
   const bytes = input.bytes;

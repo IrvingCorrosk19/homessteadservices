@@ -1,4 +1,5 @@
 import { recordUsage } from "@/lib/content-catalog";
+import { isolatedCopyFallback, isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { logError } from "@/lib/log";
 
 function textModel() {
@@ -54,6 +55,10 @@ export async function analyzeAndWriteCopy(input: {
   description: string;
   photos: Array<{ bytes: Buffer; mime: string }>;
 }): Promise<VisualAnalysis> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", `analyze:${input.publicId}`);
+    return isolatedCopyFallback(input.publicId);
+  }
   if (!apiKey()) throw new Error("openai_unconfigured");
   const images = input.photos.slice(0, 4).map((photo) => ({
     type: "image_url" as const,
@@ -125,6 +130,11 @@ export async function rewriteCopyOnly(input: {
   previousCopy: string;
   instruction?: string;
 }): Promise<{ full: string; cta: string; hashtags: string[] }> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", `rewrite:${input.publicId}`);
+    const copy = isolatedCopyFallback(input.publicId).copy;
+    return { full: copy.full, cta: copy.cta, hashtags: copy.hashtags };
+  }
   if (!apiKey()) throw new Error("openai_unconfigured");
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -175,6 +185,18 @@ export async function writeAiCampaignCopy(input: {
   platform: string;
   note: string;
 }): Promise<{ full: string; cta: string; hashtags: string[]; commercial: string; warm: string; educational: string }> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", `campaign:${input.publicId}`);
+    const copy = isolatedCopyFallback(input.publicId).copy;
+    return {
+      full: copy.full,
+      cta: copy.cta,
+      hashtags: copy.hashtags,
+      commercial: copy.commercial,
+      warm: copy.warm,
+      educational: copy.educational,
+    };
+  }
   if (!apiKey()) throw new Error("openai_unconfigured");
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -234,6 +256,10 @@ export async function generateCampaignImage(input: {
   platform: string;
   note: string;
 }): Promise<Buffer | null> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", `image:${input.publicId}`);
+    return null;
+  }
   if (!apiKey()) return null;
   const prompt = [
     "Create a clean, premium advertising photograph-style image for a home services company in Panama.",
@@ -295,6 +321,10 @@ export async function enhanceWithOpenAi(input: {
   publicId: string;
   bytes: Buffer;
 }): Promise<Buffer | null> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", `enhance:${input.publicId}`);
+    return null;
+  }
   if (!apiKey()) return null;
   const form = new FormData();
   form.set("model", imageModel());

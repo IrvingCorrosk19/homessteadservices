@@ -56,6 +56,12 @@ export function safeAdminReturnUrl(value: string | null | undefined) {
 export async function verifyAdminPassword(password: string) {
   const expected = process.env.ADMIN_PASSWORD?.trim() || "";
   if (!expected || !password) return false;
+  if (process.env.HOMESTEAD_CONTROL_ISOLATED !== "true") {
+    if (expected === "control-local" || password === "control-local") {
+      await hmacHex("length-check", password);
+      return false;
+    }
+  }
   if (expected.length !== password.length) {
     await hmacHex("length-check", password);
     return false;
@@ -71,6 +77,46 @@ export async function createAdminSessionToken() {
   const payload = `${exp}.${nonce}`;
   const signature = await hmacHex(secret, payload);
   return `${payload}.${signature}`;
+}
+
+export async function createAdminCsrfToken(sessionToken: string) {
+  const secret = process.env.ADMIN_SESSION_SECRET?.trim() || "";
+  if (!secret || !sessionToken) throw new Error("admin_session_unconfigured");
+  return hmacHex(secret, `csrf.${sessionToken}`);
+}
+
+export async function verifyAdminCsrfToken(sessionToken: string | undefined | null, csrf: string | undefined | null) {
+  if (!sessionToken || !csrf) return false;
+  try {
+    const expected = await createAdminCsrfToken(sessionToken);
+    return timingSafeEqual(expected.toLowerCase(), csrf.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function adminCsrfCookieName() {
+  return "hs_admin_csrf";
+}
+
+export function sameAdminOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin) return true;
+  if (!host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
+export function parseAdminSessionNonce(token: string) {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [exp, nonce] = parts;
+  if (!/^\d+$/.test(exp) || !/^[a-f0-9]+$/i.test(nonce)) return null;
+  return { expiresAt: Number(exp), nonce };
 }
 
 export async function isValidAdminSessionToken(token: string | undefined | null) {

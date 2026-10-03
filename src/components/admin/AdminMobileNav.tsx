@@ -6,16 +6,17 @@ import { useEffect, useState } from "react";
 
 const PRIMARY = [
   { href: "/admin", label: "Inicio", match: (path: string) => path === "/admin" },
+  { href: "/admin/contenido", label: "Contenido", match: (path: string) => path.startsWith("/admin/contenido") },
   {
     href: "/admin/solicitudes?ops=NEEDS_ATTENTION",
     label: "Solicitudes",
     match: (path: string) => path.startsWith("/admin/solicitudes"),
   },
   { href: "/admin/citas", label: "Citas", match: (path: string) => path.startsWith("/admin/citas") },
-  { href: "/admin/clientes", label: "Clientes", match: (path: string) => path.startsWith("/admin/clientes") },
 ];
 
 const MORE = [
+  { href: "/admin/clientes", label: "Clientes" },
   { href: "/admin/trabajos", label: "Trabajos" },
   { href: "/admin/retencion", label: "Retención" },
   { href: "/admin/copilot", label: "Copiloto" },
@@ -28,7 +29,8 @@ export function AdminMobileNav() {
   useEffect(() => setMounted(true), []);
   const onMore =
     mounted &&
-    (pathname.startsWith("/admin/trabajos") ||
+    (pathname.startsWith("/admin/clientes") ||
+      pathname.startsWith("/admin/trabajos") ||
       pathname.startsWith("/admin/retencion") ||
       pathname.startsWith("/admin/copilot") ||
       pathname.startsWith("/admin/configuracion"));

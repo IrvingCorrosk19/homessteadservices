@@ -1,3 +1,4 @@
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { COPILOT_MAX_TOOL_CALLS, COPILOT_TIMEOUT_MS, recordCopilotUsage } from "@/lib/copilot/schema";
 import { BUSINESS_COPILOT_SYSTEM } from "@/lib/copilot/prompt";
 import { COPILOT_OPENAI_TOOLS, executeCopilotTool } from "@/lib/copilot/tools";
@@ -38,6 +39,10 @@ export async function runCopilotOpenAi(input: {
   toolCalls: number;
   failed?: boolean;
 }> {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", "copilot");
+    return { text: "Modo aislado: el copiloto no llama a OpenAI.", toolCalls: 0 };
+  }
   if (!apiKey()) {
     return { text: "", toolCalls: 0, failed: true };
   }

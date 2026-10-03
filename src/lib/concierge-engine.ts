@@ -1,3 +1,4 @@
+import { isControlIsolated, recordSimulatedCall } from "@/lib/control-isolation";
 import { conciergeKnowledge, conciergeSystemPrompt } from "@/lib/concierge-knowledge";
 import { stripHallucinatedPrices, enforceAvailabilityIntegrity, enforceBookingIntegrity, injectionDeniedReply } from "@/lib/concierge-integrity";
 import {
@@ -305,6 +306,10 @@ function extractCasualFacts(state: ConversationState, text: string) {
 }
 
 async function completeTurn(messages: ChatMessage[]) {
+  if (isControlIsolated()) {
+    recordSimulatedCall("openai", "concierge");
+    throw new Error("openai_isolated");
+  }
   if (isTestInjectionActive("AI_PROVIDER_FAILURE") || isTestInjectionActive("TOOL_TIMEOUT")) {
     throw new Error("openai_injected_failure");
   }

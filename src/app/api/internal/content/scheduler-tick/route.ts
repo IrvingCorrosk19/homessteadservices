@@ -64,6 +64,14 @@ export async function POST(request: Request) {
     }
     let result: Record<string, unknown> = { ok: true, content: "skipped" };
     try {
+      const { recoverControlIntake } = await import("@/lib/control-intake");
+      await recoverControlIntake();
+    } catch (error) {
+      logError("ControlIntakeRecoverFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+      });
+    }
+    try {
       result = (await runContentScheduler()) as Record<string, unknown>;
     } catch (error) {
       logError("ContentSchedulerFailed", {

@@ -273,6 +273,13 @@ export function listCampaignPieces(campaignId: string) {
   return rows.map(mapPiece);
 }
 
+export function listAllCampaigns() {
+  const rows = getHomesteadDb()
+    .prepare("SELECT * FROM campaigns ORDER BY updated_at DESC LIMIT 50")
+    .all() as CampaignRow[];
+  return rows.map(mapCampaign);
+}
+
 export function listActiveCampaigns() {
   const rows = getHomesteadDb()
     .prepare(
@@ -470,5 +477,18 @@ export function campaignJobPaused(jobPublicId: string) {
   if (!campaign) return false;
   if (campaign.status === "PAUSED" || campaign.status === "CANCELLED") return true;
   if (piece.approvedVersion !== null && piece.approvedVersion !== piece.version) return true;
+  return false;
+}
+
+export function campaignJobExcludedFromAutoPublish(jobPublicId: string) {
+  if (campaignJobPaused(jobPublicId)) return true;
+  const piece = getPieceByJobId(jobPublicId);
+  if (!piece) return false;
+  const campaign = getCampaignByPublicId(piece.campaignId);
+  if (!campaign) return false;
+  if (campaign.isTest) return true;
+  if (piece.format !== "SINGLE_IMAGE") return true;
+  if (piece.approvedVersion === null || piece.approvedVersion !== piece.version) return true;
+  if (piece.status !== "APPROVED" && piece.status !== "SCHEDULED") return true;
   return false;
 }

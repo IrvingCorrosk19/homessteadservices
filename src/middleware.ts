@@ -6,15 +6,30 @@ import {
   safeAdminReturnUrl,
 } from "@/lib/admin-auth";
 
+function isPublicAdminAsset(pathname: string) {
+  return (
+    pathname === "/admin/login" ||
+    pathname === "/admin/offline" ||
+    pathname === "/admin/sw.js" ||
+    pathname === "/admin/manifest.webmanifest" ||
+    pathname.startsWith("/admin/icons/")
+  );
+}
+
+function withAdminPath(request: NextRequest) {
+  const headers = new Headers(request.headers);
+  headers.set("x-admin-pathname", request.nextUrl.pathname);
+  return NextResponse.next({ request: { headers } });
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isLoginPage = pathname === "/admin/login";
   const isLoginApi = pathname === "/api/admin/login";
-  if (isLoginPage || isLoginApi) return NextResponse.next();
+  if (isPublicAdminAsset(pathname) || isLoginApi) return withAdminPath(request);
 
   const token = request.cookies.get(adminCookieName())?.value;
   const valid = await isValidAdminSessionToken(token);
-  if (valid) return NextResponse.next();
+  if (valid) return withAdminPath(request);
 
   if (pathname.startsWith("/api/admin")) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });

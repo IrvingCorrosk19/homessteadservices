@@ -9,6 +9,7 @@ import { OperationsAiPanel } from "@/components/admin/OperationsAiPanel";
 
 const DESKTOP_NAV = [
   { href: "/admin", label: "Dashboard", match: (path: string) => path === "/admin" },
+  { href: "/admin/contenido", label: "Contenido", match: (path: string) => path.startsWith("/admin/contenido") },
   { href: "/admin/solicitudes?ops=NEEDS_ATTENTION", label: "Solicitudes", match: (path: string) => path.startsWith("/admin/solicitudes") },
   { href: "/admin/citas", label: "Citas", match: (path: string) => path.startsWith("/admin/citas") },
   { href: "/admin/trabajos", label: "Trabajos", match: (path: string) => path.startsWith("/admin/trabajos") },
@@ -24,6 +25,8 @@ export function AdminTopBar() {
   const title =
     pathname === "/admin"
       ? "Inicio operativo"
+      : pathname.startsWith("/admin/contenido")
+        ? "Homestead Control"
       : pathname.startsWith("/admin/citas")
         ? "Citas"
         : pathname.startsWith("/admin/trabajos")

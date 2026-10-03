@@ -9,6 +9,8 @@
  * Env: DATA_DIR (default ./data)
  */
 import {
+  accessSync,
+  constants,
   copyFileSync,
   cpSync,
   existsSync,
@@ -19,6 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
+import { platform } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -109,10 +112,31 @@ const { dest, retain } = parseArgs();
 
 if (!existsSync(dbPath)) fail("database_missing");
 
+if (platform() !== "win32") {
+  const dataStat = statSync(dataDir);
+  if ((dataStat.mode & 0o002) !== 0) {
+    fail("data_dir_world_writable");
+  }
+}
+
 try {
   mkdirSync(dest, { recursive: true });
+  accessSync(dest, constants.W_OK);
 } catch {
   fail("destination_unavailable");
+}
+
+if (platform() !== "win32") {
+  const destStat = statSync(dest);
+  if ((destStat.mode & 0o002) !== 0) {
+    fail("destination_world_writable");
+  }
+}
+if (process.env.HOMESTEAD_CONTROL_ISOLATED === "true") {
+  const normalizedDest = String(dest).replaceAll("\\", "/");
+  if (!normalizedDest.includes("/data/control-dev") && !normalizedDest.includes("/data/control-test")) {
+    fail("isolated_backup_must_stay_under_isolated_dir");
+  }
 }
 
 const backupDbPath = join(dest, "homestead.sqlite");

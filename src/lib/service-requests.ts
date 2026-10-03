@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import Database from "better-sqlite3";
 import { storedPhotoName, type SniffedImage } from "@/lib/photos";
@@ -116,6 +116,47 @@ function migrate(database: Database.Database) {
       ON service_request_messages (public_id, created_at);
   `);
   migrateContentStudio(database);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS control_action_receipts (
+      idempotency_key TEXT NOT NULL UNIQUE,
+      public_id TEXT NOT NULL DEFAULT '',
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '',
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_control_receipts_public
+      ON control_action_receipts (public_id, created_at);
+    CREATE TABLE IF NOT EXISTS control_intake_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_key TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      status TEXT NOT NULL,
+      public_id TEXT NOT NULL DEFAULT '',
+      relative_path TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_control_intake_batch
+      ON control_intake_items (batch_key, status);
+    CREATE INDEX IF NOT EXISTS idx_control_intake_actor_sha
+      ON control_intake_items (actor, sha256);
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      nonce TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
+      ON admin_sessions (expires_at, revoked_at);
+  `);
+  const receiptCols = columnNames(database, "control_action_receipts");
+  if (!receiptCols.includes("request_hash")) {
+    database.exec("ALTER TABLE control_action_receipts ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 function migrateContentStudio(database: Database.Database) {
@@ -208,6 +249,47 @@ function migrateContentStudio(database: Database.Database) {
   addJobCol("approved_version", "approved_version INTEGER");
   addJobCol("live_once", "live_once INTEGER NOT NULL DEFAULT 0");
   addJobCol("campaign_public_id", "campaign_public_id TEXT NOT NULL DEFAULT ''");
+  addJobCol("photo_batch_id", "photo_batch_id TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS content_batch_counters (
+      year INTEGER PRIMARY KEY,
+      last INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS content_photo_intake (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_key TEXT NOT NULL,
+      media_group_id TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL,
+      user_id TEXT NOT NULL DEFAULT '',
+      update_id INTEGER,
+      message_id INTEGER,
+      telegram_file_id TEXT NOT NULL DEFAULT '',
+      sha256 TEXT NOT NULL,
+      caption TEXT NOT NULL DEFAULT '',
+      relative_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      ext TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      public_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'buffered',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_photo_intake_group
+      ON content_photo_intake (group_key, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_content_photo_intake_update
+      ON content_photo_intake (update_id);
+    CREATE TABLE IF NOT EXISTS content_photo_batches (
+      public_id TEXT PRIMARY KEY,
+      group_key TEXT NOT NULL,
+      media_group_id TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL,
+      member_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'proposed',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
   database.exec(`
     CREATE TABLE IF NOT EXISTS campaign_counters (
       year INTEGER PRIMARY KEY,
@@ -958,6 +1040,16 @@ export function getHomesteadDb() {
 }
 
 export function homesteadDataDir() {
+  if (process.env.HOMESTEAD_CONTROL_ISOLATED === "true") {
+    const dir = (process.env.DATA_DIR || "").replaceAll("\\", "/");
+    if (!dir.endsWith("/data/control-dev") && !dir.endsWith("/data/control-test")) {
+      throw new Error("isolated_data_dir_required");
+    }
+    const marker = join(dataDir(), "CONTROL_DEV.txt");
+    if (!existsSync(marker)) {
+      throw new Error("isolated_marker_required");
+    }
+  }
   return dataDir();
 }
 
@@ -1115,13 +1207,15 @@ export function saveServiceRequest(input: {
       status: "RECORDED",
       sentAt: createdAt,
     });
-    const payload = buildN8nPayload(saved);
-    enqueueOutbox(database, {
-      eventType: "service_request.created",
-      correlationId: publicId,
-      idempotencyKey: `service_request.created:${publicId}`,
-      data: payload as unknown as Record<string, unknown>,
-    });
+    if (!isTest) {
+      const payload = buildN8nPayload(saved);
+      enqueueOutbox(database, {
+        eventType: "service_request.created",
+        correlationId: publicId,
+        idempotencyKey: `service_request.created:${publicId}`,
+        data: payload as unknown as Record<string, unknown>,
+      });
+    }
     return saved;
   })();
   void import("@/lib/revenue-ingest").then((mod) => mod.ingestSavedRequest(saved)).catch(() => undefined);

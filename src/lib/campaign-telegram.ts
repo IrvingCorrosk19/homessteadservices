@@ -63,7 +63,7 @@ function pieceKeyboard(pieceId: string): TelegramButton[][] {
   ];
 }
 
-async function sendCampaignBundle(chatId: string, campaignId: string) {
+export async function sendCampaignBundle(chatId: string, campaignId: string) {
   const campaign = getCampaignByPublicId(campaignId);
   if (!campaign) {
     await sendTelegramMessage({ chatId, text: "No encuentro esa campaña." });
@@ -130,7 +130,7 @@ export async function handleCampaignCallback(data: string, chatId: string, userI
       pauseCampaign(campaignId, userId);
       await sendTelegramMessage({
         chatId,
-        text: "Campaña en pausa. El scheduler no publicará piezas de esta campaña. Lo ya simulado o publicado se conserva.",
+        text: "Campaña en pausa. Ni el scheduler ni PUBLICAR AHORA sacan piezas de esta campaña. Lo ya simulado o publicado se conserva.",
       });
       return { ok: true };
     }

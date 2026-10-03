@@ -25,6 +25,7 @@ export const ACTIVE_CONTENT_STATUSES: ContentStatus[] = [
 ];
 
 export const CONTENT_ID_PATTERN = /^HC-\d{4}-\d{6}$/;
+export const PHOTO_BATCH_ID_PATTERN = /^HB-\d{4}-\d{6}$/;
 
 export const MAX_CONTENT_PHOTOS = 8;
 export const MAX_CONTENT_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -68,6 +69,8 @@ export type ContentJob = {
   approvedVersion: number | null;
   liveOnce: number;
   campaignPublicId: string;
+  mediaGroupId: string;
+  photoBatchId: string;
 };
 
 export type ContentPublicationStatus =

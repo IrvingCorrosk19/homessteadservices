@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdminMutation } from "@/lib/control-auth";
 import { isRequestStatus, PUBLIC_ID_PATTERN } from "@/lib/admin-format";
 import { logInfo } from "@/lib/log";
 import { markEntityContacted } from "@/lib/ops-store";
@@ -8,6 +9,8 @@ import { cancelServiceRequest } from "@/lib/service-request-cancellation";
 type Params = { params: Promise<{ requestId: string }> };
 
 export async function PATCH(request: Request, { params }: Params) {
+  const gate = await requireAdminMutation(request);
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { requestId } = await params;
   if (!PUBLIC_ID_PATTERN.test(requestId)) {
     return NextResponse.json({ ok: false }, { status: 400 });

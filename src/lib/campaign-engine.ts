@@ -23,6 +23,7 @@ import {
   getContentSettings,
   getJobByPublicId,
   recordContentEvent,
+  overwriteBrandedFeed,
   saveVersion,
   storeDerivedAsset,
   storeOriginal,
@@ -125,7 +126,15 @@ async function materializePiece(input: {
     pieceId: piece.publicId,
     channel: "web",
   });
-  const copy = caption.replace("Ref. interna al publicar.", `Ref. ${input.campaign.publicId}/${piece.publicId}`);
+  const copy = withCanonicalCta(
+    [
+      input.draft.copy,
+      "",
+      instagramCaptionFooter(destinations.web),
+      "",
+      `Ref. ${input.campaign.publicId}/${piece.publicId}`,
+    ].join("\n"),
+  );
   updatePiece(piece.publicId, {
     destinationUrl: destinations.web,
     whatsappUrl: destinations.whatsapp,
@@ -338,9 +347,12 @@ export function approveCampaign(campaignId: string, actor: string) {
     return { ok: false as const, reason: "unconfirmed_claims", pieces: blocked.map((item) => item.publicId) };
   }
   const manifest = feed.map((piece) => ({ id: piece.publicId, version: piece.version, job: piece.contentJobId }));
+  const terminal = new Set(["PUBLISHED", "SIMULATED", "PUBLISHING", "CANCELLED"]);
   for (const piece of feed) {
     updatePiece(piece.publicId, { status: "APPROVED", approvedVersion: piece.version });
     if (piece.contentJobId) {
+      const job = getJobByPublicId(piece.contentJobId);
+      if (job && terminal.has(job.status)) continue;
       updateJob(piece.contentJobId, {
         status: "SCHEDULED",
         approvedAt: new Date().toISOString(),
@@ -406,6 +418,15 @@ export function pauseCampaign(campaignId: string, actor: string) {
   if (!campaign) return { ok: false as const, reason: "missing" };
   updateCampaign(campaignId, { status: "PAUSED" });
   recordCampaignEvent(campaignId, "PAUSED", actor);
+  return { ok: true as const, campaign: getCampaignByPublicId(campaignId)! };
+}
+
+export function resumeCampaign(campaignId: string, actor: string) {
+  const campaign = getCampaignByPublicId(campaignId);
+  if (!campaign) return { ok: false as const, reason: "missing" };
+  if (campaign.status !== "PAUSED") return { ok: false as const, reason: "not_paused" };
+  updateCampaign(campaignId, { status: "SCHEDULED" });
+  recordCampaignEvent(campaignId, "RESUMED", actor);
   return { ok: true as const, campaign: getCampaignByPublicId(campaignId)! };
 }
 
@@ -501,4 +522,23 @@ export async function recomposePieceImage(pieceId: string) {
   updateCampaign(piece.campaignId, { status: "AWAITING_APPROVAL", approvalManifest: "" });
   recordCampaignEvent(piece.campaignId, "IMAGE_RECOMPOSED", `v${nextVersion}`, pieceId);
   return { ok: true as const, version: nextVersion, bytes: branded.bytes };
+}
+
+export async function repairApprovedFeedImage(pieceId: string) {
+  const piece = getPieceByPublicId(pieceId);
+  if (!piece?.contentJobId || piece.format !== "SINGLE_IMAGE") {
+    return { ok: false as const, reason: "missing" };
+  }
+  const job = getJobByPublicId(piece.contentJobId);
+  if (!job) return { ok: false as const, reason: "missing_job" };
+  const sourceAbs = publicImageAbs("/images/services/locksmith.webp");
+  const branded = await composeCampaignFeed({
+    sourceAbsPath: sourceAbs,
+    overlayText: piece.overlayText,
+    cta: piece.cta,
+  });
+  const replaced = overwriteBrandedFeed(job.publicId, branded.bytes, branded.width, branded.height);
+  if (!replaced) return { ok: false as const, reason: "no_asset" };
+  recordCampaignEvent(piece.campaignId, "IMAGE_REPAIRED", "overlay_font", pieceId);
+  return { ok: true as const, assetId: replaced.id, bytes: branded.bytes.length };
 }

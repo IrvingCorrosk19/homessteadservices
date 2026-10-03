@@ -43,6 +43,8 @@ type JobRow = {
   approved_version: number | null;
   live_once: number | null;
   campaign_public_id: string | null;
+  media_group_id: string | null;
+  photo_batch_id: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -75,6 +77,8 @@ function mapJob(row: JobRow): ContentJob {
     approvedVersion: row.approved_version ?? null,
     liveOnce: row.live_once ? 1 : 0,
     campaignPublicId: row.campaign_public_id || "",
+    mediaGroupId: row.media_group_id || "",
+    photoBatchId: row.photo_batch_id || "",
   };
 }
 
@@ -197,6 +201,8 @@ export function updateJob(
     approvedVersion: number | null;
     liveOnce: number;
     campaignPublicId: string;
+    mediaGroupId: string;
+    photoBatchId: string;
   }>,
 ) {
   const current = getJobByPublicId(publicId);
@@ -226,6 +232,8 @@ export function updateJob(
         approved_version = ?,
         live_once = ?,
         campaign_public_id = ?,
+        media_group_id = ?,
+        photo_batch_id = ?,
         updated_at = ?
        WHERE public_id = ?`,
     )
@@ -257,6 +265,8 @@ export function updateJob(
       patch.approvedVersion === undefined ? current.approvedVersion : patch.approvedVersion,
       patch.liveOnce === undefined ? current.liveOnce : patch.liveOnce,
       patch.campaignPublicId ?? current.campaignPublicId,
+      patch.mediaGroupId ?? current.mediaGroupId,
+      patch.photoBatchId ?? current.photoBatchId,
       updatedAt,
       publicId,
     );
@@ -514,6 +524,25 @@ export function storeDerivedAsset(input: {
     );
 }
 
+export function isBrandedFeedFilename(filename: string) {
+  const name = filename.toLowerCase();
+  return name.includes("-feed.") || name.includes("-feed-") || /(^|[-_])feed\.jpe?g$/.test(name);
+}
+
+export function overwriteBrandedFeed(publicId: string, bytes: Buffer, width: number, height: number) {
+  const assets = listAssets(publicId, "BRANDED").filter((asset) => isBrandedFeedFilename(asset.storedFilename));
+  const asset = assets.at(-1);
+  if (!asset) return null;
+  const abs = resolve(join(homesteadDataDir(), "content", asset.relativePath));
+  const root = resolve(join(homesteadDataDir(), "content"));
+  if (!isInside(root, abs)) return null;
+  writeFileSync(abs, bytes);
+  getHomesteadDb()
+    .prepare("UPDATE content_assets SET size = ?, width = ?, height = ?, sha256 = ? WHERE id = ?")
+    .run(bytes.length, width, height, sha256Of(bytes), asset.id);
+  return getHomesteadDb().prepare("SELECT id FROM content_assets WHERE id = ?").get(asset.id) as { id: number };
+}
+
 export function readAssetBytes(asset: ContentAsset) {
   const abs = resolve(join(homesteadDataDir(), "content", asset.relativePath));
   const root = resolve(join(homesteadDataDir(), "content"));
@@ -694,6 +723,74 @@ export function recordContentEvent(publicId: string, event: string, detail = "")
       "INSERT INTO content_events (public_id, event, detail, created_at) VALUES (?, ?, ?, ?)",
     )
     .run(publicId, event, detail.slice(0, 500), new Date().toISOString());
+}
+
+export function listContentEvents(publicId: string, limit = 40) {
+  return getHomesteadDb()
+    .prepare(
+      `SELECT event, detail, created_at FROM content_events
+       WHERE public_id = ? ORDER BY id DESC LIMIT ?`,
+    )
+    .all(publicId, limit) as Array<{ event: string; detail: string; created_at: string }>;
+}
+
+export function listPublicationsForJob(publicId: string) {
+  return getHomesteadDb()
+    .prepare(
+      `SELECT public_id, platform, status, dry_run, error, permalink, external_post_id, published_at, version, created_at
+       FROM content_publications WHERE public_id = ? ORDER BY id ASC`,
+    )
+    .all(publicId) as Array<{
+    public_id: string;
+    platform: string;
+    status: string;
+    dry_run: number;
+    error: string;
+    permalink: string;
+    external_post_id: string;
+    published_at: string | null;
+    version: number;
+    created_at: string;
+  }>;
+}
+
+export function listAllContentJobIds() {
+  return (
+    getHomesteadDb()
+      .prepare("SELECT public_id FROM content_jobs ORDER BY datetime(updated_at) DESC, id DESC")
+      .all() as Array<{ public_id: string }>
+  ).map((row) => row.public_id);
+}
+
+export function findOriginalByTelegramFileId(fileId: string) {
+  if (!fileId) return null;
+  const row = getHomesteadDb()
+    .prepare(
+      `SELECT public_id FROM content_assets
+       WHERE telegram_file_id = ? AND asset_type = 'ORIGINAL'
+       ORDER BY id ASC LIMIT 1`,
+    )
+    .get(fileId) as { public_id: string } | undefined;
+  return row?.public_id || null;
+}
+
+export function findOriginalBySha256(hash: string) {
+  if (!hash) return null;
+  const row = getHomesteadDb()
+    .prepare(
+      `SELECT public_id FROM content_assets
+       WHERE sha256 = ? AND asset_type = 'ORIGINAL'
+       ORDER BY id ASC LIMIT 1`,
+    )
+    .get(hash) as { public_id: string } | undefined;
+  return row?.public_id || null;
+}
+
+export function listRecentContentJobs(limit = 40) {
+  const rows = getHomesteadDb()
+    .prepare(`SELECT * FROM content_jobs ORDER BY datetime(created_at) DESC, id DESC LIMIT ?`)
+    .all(limit) as JobRow[];
+  return rows.map(mapJob);
 }
 
 export function listJobsByStatus(statuses: ContentStatus[]) {

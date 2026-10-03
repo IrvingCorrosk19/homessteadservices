@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import {
   adminCookieName,
   adminCookieOptions,
+  adminCsrfCookieName,
+  createAdminCsrfToken,
   createAdminSessionToken,
   isAdminAuthConfigured,
   safeAdminReturnUrl,
   verifyAdminPassword,
 } from "@/lib/admin-auth";
+import { persistAdminSession } from "@/lib/admin-session-store";
 import { logError, logInfo } from "@/lib/log";
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -46,9 +49,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 401 });
   }
   const token = await createAdminSessionToken();
+  persistAdminSession(token);
+  const csrf = await createAdminCsrfToken(token);
   const redirectTo = safeAdminReturnUrl(body?.returnUrl);
-  const response = NextResponse.json({ ok: true, redirect: redirectTo });
+  const response = NextResponse.json({ ok: true, redirect: redirectTo, csrf });
   response.cookies.set(adminCookieName(), token, adminCookieOptions());
+  response.cookies.set(adminCsrfCookieName(), csrf, {
+    ...adminCookieOptions(),
+    httpOnly: false,
+  });
   logInfo("AdminLoginSucceeded", {});
   return response;
 }

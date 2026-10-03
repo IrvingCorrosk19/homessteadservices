@@ -115,12 +115,9 @@ export function formatInBusinessZone(
 export function formatAppointmentClock(hm: string) {
   const [hours, minutes] = hm.split(":").map(Number);
   if (!Number.isFinite(hours)) return hm;
-  const date = new Date(Date.UTC(2026, 0, 1, hours, minutes || 0));
-  return new Intl.DateTimeFormat("es-PA", {
-    timeZone: "UTC",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes || 0).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 export function formatAppointmentDay(ymd: string) {

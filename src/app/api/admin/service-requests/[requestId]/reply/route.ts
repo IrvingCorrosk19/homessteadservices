@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdminMutation } from "@/lib/control-auth";
 import { PUBLIC_ID_PATTERN } from "@/lib/admin-format";
 import { logError, logInfo } from "@/lib/log";
 import { sendAdminReply } from "@/lib/mail";
@@ -7,6 +8,8 @@ import { getRequestByPublicId } from "@/lib/service-requests";
 type Params = { params: Promise<{ requestId: string }> };
 
 export async function POST(request: Request, { params }: Params) {
+  const gate = await requireAdminMutation(request);
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { requestId } = await params;
   if (!PUBLIC_ID_PATTERN.test(requestId)) {
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });

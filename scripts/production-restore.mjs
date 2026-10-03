@@ -53,6 +53,16 @@ if (existsSync(dest) && !force) {
   fail("destination_exists_use_force");
 }
 
+const normalizedDest = dest.replaceAll("\\", "/");
+if (process.env.HOMESTEAD_CONTROL_ISOLATED === "true") {
+  if (!normalizedDest.includes("/data/control-dev") && !normalizedDest.includes("/data/control-test")) {
+    fail("isolated_restore_must_stay_under_isolated_dir");
+  }
+}
+if (normalizedDest.endsWith("/data") || normalizedDest.endsWith("/data/")) {
+  fail("refusing_restore_onto_generic_data_dir");
+}
+
 if (existsSync(dest) && force) {
   rmSync(dest, { recursive: true, force: true });
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/control-auth";
 import { outboxSnapshot, getEngineState } from "@/lib/automation-outbox";
 import { inspectTelegramWebhook } from "@/lib/content-telegram";
 import { failedWaveCOutbox, jobMetrics } from "@/lib/job-store";
@@ -6,6 +7,8 @@ import { failedWaveCOutbox, jobMetrics } from "@/lib/job-store";
 export const runtime = "nodejs";
 
 export async function GET() {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const box = outboxSnapshot();
   const webhook = await inspectTelegramWebhook({ repair: false }).catch(() => null);
   return NextResponse.json({

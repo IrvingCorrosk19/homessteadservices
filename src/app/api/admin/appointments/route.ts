@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/control-auth";
 import { listAppointments } from "@/lib/revenue-store";
 import { isAppointmentStatus } from "@/lib/appointment-time";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const url = new URL(request.url);
   const from = url.searchParams.get("from") || undefined;
   const to = url.searchParams.get("to") || undefined;

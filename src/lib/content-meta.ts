@@ -1,4 +1,9 @@
 import { logError, logInfo } from "@/lib/log";
+import {
+  getSimulatedGraphScenario,
+  isControlIsolated,
+  recordSimulatedCall,
+} from "@/lib/control-isolation";
 
 export const DEFAULT_META_GRAPH_VERSION = "v22.0";
 
@@ -33,6 +38,13 @@ function graphVersion() {
 }
 
 export function resolveFacebookPageId() {
+  if (isControlIsolated()) {
+    return {
+      id: process.env.FACEBOOK_PAGE_ID?.trim() || "sim-facebook-page",
+      source: "FACEBOOK_PAGE_ID" as const,
+      conflict: false,
+    };
+  }
   const facebook = process.env.FACEBOOK_PAGE_ID?.trim() || "";
   const legacy = process.env.META_PAGE_ID?.trim() || "";
   if (facebook && legacy && facebook !== legacy) {
@@ -52,14 +64,19 @@ export function metaPageAccessToken() {
 }
 
 export function instagramAccountId() {
+  if (isControlIsolated()) {
+    return process.env.INSTAGRAM_ACCOUNT_ID?.trim() || "sim-instagram-account";
+  }
   return process.env.INSTAGRAM_ACCOUNT_ID?.trim() || "";
 }
 
 export function metaTokenConfigured() {
+  if (isControlIsolated()) return true;
   return Boolean(metaPageAccessToken());
 }
 
 export function platformConfigured(platform: MetaPlatform) {
+  if (isControlIsolated()) return true;
   if (!metaTokenConfigured()) return false;
   if (platform === "instagram") return Boolean(instagramAccountId());
   return Boolean(resolveFacebookPageId().id);
@@ -74,7 +91,46 @@ function summarizeGraphError(json: GraphJson, fallback: string) {
   return message.replace(/access_token=[^&\s]+/gi, "access_token=[REDACTED]").slice(0, 180);
 }
 
+function createIsolatedGraphTransport(): GraphTransport {
+  return {
+    async request(input) {
+      recordSimulatedCall("meta", `${input.method} ${input.path}`);
+      const scenario = getSimulatedGraphScenario();
+      const path = input.path;
+      const isFacebookPhoto = path.includes("/photos");
+      const isIgCreate = path.includes("/media") && !path.includes("media_publish") && input.method === "POST";
+      const isIgPublish = path.includes("media_publish");
+      if (scenario === "fail_all") {
+        return { status: 400, json: { error: { message: "simulated_graph_denied" } } };
+      }
+      if (scenario === "fail_facebook" && isFacebookPhoto) {
+        return { status: 400, json: { error: { message: "simulated_facebook_denied" } } };
+      }
+      if (scenario === "fail_instagram" && (isIgCreate || isIgPublish)) {
+        return { status: 400, json: { error: { message: "simulated_instagram_denied" } } };
+      }
+      if (scenario === "uncertain_facebook" && isFacebookPhoto) {
+        return { status: 0, json: { error: { message: "timeout" } } };
+      }
+      if (input.method === "GET" && path.includes("fields=status_code")) {
+        return { status: 200, json: { id: "sim-container", status_code: "FINISHED" } };
+      }
+      if (input.method === "GET") {
+        return {
+          status: 200,
+          json: { id: "sim-post", permalink: "https://example.invalid/sim", permalink_url: "https://example.invalid/sim" },
+        };
+      }
+      return {
+        status: 200,
+        json: { id: `sim-${Date.now()}`, post_id: `sim-post-${Date.now()}` },
+      };
+    },
+  };
+}
+
 export function createGraphTransport(token = metaPageAccessToken()): GraphTransport {
+  if (isControlIsolated()) return createIsolatedGraphTransport();
   return {
     async request(input) {
       if (!token) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
 import { APPOINTMENT_ID_PATTERN } from "@/lib/appointment-time";
 import { getAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/revenue-store";
 import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
@@ -20,6 +21,8 @@ const RESCHEDULE_STATUS: Record<string, number> = {
 };
 
 export async function GET(_request: Request, { params }: Params) {
+  const gate = await requireAdminSession();
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { appointmentId } = await params;
   if (!APPOINTMENT_ID_PATTERN.test(appointmentId)) {
     return NextResponse.json({ ok: false }, { status: 400 });
@@ -30,6 +33,8 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
+  const gate = await requireAdminMutation(request);
+  if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { appointmentId } = await params;
   if (!APPOINTMENT_ID_PATTERN.test(appointmentId)) {
     return NextResponse.json({ ok: false }, { status: 400 });
