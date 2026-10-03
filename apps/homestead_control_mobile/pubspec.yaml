@@ -1,7 +1,7 @@
 name: homestead_control_mobile
 description: Homestead Control — interfaz Flutter Android para el admin de homestead.lat
 publish_to: "none"
-version: 1.1.8+10
+version: 1.1.10+12
 
 environment:
   sdk: ^3.9.2

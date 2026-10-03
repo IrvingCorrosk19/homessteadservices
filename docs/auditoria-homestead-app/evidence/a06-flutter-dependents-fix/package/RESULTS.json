@@ -1,0 +1,28 @@
+{
+    "apk":  "1.1.10+12",
+    "sha256":  "EC96485F8B6C16F7313998BD94C9D44AA4F5097F22386226EDBF09E1A95B833B",
+    "device":  "R8YYA17KR3V",
+    "backendSessionCommit":  "8f47eae365b2c33ef86e3df37b483c6368a66439",
+    "isolated":  true,
+    "workspaceHead":  "8f47eae365b2c33ef86e3df37b483c6368a66439",
+    "workspaceDirty":  true,
+    "security":  {
+                     "securityReviewReason":  "flutter-fix-402f0d03",
+                     "historyAction":  "SECURITY_REVIEW_SET",
+                     "confirmNoRed":  true,
+                     "reopenNoRed":  true,
+                     "publicId":  "HS-2026-000046",
+                     "securityReviewRequired":  true
+                 },
+    "reject":  {
+                   "noRed":  true,
+                   "sendCustomerMessage":  null,
+                   "dispositionKind":  "REJECT",
+                   "historyCount":  1,
+                   "publicId":  "HS-2026-000047",
+                   "status":  "CANCELLED"
+               },
+    "noRealCustomerMessages":  true,
+    "assertFixed":  "_dependents.isEmpty on security dialog confirm",
+    "flutterFixCommit":  "0dca002b31a8c0477e7fed34cdfc3a7199b72ccc"
+}

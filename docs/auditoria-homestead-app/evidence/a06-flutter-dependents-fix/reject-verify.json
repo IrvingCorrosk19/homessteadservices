@@ -1,0 +1,22 @@
+{
+    "status":  "CANCELLED",
+    "history":  [
+                    {
+                        "id":  84,
+                        "action":  "REJECT",
+                        "actor":  "admin-mobile",
+                        "previousStatus":  "NEW",
+                        "newStatus":  "CANCELLED",
+                        "reasonCategory":  "OTHER",
+                        "reasonPublic":  "reject-done-5b25978c",
+                        "internalNote":  "",
+                        "note":  "reject-done-5b25978c",
+                        "customerMessage":  "Hola Ficticia, Revisamos tu solicitud y por ahora no podemos tomarla (Otro). reject-done-5b25978c Si quieres, podemos orientarte sobre alternativas. Gracias por escribirnos.",
+                        "at":  "2026-10-03T22:11:45.194Z",
+                        "createdAt":  "2026-10-03T22:11:45.194Z",
+                        "internal":  false
+                    }
+                ],
+    "dispositionKind":  "REJECT",
+    "historyCount":  1
+}

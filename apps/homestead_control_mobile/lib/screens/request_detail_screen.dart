@@ -73,13 +73,6 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       return;
     }
 
-    final reasonCtrl = TextEditingController();
-    final internalCtrl = TextEditingController();
-    final customerCtrl = TextEditingController(text: item.customerMessageDraft);
-    var category = DispositionReasonCategory.other;
-    var sendCustomer = false; // never default-on: isolated/fisica must opt in explicitly
-    var confirmed = false;
-
     final title = switch (action) {
       "reject" => "Rechazar solicitud",
       "cancel" => "Cancelar solicitud",
@@ -88,130 +81,19 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       _ => "Disposición",
     };
 
-    final ok = await showModalBottomSheet<bool>(
+    final payload = await showModalBottomSheet<_DispositionPayload>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 8,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-          ),
-          child: StatefulBuilder(
-            builder: (ctx, setLocal) {
-              return SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 8),
-                    Text("Solicitud ${item.publicId}", style: const TextStyle(color: HomesteadColors.mist)),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: category,
-                      decoration: const InputDecoration(labelText: "Motivo (categoría)"),
-                      items: [
-                        for (final c in DispositionReasonCategory.rejectChoices)
-                          DropdownMenuItem(value: c.value, child: Text(c.label)),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        // Mutate without setLocal — rebuilding FormField with a new
-                        // initialValue while dependents remain triggers framework assert.
-                        category = v;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: reasonCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Detalle del motivo (opcional)",
-                        helperText: "Visible en el historial administrativo",
-                      ),
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: internalCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Nota interna (solo equipo)",
-                        helperText: "No se envía al cliente. No confundir con el mensaje al cliente.",
-                      ),
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: customerCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Mensaje al cliente (borrador)",
-                        helperText: "Esto sí puede enviarse al cliente si marcas la casilla.",
-                      ),
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text("Enviar mensaje al cliente"),
-                      subtitle: const Text("Si está apagado, solo se registra la disposición."),
-                      value: sendCustomer,
-                      onChanged: (v) => setLocal(() => sendCustomer = v),
-                    ),
-                    if (sendCustomer && customerCtrl.text.trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      const Text("Vista previa del mensaje al cliente", style: TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0x330B1F33)),
-                        ),
-                        child: Text(customerCtrl.text.trim()),
-                      ),
-                    ],
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: confirmed,
-                      onChanged: (v) => setLocal(() => confirmed = v ?? false),
-                      title: const Text("Confirmo esta acción"),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: confirmed ? () => Navigator.pop(ctx, true) : null,
-                      child: Text(title),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text("Cancelar"),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        );
-      },
+      builder: (ctx) => _DispositionSheet(
+        title: title,
+        publicId: item.publicId,
+        customerMessageDraft: item.customerMessageDraft,
+      ),
     );
-
-    final payload = (
-      category: category,
-      reason: reasonCtrl.text.trim(),
-      internal: internalCtrl.text.trim(),
-      customer: customerCtrl.text.trim(),
-      send: sendCustomer,
-    );
-    reasonCtrl.dispose();
-    internalCtrl.dispose();
-    customerCtrl.dispose();
-
-    if (ok != true || !mounted) return;
+    // Wait for sheet route + keyboard MediaQuery dependents to clear.
+    await _awaitRouteTeardown();
+    if (payload == null || !mounted) return;
 
     setState(() => _busy = true);
     final api = context.read<SessionController>().api;
@@ -248,39 +130,14 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
   Future<void> _securityReview(String action) async {
     final item = _item;
     if (item == null || _busy) return;
-    final reasonCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(action == "set" ? "Marcar revisión de seguridad" : "Resolver revisión de seguridad"),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  action == "set"
-                      ? "La solicitud quedará marcada para revisión de seguridad."
-                      : "Se quitará la marca de revisión de seguridad.",
-                ),
-                if (action == "set") ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: reasonCtrl,
-                    decoration: const InputDecoration(labelText: "Motivo"),
-                    maxLines: 2,
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar")),
-              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Confirmar")),
-            ],
-          ),
-        ) ??
-        false;
-    final reason = reasonCtrl.text.trim();
-    reasonCtrl.dispose();
-    if (!ok || !mounted) return;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _SecurityReviewDialog(action: action),
+    );
+    // showDialog completes on pop while the route may still be deactivating
+    // InheritedWidgets (MediaQuery/keyboard). Rebuild only after teardown.
+    await _awaitRouteTeardown();
+    if (reason == null || !mounted) return;
 
     setState(() => _busy = true);
     final api = context.read<SessionController>().api;
@@ -298,6 +155,15 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Yield until modal route exit + a frame so InheritedElement dependents clear.
+  Future<void> _awaitRouteTeardown() async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 
   @override
@@ -523,6 +389,234 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                         if (_busy) const Padding(padding: EdgeInsets.only(top: 16), child: LinearProgressIndicator()),
                       ],
                     ),
+    );
+  }
+}
+
+class _DispositionPayload {
+  const _DispositionPayload({
+    required this.category,
+    required this.reason,
+    required this.internal,
+    required this.customer,
+    required this.send,
+  });
+  final String category;
+  final String reason;
+  final String internal;
+  final String customer;
+  final bool send;
+}
+
+/// Security dialog without TextEditingController — avoids dispose races with
+/// InheritedElement (MediaQuery/keyboard) during route pop (_dependents.isEmpty).
+class _SecurityReviewDialog extends StatefulWidget {
+  const _SecurityReviewDialog({required this.action});
+  final String action;
+
+  @override
+  State<_SecurityReviewDialog> createState() => _SecurityReviewDialogState();
+}
+
+class _SecurityReviewDialogState extends State<_SecurityReviewDialog> {
+  String _reason = "";
+
+  void _confirm() {
+    FocusScope.of(context).unfocus();
+    Navigator.pop(context, _reason.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSet = widget.action == "set";
+    return AlertDialog(
+      title: Text(isSet ? "Marcar revisión de seguridad" : "Resolver revisión de seguridad"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            isSet
+                ? "La solicitud quedará marcada para revisión de seguridad."
+                : "Se quitará la marca de revisión de seguridad.",
+          ),
+          if (isSet) ...[
+            const SizedBox(height: 12),
+            TextField(
+              decoration: const InputDecoration(labelText: "Motivo"),
+              maxLines: 2,
+              onChanged: (v) => _reason = v,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _confirm(),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            FocusScope.of(context).unfocus();
+            Navigator.pop(context);
+          },
+          child: const Text("Cancelar"),
+        ),
+        FilledButton(onPressed: _confirm, child: const Text("Confirmar")),
+      ],
+    );
+  }
+}
+
+/// Disposition sheet without TextEditingControllers (same dependents teardown race).
+class _DispositionSheet extends StatefulWidget {
+  const _DispositionSheet({
+    required this.title,
+    required this.publicId,
+    required this.customerMessageDraft,
+  });
+  final String title;
+  final String publicId;
+  final String customerMessageDraft;
+
+  @override
+  State<_DispositionSheet> createState() => _DispositionSheetState();
+}
+
+class _DispositionSheetState extends State<_DispositionSheet> {
+  late String _reason;
+  late String _internal;
+  late String _customer;
+  String _category = DispositionReasonCategory.other;
+  var _sendCustomer = false; // never default-on: isolated/fisica must opt in explicitly
+  var _confirmed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reason = "";
+    _internal = "";
+    _customer = widget.customerMessageDraft;
+  }
+
+  void _submit() {
+    FocusScope.of(context).unfocus();
+    Navigator.pop(
+      context,
+      _DispositionPayload(
+        category: _category,
+        reason: _reason.trim(),
+        internal: _internal.trim(),
+        customer: _customer.trim(),
+        send: _sendCustomer,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text("Solicitud ${widget.publicId}", style: const TextStyle(color: HomesteadColors.mist)),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _category,
+              decoration: const InputDecoration(labelText: "Motivo (categoría)"),
+              items: [
+                for (final c in DispositionReasonCategory.rejectChoices)
+                  DropdownMenuItem(value: c.value, child: Text(c.label)),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                // Mutate without setState — rebuilding FormField with a new
+                // initialValue while dependents remain triggers framework assert.
+                _category = v;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: "Detalle del motivo (opcional)",
+                helperText: "Visible en el historial administrativo",
+              ),
+              maxLines: 2,
+              onChanged: (v) => _reason = v,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: "Nota interna (solo equipo)",
+                helperText: "No se envía al cliente. No confundir con el mensaje al cliente.",
+              ),
+              maxLines: 2,
+              onChanged: (v) => _internal = v,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: "Mensaje al cliente (borrador)",
+                helperText: "Esto sí puede enviarse al cliente si marcas la casilla.",
+              ),
+              maxLines: 3,
+              onChanged: (v) {
+                _customer = v;
+                if (_sendCustomer) setState(() {});
+              },
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Enviar mensaje al cliente"),
+              subtitle: const Text("Si está apagado, solo se registra la disposición."),
+              value: _sendCustomer,
+              onChanged: (v) => setState(() => _sendCustomer = v),
+            ),
+            if (_sendCustomer && _customer.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              const Text("Vista previa del mensaje al cliente", style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0x330B1F33)),
+                ),
+                child: Text(_customer.trim()),
+              ),
+            ],
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _confirmed,
+              onChanged: (v) => setState(() => _confirmed = v ?? false),
+              title: const Text("Confirmo esta acción"),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _confirmed ? _submit : null,
+              child: Text(widget.title),
+            ),
+            TextButton(
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                Navigator.pop(context);
+              },
+              child: const Text("Cancelar"),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

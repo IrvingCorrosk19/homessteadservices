@@ -1,0 +1,79 @@
+{
+    "publicId":  "HS-2026-000047",
+    "status":  "CANCELLED",
+    "name":  "Ficticia A06 musxzcv4",
+    "phone":  "+50765210080",
+    "email":  "sec-fisica-musxzcv4@example.invalid",
+    "service":  "locksmith",
+    "message":  "Solicitud ficticia marca seguridad A06 musxzcv4",
+    "dispositionKind":  "REJECT",
+    "internalNote":  "",
+    "customerMessageDraft":  "Hola Ficticia,\n\nRevisamos tu solicitud y por ahora no podemos tomarla (Otro).\n\nreject-done-5b25978c\n\nSi quieres, podemos orientarte sobre alternativas. Gracias por escribirnos.",
+    "customerNotifyStatus":  "NONE",
+    "customerNotifyChannel":  "",
+    "customerNotifyLastError":  "",
+    "securityReviewRequired":  false,
+    "securityReviewReason":  "",
+    "securityReviewSetAt":  null,
+    "securityReviewSetBy":  "",
+    "securityReviewResolvedAt":  null,
+    "securityReviewResolvedBy":  "",
+    "cancellationReason":  "reject-done-5b25978c",
+    "cancellationReasonCategory":  "OTHER",
+    "reopenCount":  0,
+    "openAppointments":  [
+
+                         ],
+    "relatedAppointment":  null,
+    "history":  [
+                    {
+                        "id":  84,
+                        "action":  "REJECT",
+                        "actor":  "admin-mobile",
+                        "previousStatus":  "NEW",
+                        "newStatus":  "CANCELLED",
+                        "reasonCategory":  "OTHER",
+                        "reasonPublic":  "reject-done-5b25978c",
+                        "internalNote":  "",
+                        "note":  "reject-done-5b25978c",
+                        "customerMessage":  "Hola Ficticia, Revisamos tu solicitud y por ahora no podemos tomarla (Otro). reject-done-5b25978c Si quieres, podemos orientarte sobre alternativas. Gracias por escribirnos.",
+                        "at":  "2026-10-03T22:11:45.194Z",
+                        "createdAt":  "2026-10-03T22:11:45.194Z",
+                        "internal":  false
+                    }
+                ],
+    "availableActions":  {
+                             "reject":  false,
+                             "cancel":  false,
+                             "requestInfo":  false,
+                             "reopen":  true,
+                             "setSecurityReview":  true,
+                             "resolveSecurityReview":  false
+                         },
+    "rejectReasonCategories":  [
+                                   {
+                                       "id":  "SECURITY_RISK",
+                                       "label":  "Riesgo de seguridad"
+                                   },
+                                   {
+                                       "id":  "OUT_OF_COVERAGE",
+                                       "label":  "Fuera de cobertura"
+                                   },
+                                   {
+                                       "id":  "SERVICE_NOT_OFFERED",
+                                       "label":  "Servicio no ofrecido"
+                                   },
+                                   {
+                                       "id":  "REQUIREMENTS_NOT_MET",
+                                       "label":  "Condiciones o requisitos incumplidos"
+                                   },
+                                   {
+                                       "id":  "NO_AVAILABILITY",
+                                       "label":  "Falta de disponibilidad"
+                                   },
+                                   {
+                                       "id":  "OTHER",
+                                       "label":  "Otro"
+                                   }
+                               ]
+}

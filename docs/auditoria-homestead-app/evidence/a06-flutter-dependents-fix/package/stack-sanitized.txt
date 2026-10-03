@@ -1,0 +1,50 @@
+00:00 +0: loading C:/Proyectos/HOMESTEAD SERVICES/apps/homestead_control_mobile/test/dialog_controller_dispose_race_test.dart
+00:00 +0: legacy dispose-after-showDialog races InheritedElement dependents
+GÚ…GÚ…GÚÌ EXCEPTION CAUGHT BY WIDGETS LIBRARY GÚPGÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…
+A TextEditingController was used after being disposed.
+Once you have called dispose() on a TextEditingController, it can no longer be used.
+  TextField:file:///C:/Proyectos/HOMESTEAD%20SERVICES/apps/homestead_control_mobile/test/dialog_controller_dispose_race_test.dart:14:20
+When the exception was thrown, this was the stack:
+#0      ChangeNotifier.debugAssertNotDisposed.<anonymous closure> (package:flutter/src/foundation/change_notifier.dart:182:9)
+#1      ChangeNotifier.debugAssertNotDisposed (package:flutter/src/foundation/change_notifier.dart:189:6)
+#2      ChangeNotifier.addListener (package:flutter/src/foundation/change_notifier.dart:271:27)
+#3      _MergingListenable.addListener (package:flutter/src/foundation/change_notifier.dart:503:14)
+#4      _AnimatedState.didUpdateWidget (package:flutter/src/widgets/transitions.dart:119:25)
+#5      StatefulElement.update (package:flutter/src/widgets/framework.dart:5893:55)
+#6      Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#7      SingleChildRenderObjectElement.update (package:flutter/src/widgets/framework.dart:7025:14)
+#8      Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#9      ComponentElement.performRebuild (package:flutter/src/widgets/framework.dart:5747:16)
+#10     StatefulElement.performRebuild (package:flutter/src/widgets/framework.dart:5884:11)
+#11     Element.rebuild (package:flutter/src/widgets/framework.dart:5435:7)
+#12     StatefulElement.update (package:flutter/src/widgets/framework.dart:5909:5)
+#13     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#14     ComponentElement.performRebuild (package:flutter/src/widgets/framework.dart:5747:16)
+#15     StatefulElement.performRebuild (package:flutter/src/widgets/framework.dart:5884:11)
+#16     Element.rebuild (package:flutter/src/widgets/framework.dart:5435:7)
+#17     StatefulElement.update (package:flutter/src/widgets/framework.dart:5909:5)
+#18     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#19     SingleChildRenderObjectElement.update (package:flutter/src/widgets/framework.dart:7025:14)
+#20     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#21     ComponentElement.performRebuild (package:flutter/src/widgets/framework.dart:5747:16)
+#22     StatefulElement.performRebuild (package:flutter/src/widgets/framework.dart:5884:11)
+#23     Element.rebuild (package:flutter/src/widgets/framework.dart:5435:7)
+#24     StatefulElement.update (package:flutter/src/widgets/framework.dart:5909:5)
+#25     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#26     SingleChildRenderObjectElement.update (package:flutter/src/widgets/framework.dart:7025:14)
+#27     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#28     SingleChildRenderObjectElement.update (package:flutter/src/widgets/framework.dart:7025:14)
+#29     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#30     SingleChildRenderObjectElement.update (package:flutter/src/widgets/framework.dart:7025:14)
+#31     Element.updateChild (package:flutter/src/widgets/framework.dart:3982:15)
+#32     ComponentElement.performRebuild (package:flutter/src/widgets/framework.dart:5747:16)
+#33     StatefulElement.performRebuild (package:flutter/src/widgets/framework.dart:5884:11)
+#34     Element.rebuild (package:flutter/src/widgets/framework.dart:5435:7)
+#35     BuildScope._tryRebuild (package:flutter/src/widgets/framework.dart:2695:15)
+#36     BuildScope._flushDirtyElements (package:flutter/src/widgets/framework.dart:2752:11)
+#37     BuildOwner.buildScope (package:flutter/src/widgets/framework.dart:3056:18)
+#52     main.<anonymous closure> (file:///C:/Proyectos/HOMESTEAD%20SERVICES/apps/homestead_control_mobile/test/dialog_controller_dispose_race_test.dart:55:18)
+GÚ…GÚ…GÚÌ EXCEPTION CAUGHT BY SCHEDULER LIBRARY GÚPGÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…GÚ…
+When the exception was thrown, this was the stack:
+#2      RenderObject.getTransformTo (package:flutter/src/rendering/object.dart:3530:12)
+#3      RenderBox.localToGlobal (package:flutter/src/rendering/box.dart:3091:39)

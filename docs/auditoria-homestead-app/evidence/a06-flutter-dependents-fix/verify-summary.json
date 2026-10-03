@@ -1,0 +1,19 @@
+{
+    "secId":  "HS-2026-000046",
+    "rejId":  "HS-2026-000047",
+    "reason":  "flutter-fix-402f0d03",
+    "rejReason":  "reject-fix-d5acffe2",
+    "secConfirmRed":  false,
+    "afterBackRed":  false,
+    "reopenRed":  false,
+    "rejectOpenRed":  false,
+    "rejectAfterRed":  false,
+    "securityReviewRequired":  true,
+    "securityReviewReason":  "flutter-fix-402f0d03",
+    "rejectStatus":  "NEW",
+    "dispositionKind":  "",
+    "historyCount":  0,
+    "verifyExceptions":  0,
+    "apk":  "1.1.10+12",
+    "sha256":  "EC96485F8B6C16F7313998BD94C9D44AA4F5097F22386226EDBF09E1A95B833B"
+}
