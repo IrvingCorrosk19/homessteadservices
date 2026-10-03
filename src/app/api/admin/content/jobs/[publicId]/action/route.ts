@@ -12,6 +12,7 @@ const ACTIONS = new Set<ControlJobAction>([
   "reject",
   "publish_now",
   "retry_platform",
+  "reprocess_media",
 ]);
 
 export async function POST(

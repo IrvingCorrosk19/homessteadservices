@@ -39,7 +39,28 @@ export type ControlJobAction =
   | "reschedule"
   | "reject"
   | "publish_now"
-  | "retry_platform";
+  | "retry_platform"
+  | "reprocess_media";
+
+function assessPublishImage(publicId: string) {
+  const branded = listAssets(publicId, "BRANDED")
+    .filter((asset) => asset.storedFilename.includes("-feed"))
+    .at(-1);
+  const original = listAssets(publicId, "ORIGINAL", 0)[0];
+  if (!branded) {
+    return { ready: false as const, cause: "image_missing", branded: null, original };
+  }
+  const width = branded.width || 0;
+  const height = branded.height || 0;
+  if (width < 320 || height < 320) {
+    return { ready: false as const, cause: "image_too_small", branded, original };
+  }
+  const ratio = width / height;
+  if (ratio < 0.8 - 0.01 || ratio > 1.91 + 0.01) {
+    return { ready: false as const, cause: "image_aspect_unsupported", branded, original };
+  }
+  return { ready: true as const, cause: "", branded, original };
+}
 
 function receiptHash(input: {
   key: string;
@@ -126,8 +147,19 @@ export function toControlJobCard(publicId: string) {
   });
   const version = latestVersion(publicId);
   const settings = getContentSettings();
-  const branded = listAssets(publicId, "BRANDED").at(-1);
-  const original = listAssets(publicId, "ORIGINAL", 0)[0];
+  const image = assessPublishImage(publicId);
+  const branded = image.branded;
+  const original = image.original;
+  const processingPhase =
+    job.status === "PROCESSING" || job.status === "RECEIVING"
+      ? "processing"
+      : job.status === "FAILED" && !image.ready
+        ? "error"
+        : image.ready
+          ? "ready"
+          : job.status === "DRAFT"
+            ? "uploading"
+            : "error";
   return {
     publicId: job.publicId,
     status: job.status,
@@ -149,7 +181,17 @@ export function toControlJobCard(publicId: string) {
       ...row,
       errorLabel: row.error ? humanPublicationError(row.error) : "",
     })),
-    previewAssetId: branded?.id || original?.id || null,
+    previewAssetId: branded?.id || null,
+    originalAssetId: original?.id || null,
+    brandedAssetId: branded?.id || null,
+    publishImageReady: image.ready,
+    publishImageIssue: image.cause,
+    publishImageIssueLabel: image.cause ? humanPublicationError(image.cause) : "",
+    processingPhase,
+    brandedWidth: branded?.width || null,
+    brandedHeight: branded?.height || null,
+    originalWidth: original?.width || null,
+    originalHeight: original?.height || null,
     updatedAt: job.updatedAt,
     createdAt: job.createdAt,
     paused: settings.paused,
@@ -160,14 +202,23 @@ export function toControlJobCard(publicId: string) {
 export function availableControlActions(job: NonNullable<ReturnType<typeof toControlJobCard>>) {
   const pending = job.publications.some((row) => !row.dryRun && row.status !== "PUBLISHED");
   const uncertain = job.publications.some((row) => row.status === "UNCERTAIN" || row.status === "PUBLISHING");
+  const imageOk = job.publishImageReady === true;
   return {
-    approve: ["pending_approval", "needs_review"].includes(job.displayState) && !job.paused,
-    approveAndSchedule: ["pending_approval", "needs_review", "approved_unscheduled"].includes(job.displayState) && !job.paused,
+    approve: imageOk && ["pending_approval", "needs_review"].includes(job.displayState) && !job.paused,
+    approveAndSchedule:
+      imageOk &&
+      ["pending_approval", "needs_review", "approved_unscheduled"].includes(job.displayState) &&
+      !job.paused,
     reschedule: job.status === "SCHEDULED" && !job.paused,
     reject: ["pending_approval", "approved_unscheduled", "scheduled", "needs_review"].includes(job.displayState),
-    publishNow: ["scheduled", "approved_unscheduled", "partially_published"].includes(job.displayState) && !job.paused,
-    retryPlatform: (job.displayState === "partially_published" || pending) && !uncertain && !job.paused,
+    publishNow:
+      imageOk &&
+      ["scheduled", "approved_unscheduled", "partially_published"].includes(job.displayState) &&
+      !job.paused,
+    retryPlatform: imageOk && (job.displayState === "partially_published" || pending) && !uncertain && !job.paused,
     retryBlockedByUncertain: uncertain,
+    reprocessMedia: Boolean(job.originalAssetId) && (!imageOk || job.displayState === "needs_review"),
+    blockedByIncompleteImage: !imageOk,
   };
 }
 
@@ -430,7 +481,7 @@ export async function runControlJobAction(input: {
   if (!job) return { ok: false as const, error: "missing" as const };
 
   const versionGate = assertVersion(input.publicId, input.version);
-  if (!versionGate.ok && input.action !== "reschedule") {
+  if (!versionGate.ok && input.action !== "reschedule" && input.action !== "reprocess_media") {
     return versionGate;
   }
 
@@ -448,7 +499,31 @@ export async function runControlJobAction(input: {
     return payload;
   }
 
+  if (input.action === "reprocess_media") {
+    const { reprocessControlBrand } = await import("@/lib/control-intake");
+    const result = await reprocessControlBrand(input.publicId);
+    const payload = {
+      ok: result.ok,
+      error: result.ok ? "" : result.error,
+      invalidatedApproval: result.ok ? true : false,
+      job: toControlJobCard(input.publicId),
+    };
+    writeReceipt({
+      key: input.idempotencyKey || "",
+      publicId: input.publicId,
+      action: input.action,
+      actor: input.actor,
+      hash,
+      result: payload,
+    });
+    return payload;
+  }
+
   if (input.action === "approve" || input.action === "approve_and_schedule") {
+    const image = assessPublishImage(input.publicId);
+    if (!image.ready) {
+      return { ok: false as const, error: image.cause || "image_missing" };
+    }
     if (job.status === "NEEDS_REVIEW") {
       updateJob(input.publicId, { status: "AWAITING_APPROVAL" });
     }
@@ -517,6 +592,10 @@ export async function runControlJobAction(input: {
 
   if (input.action === "publish_now" || input.action === "retry_platform") {
     const card = toControlJobCard(input.publicId);
+    const image = assessPublishImage(input.publicId);
+    if (!image.ready) {
+      return { ok: false as const, error: image.cause || "image_missing" };
+    }
     if (input.action === "retry_platform" && card?.publications.some((row) => row.status === "UNCERTAIN")) {
       return { ok: false as const, error: "uncertain_pending" as const };
     }

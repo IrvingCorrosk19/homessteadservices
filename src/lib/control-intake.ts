@@ -7,6 +7,8 @@ import {
   getJobByPublicId,
   latestVersion,
   listAssets,
+  overwriteBrandedFeed,
+  readAssetBytes,
   recordContentEvent,
   saveVersion,
   sha256Of,
@@ -16,8 +18,9 @@ import {
 } from "@/lib/content-catalog";
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import { nextBatchPublicId } from "@/lib/content-photo-batch";
-import { applyHomesteadWatermark, enhanceDeterministic, metadataOf, toJpeg } from "@/lib/content-images";
-import { isolatedCopyFallback } from "@/lib/control-isolation";
+import { brandedSocialSet, metadataOf, toJpeg } from "@/lib/content-images";
+import { isControlIsolated, isolatedCopyFallback } from "@/lib/control-isolation";
+import { validatePublishImage } from "@/lib/content-media-url";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { sniffImage } from "@/lib/photos";
 
@@ -50,23 +53,53 @@ function writeStaged(batchKey: string, hash: string, ext: string, bytes: Buffer)
   return relative.replaceAll("\\", "/");
 }
 
+function controlCopyFallback(publicId: string) {
+  if (isControlIsolated()) return isolatedCopyFallback(publicId);
+  return {
+    serviceGuess: "servicio del hogar",
+    ratings: [{ index: 1, label: "PRIMARY" as const, notes: "Imagen recibida." }],
+    privacy: { people: false, plates: false, documents: false, warning: "" },
+    copy: {
+      full: `Trabajo documentado por Homestead. Folio ${publicId}. Revisa la foto y el texto antes de publicar.`,
+      commercial: `Homestead Services. Folio ${publicId}. Confirma el texto antes de publicar.`,
+      warm: `Así llegó este trabajo a Homestead. Folio ${publicId}.`,
+      educational: `Mantenimiento y reparaciones en Panamá. Folio ${publicId}.`,
+      cta: "Agenda en homestead.lat",
+      hashtags: ["#HomesteadServices", "#Panama"],
+    },
+  };
+}
+
+/**
+ * Brands a Control photo for Meta feed publish:
+ * cover-crop to 1080×1350 (4:5) + watermark. Plain enhance-only is not enough —
+ * tall phone photos (e.g. 1200×1600 = 0.75) fail Meta aspect validation.
+ */
 export async function brandControlJob(publicId: string, bytes: Buffer) {
   const job = getJobByPublicId(publicId);
-  if (!job) return { ok: false as const, error: "missing" };
+  if (!job) return { ok: false as const, error: "missing" as const, assetId: 0 };
   const jpeg = await toJpeg(bytes);
-  const enhanced = await enhanceDeterministic(jpeg);
-  let branded = enhanced;
+  let branded: Buffer;
   let width: number | null = null;
   let height: number | null = null;
   try {
-    const marked = await applyHomesteadWatermark(enhanced);
-    branded = marked.bytes;
-    width = marked.width;
-    height = marked.height;
+    const set = await brandedSocialSet(jpeg);
+    branded = set.feed.bytes;
+    width = set.feed.width;
+    height = set.feed.height;
   } catch {
-    branded = enhanced;
+    return { ok: false as const, error: "process_failed" as const, assetId: 0 };
   }
   const meta = width && height ? { width, height } : await metadataOf(branded);
+  const valid = validatePublishImage({
+    bytes: branded,
+    mime: "image/jpeg",
+    width: meta.width,
+    height: meta.height,
+  });
+  if (!valid.ok) {
+    return { ok: false as const, error: valid.cause, assetId: 0 };
+  }
   const version = latestVersion(publicId)?.version || 1;
   storeDerivedAsset({
     job,
@@ -81,7 +114,10 @@ export async function brandControlJob(publicId: string, bytes: Buffer) {
     width: meta.width,
     height: meta.height,
   });
-  const copy = isolatedCopyFallback(publicId);
+  const asset = listAssets(publicId, "BRANDED", version).find((a) =>
+    a.storedFilename.includes("-001-feed"),
+  );
+  const copy = controlCopyFallback(publicId);
   if (!latestVersion(publicId)) {
     saveVersion({
       job,
@@ -90,7 +126,7 @@ export async function brandControlJob(publicId: string, bytes: Buffer) {
       copy: copy.copy.full,
       cta: copy.copy.cta,
       hashtags: copy.copy.hashtags.join(" "),
-      prompt: "control-local",
+      prompt: isControlIsolated() ? "control-isolated" : "control-local",
       privacyNote: copy.privacy.warning,
     });
   }
@@ -101,7 +137,58 @@ export async function brandControlJob(publicId: string, bytes: Buffer) {
     lastError: null,
   });
   recordContentEvent(publicId, "CONTENT_READY", "control-intake");
-  return { ok: true as const };
+  return { ok: true as const, assetId: asset?.id || 0 };
+}
+
+/** Re-brand from ORIGINAL for pieces processed without feed crop (e.g. aspect 0.75). */
+export async function reprocessControlBrand(publicId: string) {
+  const job = getJobByPublicId(publicId);
+  if (!job) return { ok: false as const, error: "missing" as const };
+  const original = listAssets(publicId, "ORIGINAL", 0)[0];
+  if (!original) return { ok: false as const, error: "original_missing" as const };
+  const bytes = readAssetBytes(original);
+  if (!bytes) return { ok: false as const, error: "original_unreadable" as const };
+
+  updateJob(publicId, { status: "PROCESSING", lastError: null, approvedVersion: null });
+  try {
+    const jpeg = await toJpeg(bytes);
+    const set = await brandedSocialSet(jpeg);
+    const valid = validatePublishImage({
+      bytes: set.feed.bytes,
+      mime: "image/jpeg",
+      width: set.feed.width,
+      height: set.feed.height,
+    });
+    if (!valid.ok) {
+      updateJob(publicId, { status: "FAILED", lastError: valid.cause });
+      return { ok: false as const, error: valid.cause };
+    }
+    const existing = listAssets(publicId, "BRANDED").filter((a) => a.storedFilename.includes("-feed")).at(-1);
+    if (existing) {
+      overwriteBrandedFeed(publicId, set.feed.bytes, set.feed.width, set.feed.height);
+    } else {
+      const branded = await brandControlJob(publicId, bytes);
+      if (!branded.ok) {
+        updateJob(publicId, { status: "FAILED", lastError: branded.error });
+        return { ok: false as const, error: branded.error };
+      }
+    }
+    updateJob(publicId, {
+      status: "AWAITING_APPROVAL",
+      lastError: null,
+      approvedVersion: null,
+    });
+    recordContentEvent(publicId, "CONTENT_READY", "reprocess-brand");
+    return {
+      ok: true as const,
+      width: set.feed.width,
+      height: set.feed.height,
+      invalidatedApproval: true as const,
+    };
+  } catch {
+    updateJob(publicId, { status: "FAILED", lastError: "process_failed" });
+    return { ok: false as const, error: "process_failed" as const };
+  }
 }
 
 function actorOwnsOriginal(publicId: string, actor: string) {

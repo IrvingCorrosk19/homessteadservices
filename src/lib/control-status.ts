@@ -119,6 +119,12 @@ export function humanPublicationError(error: string) {
     simulated_graph_denied: "Ambas redes simularon un rechazo.",
     pages_read_engagement: "Meta rechazó la Page: faltan permisos de la Página.",
     image_missing: "No hay imagen aprobada para publicar.",
+    image_aspect_unsupported:
+      "La imagen no tiene proporción válida para Meta (debe ser entre 4:5 y 1.91:1). Reprocesa el recorte a feed.",
+    image_too_small: "La imagen es demasiado pequeña para publicar.",
+    image_too_large: "La imagen supera el tamaño máximo permitido.",
+    image_not_jpeg: "La imagen final no es JPEG.",
+    process_failed: "El procesamiento de la imagen falló. Reintenta la carga.",
     stale_version: "La versión aprobada ya no es la vigente.",
     paused: "El estudio está en pausa.",
     locked: "Ya hay una publicación en curso.",
