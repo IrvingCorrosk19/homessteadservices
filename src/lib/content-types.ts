@@ -117,5 +117,6 @@ export type ContentVersion = {
   hashtags: string;
   prompt: string;
   privacyNote: string;
+  mediaOrderJson: string;
   createdAt: string;
 };

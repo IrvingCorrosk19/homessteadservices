@@ -707,10 +707,7 @@ export async function applyServiceRequestDisposition(input: {
       /* lead may be absent */
     }
     try {
-      addRevenueEvent(input.requestId, "SERVICE_REQUEST_REOPENED", {
-        actor: input.actor,
-        previousStatus: "CANCELLED",
-      });
+      addRevenueEvent(input.requestId, "SERVICE_REQUEST_REOPENED");
     } catch {
       /* optional */
     }

@@ -8,4 +8,15 @@ terminals
 agent-transcripts
 public/images/raw
 data
+docs
+apps
+backups
+evidence
+tmp-incident
+tmp-brand-deploy-wip
+*.pdf
+*.mp4
+*.docx
+*.png
+*.zip
 

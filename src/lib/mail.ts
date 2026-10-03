@@ -160,3 +160,27 @@ export async function sendTransactionalEmail(input: {
     return { ok: false as const, error: "smtp_failed" };
   }
 }
+
+/** Customer-facing disposition mail. Caller must never include internal notes in body. */
+export async function sendCustomerDispositionEmail(input: {
+  to: string;
+  publicId: string;
+  body: string;
+}) {
+  const text = input.body.trim();
+  if (text.length < 8) return { ok: false as const, error: "invalid_message" };
+  const subject = `Homestead Services · ${input.publicId}`;
+  const html = `<p>${text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br/>")}</p>`;
+  const result = await sendTransactionalEmail({
+    to: input.to,
+    subject,
+    text,
+    html,
+  });
+  if (!result.ok) throw new Error(result.error || "smtp_failed");
+  return result;
+}
