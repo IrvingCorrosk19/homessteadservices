@@ -6,7 +6,7 @@ import { deliverAutonomousSignalToOpsCenter } from "@/lib/autonomous/notificatio
 export const runtime = "nodejs";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ signalId: string }> }) {
-  const gate = await requireAdminSession();
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { signalId } = await ctx.params;
   const signal = getSignalById(signalId);

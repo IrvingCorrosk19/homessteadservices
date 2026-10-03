@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminMutation } from "@/lib/control-auth";
+import { controlActor, requireAdminMutation } from "@/lib/control-auth";
 import { runControlJobAction, type ControlJobAction } from "@/lib/control-service";
 import { logInfo } from "@/lib/log";
 
@@ -37,7 +37,7 @@ export async function POST(
     publicId,
     action,
     version: Number(body?.version || 0),
-    actor: "admin-web",
+    actor: controlActor(request),
     confirm: Boolean(body?.confirm),
     idempotencyKey: String(body?.idempotencyKey || request.headers.get("idempotency-key") || ""),
   });

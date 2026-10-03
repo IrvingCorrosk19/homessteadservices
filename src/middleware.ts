@@ -22,12 +22,20 @@ function withAdminPath(request: NextRequest) {
   return NextResponse.next({ request: { headers } });
 }
 
+function bearerToken(request: NextRequest) {
+  const header = request.headers.get("authorization") || "";
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match?.[1]?.trim() || "";
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isLoginApi = pathname === "/api/admin/login";
   if (isPublicAdminAsset(pathname) || isLoginApi) return withAdminPath(request);
 
-  const token = request.cookies.get(adminCookieName())?.value;
+  const cookieToken = request.cookies.get(adminCookieName())?.value || "";
+  const headerToken = bearerToken(request);
+  const token = headerToken || cookieToken;
   const valid = await isValidAdminSessionToken(token);
   if (valid) return withAdminPath(request);
 

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
+import { controlActor, requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
 import { getContentSettings } from "@/lib/content-catalog";
 import { setStudioPaused } from "@/lib/control-service";
 import { logInfo } from "@/lib/log";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const gate = await requireAdminSession();
+export async function GET(request: Request) {
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const settings = getContentSettings();
   return NextResponse.json({
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (typeof body?.paused !== "boolean") {
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  const result = setStudioPaused(body.paused, "admin-web");
+  const result = setStudioPaused(body.paused, controlActor(request));
   logInfo("ControlStudioPause", { stage: body.paused ? "paused" : "resumed" });
   return NextResponse.json(result);
 }

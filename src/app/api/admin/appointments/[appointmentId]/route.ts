@@ -20,8 +20,8 @@ const RESCHEDULE_STATUS: Record<string, number> = {
   conflict: 409,
 };
 
-export async function GET(_request: Request, { params }: Params) {
-  const gate = await requireAdminSession();
+export async function GET(request: Request, { params }: Params) {
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { appointmentId } = await params;
   if (!APPOINTMENT_ID_PATTERN.test(appointmentId)) {

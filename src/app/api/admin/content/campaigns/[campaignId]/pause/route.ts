@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminMutation } from "@/lib/control-auth";
+import { controlActor, requireAdminMutation } from "@/lib/control-auth";
 import { setControlCampaignPaused } from "@/lib/control-service";
 import { logInfo } from "@/lib/log";
 
@@ -16,7 +16,7 @@ export async function POST(
   if (typeof body?.paused !== "boolean") {
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  const result = setControlCampaignPaused(campaignId, body.paused, "admin-web");
+  const result = setControlCampaignPaused(campaignId, body.paused, controlActor(request));
   logInfo("ControlCampaignPause", { contentJobId: campaignId, stage: body.paused ? "paused" : "resumed" });
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

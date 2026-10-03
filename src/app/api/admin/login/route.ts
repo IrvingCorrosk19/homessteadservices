@@ -9,6 +9,7 @@ import {
   safeAdminReturnUrl,
   verifyAdminPassword,
 } from "@/lib/admin-auth";
+import { isControlMobileClient } from "@/lib/control-auth";
 import { persistAdminSession } from "@/lib/admin-session-store";
 import { logError, logInfo } from "@/lib/log";
 
@@ -52,12 +53,19 @@ export async function POST(request: Request) {
   persistAdminSession(token);
   const csrf = await createAdminCsrfToken(token);
   const redirectTo = safeAdminReturnUrl(body?.returnUrl);
-  const response = NextResponse.json({ ok: true, redirect: redirectTo, csrf });
+  const mobile = isControlMobileClient(request);
+  const response = NextResponse.json({
+    ok: true,
+    redirect: redirectTo,
+    csrf,
+    // Session body only for the native Control client. Web keeps httpOnly cookie.
+    ...(mobile ? { session: token, expiresInDays: 7 } : {}),
+  });
   response.cookies.set(adminCookieName(), token, adminCookieOptions());
   response.cookies.set(adminCsrfCookieName(), csrf, {
     ...adminCookieOptions(),
     httpOnly: false,
   });
-  logInfo("AdminLoginSucceeded", {});
+  logInfo("AdminLoginSucceeded", { stage: mobile ? "mobile" : "web" });
   return response;
 }

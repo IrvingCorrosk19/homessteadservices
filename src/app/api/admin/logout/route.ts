@@ -2,15 +2,23 @@ import { NextResponse } from "next/server";
 import { adminCookieName, adminCsrfCookieName } from "@/lib/admin-auth";
 import { revokeAdminSession } from "@/lib/admin-session-store";
 
-export async function POST(request: Request) {
-  const token =
+function sessionFromRequest(request: Request) {
+  const auth = request.headers.get("authorization") || "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(auth.trim())?.[1]?.trim();
+  if (bearer) return bearer;
+  return (
     request.headers
       .get("cookie")
       ?.split(";")
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${adminCookieName()}=`))
-      ?.slice(adminCookieName().length + 1) || "";
-  revokeAdminSession(decodeURIComponent(token));
+      ?.slice(adminCookieName().length + 1) || ""
+  );
+}
+
+export async function POST(request: Request) {
+  const token = decodeURIComponent(sessionFromRequest(request));
+  revokeAdminSession(token);
   const response = NextResponse.json({ ok: true });
   response.cookies.set(adminCookieName(), "", {
     httpOnly: true,

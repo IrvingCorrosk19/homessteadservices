@@ -8,7 +8,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ batchKey: string }> },
 ) {
-  const gate = await requireAdminSession();
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { batchKey } = await context.params;
   return NextResponse.json({ ok: true, items: listControlIntake(batchKey) });

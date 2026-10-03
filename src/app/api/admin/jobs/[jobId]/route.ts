@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 
 type Params = { params: Promise<{ jobId: string }> };
 
-export async function GET(_request: Request, { params }: Params) {
-  const gate = await requireAdminSession();
+export async function GET(request: Request, { params }: Params) {
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { jobId } = await params;
   if (!JOB_ID_PATTERN.test(jobId)) return NextResponse.json({ ok: false }, { status: 400 });

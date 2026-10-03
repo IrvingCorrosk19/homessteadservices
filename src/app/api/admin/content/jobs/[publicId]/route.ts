@@ -8,7 +8,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ publicId: string }> },
 ) {
-  const session = await requireAdminSession();
+  const session = await requireAdminSession(request);
   if (!session.ok) {
     return NextResponse.json({ ok: false, error: session.error }, { status: session.status });
   }

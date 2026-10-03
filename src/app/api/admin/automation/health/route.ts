@@ -6,8 +6,8 @@ import { failedWaveCOutbox, jobMetrics } from "@/lib/job-store";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const gate = await requireAdminSession();
+export async function GET(request: Request) {
+  const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const box = outboxSnapshot();
   const webhook = await inspectTelegramWebhook({ repair: false }).catch(() => null);

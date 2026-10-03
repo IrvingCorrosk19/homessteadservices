@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminMutation } from "@/lib/control-auth";
+import { controlActor, requireAdminMutation } from "@/lib/control-auth";
 import { ingestControlPhotos } from "@/lib/control-intake";
 import { MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   const result = await ingestControlPhotos({
     files: buffers,
     note,
-    actor: "admin-web",
+    actor: controlActor(request),
   });
   return NextResponse.json(result, { status: result.ok ? 202 : 400 });
 }
