@@ -18,8 +18,10 @@ export async function GET(request: Request) {
     status: 200,
     headers: {
       "Content-Type": asset.mimeType || "image/jpeg",
-      "Cache-Control": "private, max-age=120",
+      // BRANDED can be overwritten in place (same asset id) after reprocess — do not cache.
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
+      ETag: `"${asset.id}-${asset.size}-${asset.width || 0}x${asset.height || 0}"`,
     },
   });
 }

@@ -33,7 +33,7 @@ export async function enhanceDeterministic(bytes: Buffer) {
 async function coverCrop(bytes: Buffer, width: number, height: number) {
   return sharp(bytes)
     .rotate()
-    .resize(width, height, { fit: "cover", position: "attention" })
+    .resize(width, height, { fit: "cover", position: "centre" })
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer();
 }
@@ -42,7 +42,13 @@ export async function applyHomesteadWatermark(bytes: Buffer) {
   const meta = await sharp(bytes).rotate().metadata();
   const width = meta.width || 1080;
   const logoWidth = Math.max(96, Math.round(width * 0.16));
-  const logo = await sharp(readFileSync(logoPath())).resize({ width: logoWidth }).png().toBuffer();
+  // Force sRGB/alpha so libvips never hits invalid Interpretation "space=32" on logo PNG.
+  const logo = await sharp(readFileSync(logoPath()))
+    .ensureAlpha()
+    .toColorspace("srgb")
+    .resize({ width: logoWidth })
+    .png()
+    .toBuffer();
   const logoMeta = await sharp(logo).metadata();
   const overlay = await sharp({
     create: {
@@ -58,6 +64,7 @@ export async function applyHomesteadWatermark(bytes: Buffer) {
 
   const output = await sharp(bytes)
     .rotate()
+    .toColorspace("srgb")
     .composite([{ input: overlay, gravity: "southeast" }])
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer({ resolveWithObject: true });

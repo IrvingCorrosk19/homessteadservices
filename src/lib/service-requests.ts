@@ -250,6 +250,8 @@ function migrateContentStudio(database: Database.Database) {
   addJobCol("live_once", "live_once INTEGER NOT NULL DEFAULT 0");
   addJobCol("campaign_public_id", "campaign_public_id TEXT NOT NULL DEFAULT ''");
   addJobCol("photo_batch_id", "photo_batch_id TEXT NOT NULL DEFAULT ''");
+  addJobCol("publish_mode", "publish_mode TEXT NOT NULL DEFAULT ''");
+  addJobCol("media_order_json", "media_order_json TEXT NOT NULL DEFAULT ''");
   database.exec(`
     CREATE TABLE IF NOT EXISTS content_batch_counters (
       year INTEGER PRIMARY KEY,
@@ -576,6 +578,55 @@ function migrateServiceRequestCancellation(database: Database.Database) {
   add("utm_json", "utm_json TEXT NOT NULL DEFAULT ''");
   add("hs_ref", "hs_ref TEXT NOT NULL DEFAULT ''");
   add("is_test", "is_test INTEGER NOT NULL DEFAULT 0");
+  add("disposition_kind", "disposition_kind TEXT NOT NULL DEFAULT ''");
+  add("internal_note", "internal_note TEXT NOT NULL DEFAULT ''");
+  add("customer_message_draft", "customer_message_draft TEXT NOT NULL DEFAULT ''");
+  add("customer_notify_status", "customer_notify_status TEXT NOT NULL DEFAULT 'NONE'");
+  add("customer_notify_channel", "customer_notify_channel TEXT NOT NULL DEFAULT ''");
+  add("customer_notify_attempts", "customer_notify_attempts INTEGER NOT NULL DEFAULT 0");
+  add("customer_notify_last_error", "customer_notify_last_error TEXT NOT NULL DEFAULT ''");
+  add("security_review_required", "security_review_required INTEGER NOT NULL DEFAULT 0");
+  add("security_review_reason", "security_review_reason TEXT NOT NULL DEFAULT ''");
+  add("security_review_set_at", "security_review_set_at TEXT");
+  add("security_review_set_by", "security_review_set_by TEXT NOT NULL DEFAULT ''");
+  add("security_review_resolved_at", "security_review_resolved_at TEXT");
+  add("security_review_resolved_by", "security_review_resolved_by TEXT NOT NULL DEFAULT ''");
+  add("reopen_count", "reopen_count INTEGER NOT NULL DEFAULT 0");
+  add("last_reopened_at", "last_reopened_at TEXT");
+  add("last_reopened_by", "last_reopened_by TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS service_request_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '',
+      previous_status TEXT NOT NULL DEFAULT '',
+      new_status TEXT NOT NULL DEFAULT '',
+      reason_category TEXT NOT NULL DEFAULT '',
+      reason_public TEXT NOT NULL DEFAULT '',
+      internal_note TEXT NOT NULL DEFAULT '',
+      customer_message TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sr_audit_public
+      ON service_request_audit (public_id, id);
+    CREATE TABLE IF NOT EXISTS service_request_notify_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'EMAIL',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sr_notify_pending
+      ON service_request_notify_outbox (status, id);
+  `);
 }
 
 function migrateRevenueEngine(database: Database.Database) {

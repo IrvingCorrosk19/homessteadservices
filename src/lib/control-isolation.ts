@@ -7,9 +7,29 @@ export type SimulatedGraphScenario =
   | "fail_instagram"
   | "fail_all"
   | "uncertain_facebook";
+export type SimulatedNotifyScenario = "ok" | "fail_once" | "fail";
 
-const calls: Array<{ provider: SimulatedProvider; at: string; detail: string }> = [];
+export type SimulatedCallRecord = {
+  provider: SimulatedProvider;
+  at: string;
+  detail: string;
+  /** Sanitized Graph request snapshot (no tokens). */
+  request?: {
+    method: string;
+    path: string;
+    bodyKeys?: string[];
+    imageUrlCount?: number;
+    childrenCount?: number;
+    mediaType?: string;
+    isCarouselItem?: boolean;
+    attachedMediaCount?: number;
+  };
+};
+
+const calls: SimulatedCallRecord[] = [];
 let graphScenario: SimulatedGraphScenario = "ok";
+let notifyScenario: SimulatedNotifyScenario = "ok";
+let notifyFailBudget = 0;
 
 export function isControlIsolated() {
   return process.env.HOMESTEAD_CONTROL_ISOLATED === "true";
@@ -54,9 +74,18 @@ export function assertIsolatedSecretsCleared() {
   }
 }
 
-export function recordSimulatedCall(provider: SimulatedProvider, detail = "") {
+export function recordSimulatedCall(
+  provider: SimulatedProvider,
+  detail = "",
+  request?: SimulatedCallRecord["request"],
+) {
   const at = new Date().toISOString();
-  calls.push({ provider, at, detail: detail.slice(0, 180) });
+  calls.push({
+    provider,
+    at,
+    detail: detail.slice(0, 180),
+    ...(request ? { request } : {}),
+  });
   logInfo("ControlProviderSimulated", { stage: provider, contentJobId: detail.slice(0, 24) });
 }
 
@@ -74,6 +103,26 @@ export function setSimulatedGraphScenario(scenario: SimulatedGraphScenario) {
 
 export function getSimulatedGraphScenario() {
   return graphScenario;
+}
+
+export function setSimulatedNotifyScenario(scenario: SimulatedNotifyScenario) {
+  notifyScenario = scenario;
+  notifyFailBudget = scenario === "fail_once" ? 1 : scenario === "fail" ? Number.POSITIVE_INFINITY : 0;
+}
+
+export function getSimulatedNotifyScenario() {
+  return notifyScenario;
+}
+
+/** Throws when isolated notify drain should simulate SMTP failure. */
+export function maybeThrowSimulatedNotifyFailure() {
+  if (!isControlIsolated()) return;
+  if (notifyFailBudget <= 0) return;
+  notifyFailBudget -= 1;
+  if (notifyFailBudget <= 0 && notifyScenario === "fail_once") {
+    notifyScenario = "ok";
+  }
+  throw new Error("simulated_smtp_denied");
 }
 
 export function isolatedCopyFallback(publicId: string) {

@@ -16,6 +16,7 @@ import {
 import { getHomesteadDb } from "@/lib/service-requests";
 import { assignStaggeredSlots, formatPanama, recommendPublishAt } from "@/lib/content-queue";
 import { publishJob } from "@/lib/content-publish";
+import { listOrderedBrandedFeeds, parseMediaOrderJson } from "@/lib/content-multi-photo";
 import {
   getCampaignByPublicId,
   listAllCampaigns,
@@ -40,12 +41,22 @@ export type ControlJobAction =
   | "reject"
   | "publish_now"
   | "retry_platform"
-  | "reprocess_media";
+  | "reprocess_media"
+  | "regenerate_copy"
+  | "save_copy"
+  | "update_ai_context";
 
 function assessPublishImage(publicId: string) {
-  const branded = listAssets(publicId, "BRANDED")
-    .filter((asset) => asset.storedFilename.includes("-feed"))
-    .at(-1);
+  const feeds = listAssets(publicId, "BRANDED").filter((asset) => asset.storedFilename.includes("-feed"));
+  const job = getJobByPublicId(publicId);
+  const orderIds = job ? parseMediaOrderJson(job.mediaOrderJson) : [];
+  const branded =
+    (orderIds.length
+      ? orderIds.map((id) => feeds.find((a) => a.id === id)).find(Boolean)
+      : null) ||
+    feeds[0] ||
+    feeds.at(-1) ||
+    null;
   const original = listAssets(publicId, "ORIGINAL", 0)[0];
   if (!branded) {
     return { ready: false as const, cause: "image_missing", branded: null, original };
@@ -97,10 +108,51 @@ function readReceipt(key: string, hash: string) {
     return { conflict: true as const };
   }
   try {
-    return { payload: JSON.parse(row.result_json) as Record<string, unknown> };
+    const payload = JSON.parse(row.result_json) as Record<string, unknown>;
+    if (payload && payload.__pending === true) {
+      return { inflight: true as const };
+    }
+    return { payload };
   } catch {
     return { payload: { ok: true, replayed: true } };
   }
+}
+
+function claimReceipt(input: {
+  key: string;
+  publicId: string;
+  action: string;
+  actor: string;
+  hash: string;
+}): { ok: true } | { conflict: true } | { inflight: true } | { payload: Record<string, unknown> } {
+  if (!input.key) return { ok: true };
+  const existing = readReceipt(input.key, input.hash);
+  if (existing?.conflict) return { conflict: true };
+  if (existing?.inflight) return { inflight: true };
+  if (existing?.payload) return { payload: existing.payload };
+  const info = getHomesteadDb()
+    .prepare(
+      `INSERT OR IGNORE INTO control_action_receipts
+        (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.key,
+      input.publicId,
+      input.action,
+      input.actor.slice(0, 80),
+      JSON.stringify({ __pending: true }),
+      input.hash,
+      new Date().toISOString(),
+    );
+  if (info.changes === 0) {
+    const again = readReceipt(input.key, input.hash);
+    if (again?.conflict) return { conflict: true };
+    if (again?.inflight) return { inflight: true };
+    if (again?.payload) return { payload: again.payload };
+    return { inflight: true };
+  }
+  return { ok: true };
 }
 
 function writeReceipt(input: {
@@ -114,9 +166,12 @@ function writeReceipt(input: {
   if (!input.key) return;
   getHomesteadDb()
     .prepare(
-      `INSERT OR IGNORE INTO control_action_receipts
+      `INSERT INTO control_action_receipts
         (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(idempotency_key) DO UPDATE SET
+         result_json = excluded.result_json,
+         request_hash = excluded.request_hash`,
     )
     .run(
       input.key,
@@ -218,6 +273,15 @@ export function availableControlActions(job: NonNullable<ReturnType<typeof toCon
     retryPlatform: imageOk && (job.displayState === "partially_published" || pending) && !uncertain && !job.paused,
     retryBlockedByUncertain: uncertain,
     reprocessMedia: Boolean(job.originalAssetId) && (!imageOk || job.displayState === "needs_review"),
+    regenerateCopy: ["pending_approval", "needs_review", "approved_unscheduled", "scheduled"].includes(
+      job.displayState,
+    ),
+    saveCopy: ["pending_approval", "needs_review", "approved_unscheduled", "scheduled"].includes(
+      job.displayState,
+    ),
+    updateAiContext: ["pending_approval", "needs_review", "approved_unscheduled", "scheduled"].includes(
+      job.displayState,
+    ),
     blockedByIncompleteImage: !imageOk,
   };
 }
@@ -271,16 +335,51 @@ export function getControlJobDetail(publicId: string) {
     detail: row.detail,
     createdAt: row.created_at,
   }));
+  const mediaVersion = job.approvedVersion || version?.version || 1;
+  let mediaItems = listOrderedBrandedFeeds(publicId, mediaVersion, job.mediaOrderJson).map((asset, index) => ({
+    assetId: asset.id,
+    index,
+    width: asset.width,
+    height: asset.height,
+    size: asset.size,
+    role: asset.role,
+  }));
+  if (!mediaItems.length) {
+    const fallback = listAssets(publicId, "BRANDED")
+      .filter((a) => a.storedFilename.includes("-feed"))
+      .sort((a, b) => a.id - b.id);
+    const orderIds = parseMediaOrderJson(job.mediaOrderJson);
+    const ordered =
+      orderIds.length > 0
+        ? orderIds
+            .map((id) => fallback.find((a) => a.id === id))
+            .filter((a): a is NonNullable<typeof a> => Boolean(a))
+            .concat(fallback.filter((a) => !orderIds.includes(a.id)))
+        : fallback;
+    mediaItems = ordered.map((asset, index) => ({
+      assetId: asset.id,
+      index,
+      width: asset.width,
+      height: asset.height,
+      size: asset.size,
+      role: asset.role,
+    }));
+  }
+  const isAlbum = job.format === "CAROUSEL" || job.publishMode === "album" || mediaItems.length > 1;
   return {
     ...card,
     description: job.description,
     cta: version?.cta || "",
     hashtags: version?.hashtags || "",
     history,
+    format: job.format,
+    publishMode: job.publishMode || (isAlbum ? "album" : "separate"),
+    mediaItems,
     videoSupported: false,
-    carouselSupported: false,
-    laterNote:
-      "Video y carrusel quedan para una fase posterior: el publicador solo envía una imagen JPEG por pieza.",
+    carouselSupported: true,
+    laterNote: isAlbum
+      ? "Álbum: Instagram publica carrusel oficial; Facebook usa multi-foto orgánica (fotos no publicadas + attached_media). Video/Reels no soportados."
+      : "Una imagen por publicación. Elige modo álbum al subir varias fotos para carrusel/multi-foto. Video/Reels no soportados.",
     actions: availableControlActions(card),
   };
 }
@@ -387,7 +486,7 @@ export function getControlBatch(publicId: string) {
     publicId: batch.public_id,
     status: batch.status,
     members,
-    carouselSupported: false,
+    carouselSupported: true,
   };
 }
 
@@ -464,6 +563,8 @@ export async function runControlJobAction(input: {
   actor: string;
   confirm?: boolean;
   idempotencyKey?: string;
+  copy?: string;
+  note?: string;
 }) {
   const hash = receiptHash({
     key: input.idempotencyKey || "",
@@ -473,16 +574,44 @@ export async function runControlJobAction(input: {
     version: input.version,
     confirm: input.confirm,
   });
-  const existing = readReceipt(input.idempotencyKey || "", hash);
-  if (existing?.conflict) return { ok: false as const, error: "idempotency_conflict" as const };
-  if (existing?.payload) return { ...existing.payload, replayed: true };
+  const claimed = claimReceipt({
+    key: input.idempotencyKey || "",
+    publicId: input.publicId,
+    action: input.action,
+    actor: input.actor,
+    hash,
+  });
+  if ("conflict" in claimed && claimed.conflict) return { ok: false as const, error: "idempotency_conflict" as const };
+  if ("inflight" in claimed && claimed.inflight) {
+    return { ok: false as const, error: "idempotency_inflight" as const };
+  }
+  if ("payload" in claimed && claimed.payload) return { ...claimed.payload, replayed: true };
+
+  const finish = (payload: Record<string, unknown>) => {
+    writeReceipt({
+      key: input.idempotencyKey || "",
+      publicId: input.publicId,
+      action: input.action,
+      actor: input.actor,
+      hash,
+      result: payload,
+    });
+    return payload;
+  };
 
   const job = getJobByPublicId(input.publicId);
-  if (!job) return { ok: false as const, error: "missing" as const };
+  if (!job) return finish({ ok: false, error: "missing" });
 
   const versionGate = assertVersion(input.publicId, input.version);
-  if (!versionGate.ok && input.action !== "reschedule" && input.action !== "reprocess_media") {
-    return versionGate;
+  if (
+    !versionGate.ok &&
+    input.action !== "reschedule" &&
+    input.action !== "reprocess_media" &&
+    input.action !== "regenerate_copy" &&
+    input.action !== "save_copy" &&
+    input.action !== "update_ai_context"
+  ) {
+    return finish({ ok: false, error: versionGate.error, current: versionGate.current });
   }
 
   if (input.action === "reject") {
@@ -507,6 +636,78 @@ export async function runControlJobAction(input: {
       error: result.ok ? "" : result.error,
       invalidatedApproval: result.ok ? true : false,
       job: toControlJobCard(input.publicId),
+    };
+    writeReceipt({
+      key: input.idempotencyKey || "",
+      publicId: input.publicId,
+      action: input.action,
+      actor: input.actor,
+      hash,
+      result: payload,
+    });
+    return payload;
+  }
+
+  if (input.action === "regenerate_copy") {
+    const { regenerateControlCopy } = await import("@/lib/control-intake");
+    const result = regenerateControlCopy(input.publicId, input.note);
+    const payload = {
+      ok: result.ok,
+      error: result.ok ? "" : result.error,
+      invalidatedApproval: result.ok ? true : false,
+      job: getControlJobDetail(input.publicId),
+    };
+    writeReceipt({
+      key: input.idempotencyKey || "",
+      publicId: input.publicId,
+      action: input.action,
+      actor: input.actor,
+      hash,
+      result: payload,
+    });
+    return payload;
+  }
+
+  if (input.action === "update_ai_context") {
+    const jobNow = getJobByPublicId(input.publicId);
+    if (!jobNow) return { ok: false as const, error: "missing" as const };
+    const note = String(input.note ?? "").trim().slice(0, 2000);
+    const nextStatus =
+      jobNow.status === "APPROVED" || jobNow.status === "SCHEDULED" || jobNow.status === "NEEDS_REVIEW"
+        ? ("AWAITING_APPROVAL" as const)
+        : jobNow.status;
+    updateJob(input.publicId, {
+      description: note,
+      approvedVersion: null,
+      status: nextStatus,
+    });
+    recordContentEvent(input.publicId, "CONTENT_READY", "ai-context-updated");
+    const payload = {
+      ok: true as const,
+      error: "",
+      invalidatedApproval: true as const,
+      regeneratedCopy: false as const,
+      job: getControlJobDetail(input.publicId),
+    };
+    writeReceipt({
+      key: input.idempotencyKey || "",
+      publicId: input.publicId,
+      action: input.action,
+      actor: input.actor,
+      hash,
+      result: payload,
+    });
+    return payload;
+  }
+
+  if (input.action === "save_copy") {
+    const { saveControlCopy } = await import("@/lib/control-intake");
+    const result = saveControlCopy(input.publicId, input.copy || "");
+    const payload = {
+      ok: result.ok,
+      error: result.ok ? "" : result.error,
+      invalidatedApproval: result.ok ? true : false,
+      job: getControlJobDetail(input.publicId),
     };
     writeReceipt({
       key: input.idempotencyKey || "",
@@ -594,32 +795,33 @@ export async function runControlJobAction(input: {
     const card = toControlJobCard(input.publicId);
     const image = assessPublishImage(input.publicId);
     if (!image.ready) {
-      return { ok: false as const, error: image.cause || "image_missing" };
+      return finish({ ok: false, error: image.cause || "image_missing" });
     }
-    if (input.action === "retry_platform" && card?.publications.some((row) => row.status === "UNCERTAIN")) {
-      return { ok: false as const, error: "uncertain_pending" as const };
+    if (card?.publications.some((row) => row.status === "UNCERTAIN" || row.status === "PUBLISHING")) {
+      return finish({
+        ok: false,
+        error: "uncertain_pending",
+        hint: "Hay un resultado incierto o publicación en curso. Conciliar o revisar el estado antes de reintentar; no se repite a ciegas.",
+        job: card,
+      });
     }
     if (!input.confirm) {
-      return { ok: false as const, error: "confirm_required" as const, preview: previewPublishNow(input.publicId) };
+      return finish({
+        ok: false,
+        error: "confirm_required",
+        preview: previewPublishNow(input.publicId),
+      });
     }
     const published = await publishJob(input.publicId, "now");
-    const payload = {
+    return finish({
       ok: published.ok,
       error: published.ok ? "" : "cause" in published ? published.cause : "publish_failed",
+      results: "results" in published ? published.results : undefined,
       job: toControlJobCard(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
     });
-    return payload;
   }
 
-  return { ok: false as const, error: "unknown_action" as const };
+  return finish({ ok: false, error: "unknown_action" });
 }
 
 export function assertDisplayState(status: ContentStatus, publications: PlatformPublicationView[]) {

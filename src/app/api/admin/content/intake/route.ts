@@ -12,6 +12,8 @@ export async function POST(request: Request) {
   }
   const form = await request.formData();
   const note = String(form.get("note") || "");
+  const publishModeRaw = String(form.get("publishMode") || form.get("publish_mode") || "separate").toLowerCase();
+  const publishMode = publishModeRaw === "album" ? "album" : "separate";
   const files = form.getAll("files").filter((item) => item instanceof File);
   if (!files.length) {
     return NextResponse.json({ ok: false, error: "no_files" }, { status: 400 });
@@ -30,6 +32,8 @@ export async function POST(request: Request) {
     files: buffers,
     note,
     actor: controlActor(request),
+    publishMode,
+    batchKey: String(form.get("batchKey") || form.get("batch_key") || "").trim() || undefined,
   });
   return NextResponse.json(result, { status: result.ok ? 202 : 400 });
 }

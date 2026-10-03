@@ -24,7 +24,7 @@ import { logInfo } from "@/lib/log";
 
 export const ALBUM_WAIT_MS = 1800;
 export const CAROUSEL_UNSUPPORTED =
-  "El publicador actual no publica carruseles en Facebook ni Instagram. Cada pieza sale como 1 imagen. No cambio tu elección: quedan propuestas independientes.";
+  "Desde Telegram cada foto sigue siendo 1 propuesta independiente. El carrusel/multi-foto se publica desde Homestead Control (modo álbum): Instagram usa carrusel oficial y Facebook multi-foto orgánica.";
 
 const albumTimers = new Map<string, ReturnType<typeof setTimeout>>();
 

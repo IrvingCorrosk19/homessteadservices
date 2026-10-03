@@ -91,25 +91,56 @@ function summarizeGraphError(json: GraphJson, fallback: string) {
   return message.replace(/access_token=[^&\s]+/gi, "access_token=[REDACTED]").slice(0, 180);
 }
 
+function summarizeIsolatedGraphBody(body?: Record<string, string>) {
+  if (!body) return undefined;
+  const keys = Object.keys(body).filter((k) => k !== "access_token").sort();
+  const attached = keys.filter((k) => k.startsWith("attached_media")).length;
+  const children = String(body.children || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return {
+    method: "POST" as const,
+    path: "",
+    bodyKeys: keys,
+    imageUrlCount: body.image_url ? 1 : 0,
+    childrenCount: children.length,
+    mediaType: body.media_type || "",
+    isCarouselItem: String(body.is_carousel_item || "") === "true",
+    attachedMediaCount: attached,
+  };
+}
+
 function createIsolatedGraphTransport(): GraphTransport {
   return {
     async request(input) {
-      recordSimulatedCall("meta", `${input.method} ${input.path}`);
-      const scenario = getSimulatedGraphScenario();
       const path = input.path;
+      const snap = summarizeIsolatedGraphBody(input.body);
+      recordSimulatedCall("meta", `${input.method} ${path}`, {
+        method: input.method,
+        path,
+        bodyKeys: snap?.bodyKeys,
+        imageUrlCount: snap?.imageUrlCount,
+        childrenCount: snap?.childrenCount,
+        mediaType: snap?.mediaType,
+        isCarouselItem: snap?.isCarouselItem,
+        attachedMediaCount: snap?.attachedMediaCount,
+      });
+      const scenario = getSimulatedGraphScenario();
       const isFacebookPhoto = path.includes("/photos");
+      const isFacebookFeed = path.includes("/feed");
       const isIgCreate = path.includes("/media") && !path.includes("media_publish") && input.method === "POST";
       const isIgPublish = path.includes("media_publish");
       if (scenario === "fail_all") {
         return { status: 400, json: { error: { message: "simulated_graph_denied" } } };
       }
-      if (scenario === "fail_facebook" && isFacebookPhoto) {
+      if (scenario === "fail_facebook" && (isFacebookPhoto || isFacebookFeed)) {
         return { status: 400, json: { error: { message: "simulated_facebook_denied" } } };
       }
       if (scenario === "fail_instagram" && (isIgCreate || isIgPublish)) {
         return { status: 400, json: { error: { message: "simulated_instagram_denied" } } };
       }
-      if (scenario === "uncertain_facebook" && isFacebookPhoto) {
+      if (scenario === "uncertain_facebook" && (isFacebookPhoto || isFacebookFeed)) {
         return { status: 0, json: { error: { message: "timeout" } } };
       }
       if (input.method === "GET" && path.includes("fields=status_code")) {
@@ -120,6 +151,15 @@ function createIsolatedGraphTransport(): GraphTransport {
           status: 200,
           json: { id: "sim-post", permalink: "https://example.invalid/sim", permalink_url: "https://example.invalid/sim" },
         };
+      }
+      if (isIgCreate && String(input.body?.is_carousel_item || "") === "true") {
+        return { status: 200, json: { id: `sim-child-${Date.now()}-${Math.floor(Math.random() * 999)}` } };
+      }
+      if (isIgCreate && String(input.body?.media_type || "") === "CAROUSEL") {
+        return { status: 200, json: { id: `sim-carousel-${Date.now()}` } };
+      }
+      if (isFacebookFeed) {
+        return { status: 200, json: { id: `sim-feed-${Date.now()}` } };
       }
       return {
         status: 200,

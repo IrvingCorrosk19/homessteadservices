@@ -13,6 +13,9 @@ const ACTIONS = new Set<ControlJobAction>([
   "publish_now",
   "retry_platform",
   "reprocess_media",
+  "regenerate_copy",
+  "save_copy",
+  "update_ai_context",
 ]);
 
 export async function POST(
@@ -29,6 +32,8 @@ export async function POST(
     version?: number;
     confirm?: boolean;
     idempotencyKey?: string;
+    copy?: string;
+    note?: string;
   } | null;
   const action = body?.action as ControlJobAction;
   if (!ACTIONS.has(action)) {
@@ -41,6 +46,8 @@ export async function POST(
     actor: controlActor(request),
     confirm: Boolean(body?.confirm),
     idempotencyKey: String(body?.idempotencyKey || request.headers.get("idempotency-key") || ""),
+    copy: body?.copy,
+    note: body?.note,
   });
   logInfo("ControlJobAction", {
     contentJobId: publicId,

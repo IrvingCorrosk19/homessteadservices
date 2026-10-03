@@ -45,6 +45,8 @@ type JobRow = {
   campaign_public_id: string | null;
   media_group_id: string | null;
   photo_batch_id: string | null;
+  publish_mode: string | null;
+  media_order_json: string | null;
 };
 
 function mapJob(row: JobRow): ContentJob {
@@ -79,6 +81,8 @@ function mapJob(row: JobRow): ContentJob {
     campaignPublicId: row.campaign_public_id || "",
     mediaGroupId: row.media_group_id || "",
     photoBatchId: row.photo_batch_id || "",
+    publishMode: row.publish_mode === "album" || row.publish_mode === "separate" ? row.publish_mode : "",
+    mediaOrderJson: row.media_order_json || "",
   };
 }
 
@@ -203,6 +207,8 @@ export function updateJob(
     campaignPublicId: string;
     mediaGroupId: string;
     photoBatchId: string;
+    publishMode: string;
+    mediaOrderJson: string;
   }>,
 ) {
   const current = getJobByPublicId(publicId);
@@ -234,6 +240,8 @@ export function updateJob(
         campaign_public_id = ?,
         media_group_id = ?,
         photo_batch_id = ?,
+        publish_mode = ?,
+        media_order_json = ?,
         updated_at = ?
        WHERE public_id = ?`,
     )
@@ -267,6 +275,8 @@ export function updateJob(
       patch.campaignPublicId ?? current.campaignPublicId,
       patch.mediaGroupId ?? current.mediaGroupId,
       patch.photoBatchId ?? current.photoBatchId,
+      patch.publishMode ?? current.publishMode,
+      patch.mediaOrderJson ?? current.mediaOrderJson,
       updatedAt,
       publicId,
     );

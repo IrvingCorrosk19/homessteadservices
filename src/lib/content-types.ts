@@ -29,6 +29,9 @@ export const PHOTO_BATCH_ID_PATTERN = /^HB-\d{4}-\d{6}$/;
 
 export const MAX_CONTENT_PHOTOS = 8;
 export const MAX_CONTENT_PHOTO_BYTES = 8 * 1024 * 1024;
+/** Instagram carousel / Facebook multi-photo organic limits (official Graph docs). */
+export const MIN_MULTI_PHOTO_ITEMS = 2;
+export const MAX_MULTI_PHOTO_ITEMS = 10;
 
 export type ContentAssetType = "ORIGINAL" | "ENHANCED" | "BRANDED" | "PUBLISHED";
 export type ContentAssetRole =
@@ -71,6 +74,10 @@ export type ContentJob = {
   campaignPublicId: string;
   mediaGroupId: string;
   photoBatchId: string;
+  /** separate = one post per photo; album = multi-photo / carousel */
+  publishMode: "separate" | "album" | "";
+  /** Ordered content_assets.id for BRANDED (or ORIGINAL) slides */
+  mediaOrderJson: string;
 };
 
 export type ContentPublicationStatus =

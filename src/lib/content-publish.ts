@@ -37,10 +37,16 @@ import {
   jobUsesLiveOverride,
   shouldConsumeLiveOnce,
 } from "@/lib/content-publish-policy";
+import {
+  listOrderedBrandedFeeds,
+  validateCarouselAssets,
+  validateLivePublishImages,
+} from "@/lib/content-multi-photo";
 import { logError, logInfo } from "@/lib/log";
 import { sendTelegramMessage } from "@/lib/content-telegram";
 import { campaignJobPaused } from "@/lib/campaign-store";
 import { scanCommercialClaims } from "@/lib/campaign-claims";
+import { isControlIsolated } from "@/lib/control-isolation";
 import { site } from "@/lib/site";
 import type { ContentAsset, ContentJob } from "@/lib/content-types";
 
@@ -78,9 +84,9 @@ function humanCause(cause: string) {
     meta_token_unconfigured:
       { text: "No hay token de Página de Meta.", action: "Pega META_PAGE_ACCESS_TOKEN en el .env del VPS (no en el chat)." },
     image_missing: { text: "No encontré la imagen aprobada.", action: "Vuelve a generar la pieza y aprueba la versión nueva." },
-    carousel_unsupported: {
-      text: "Esta pieza está marcada como carrusel. El publicador solo envía 1 imagen por publicación.",
-      action: "Deja las propuestas independientes (una foto = una pieza) o publica UNA con PUBLICAR AHORA.",
+    carousel_invalid: {
+      text: "El carrusel no cumple límites o validación de imágenes (2–10 fotos JPEG válidas).",
+      action: "Reordena o cambia las fotos y vuelve a aprobar la versión.",
     },
     image_url_unconfigured: { text: "No pude firmar la URL de la imagen.", action: "Configura CONTENT_MEDIA_SIGNING_SECRET o N8N_HOMESTEAD_WEBHOOK_SECRET." },
     image_not_jpeg: { text: "La imagen no es JPEG válido.", action: "Reprocesa la pieza." },
@@ -128,7 +134,7 @@ async function waitInstagramContainer(containerId: string, transport: GraphTrans
 
 async function publishInstagram(input: {
   caption: string;
-  imageUrl: string;
+  imageUrls: string[];
   existing?: ContentPublicationRecord | null;
   transport: GraphTransport;
 }): Promise<{
@@ -141,18 +147,59 @@ async function publishInstagram(input: {
 }> {
   const ig = instagramAccountId();
   if (!ig) return { ok: false, status: "FAILED", cause: "instagram_unconfigured" };
+  const urls = input.imageUrls.filter(Boolean);
+  if (!urls.length) return { ok: false, status: "FAILED", cause: "image_missing" };
+
   let containerId = input.existing?.containerId || "";
   if (!containerId) {
-    const created = await input.transport.request({
-      method: "POST",
-      path: `${ig}/media`,
-      body: { image_url: input.imageUrl, caption: input.caption },
-    });
-    containerId = created.json.id || "";
-    if (!containerId) {
-      const cause = graphErrorMessage(created.json, "instagram_create_failed");
-      const uncertain = created.status === 0 || /timeout|network/i.test(cause);
-      return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+    if (urls.length === 1) {
+      const created = await input.transport.request({
+        method: "POST",
+        path: `${ig}/media`,
+        body: { image_url: urls[0], caption: input.caption },
+      });
+      containerId = created.json.id || "";
+      if (!containerId) {
+        const cause = graphErrorMessage(created.json, "instagram_create_failed");
+        const uncertain = created.status === 0 || /timeout|network/i.test(cause);
+        return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+      }
+    } else {
+      // Official IG carousel: children with is_carousel_item=true, then parent media_type=CAROUSEL.
+      const childIds: string[] = [];
+      for (const imageUrl of urls.slice(0, 10)) {
+        const child = await input.transport.request({
+          method: "POST",
+          path: `${ig}/media`,
+          body: { image_url: imageUrl, is_carousel_item: "true" },
+        });
+        const childId = child.json.id || "";
+        if (!childId) {
+          const cause = graphErrorMessage(child.json, "instagram_carousel_child_failed");
+          const uncertain = child.status === 0 || /timeout|network/i.test(cause);
+          return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause, containerId: childIds[0] };
+        }
+        const readyChild = await waitInstagramContainer(childId, input.transport);
+        if (!readyChild.ok && readyChild.code !== "IN_PROGRESS") {
+          return { ok: false, status: "FAILED", cause: readyChild.cause, containerId: childId };
+        }
+        childIds.push(childId);
+      }
+      const carousel = await input.transport.request({
+        method: "POST",
+        path: `${ig}/media`,
+        body: {
+          media_type: "CAROUSEL",
+          children: childIds.join(","),
+          caption: input.caption,
+        },
+      });
+      containerId = carousel.json.id || "";
+      if (!containerId) {
+        const cause = graphErrorMessage(carousel.json, "instagram_carousel_create_failed");
+        const uncertain = carousel.status === 0 || /timeout|network/i.test(cause);
+        return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+      }
     }
   }
   const ready = await waitInstagramContainer(containerId, input.transport);
@@ -202,7 +249,7 @@ async function lookupFacebookPost(postId: string, transport: GraphTransport) {
 
 async function publishFacebook(input: {
   caption: string;
-  imageUrl: string;
+  imageUrls: string[];
   existing?: ContentPublicationRecord | null;
   transport: GraphTransport;
   source: "now" | "scheduler" | "live";
@@ -216,6 +263,8 @@ async function publishFacebook(input: {
 }> {
   const page = resolveFacebookPageId();
   if (!page.id) return { ok: false, status: "FAILED", cause: "facebook_unconfigured" };
+  const urls = input.imageUrls.filter(Boolean);
+  if (!urls.length) return { ok: false, status: "FAILED", cause: "image_missing" };
   const decision = facebookReconcileDecision({
     existingStatus: input.existing?.status,
     existingPostId: input.existing?.externalPostId,
@@ -233,32 +282,75 @@ async function publishFacebook(input: {
   if (decision.action === "cannot_reconcile") {
     return { ok: false, status: "UNCERTAIN", cause: "facebook_uncertain_unverified" };
   }
+
+  // Single photo: Page Photos published=true. Multi-photo: unpublished photos + /feed attached_media.
+  if (urls.length === 1) {
+    const posted = await input.transport.request({
+      method: "POST",
+      path: `${page.id}/photos`,
+      body: { url: urls[0], caption: input.caption, published: "true" },
+    });
+    const postId = posted.json.post_id || posted.json.id || "";
+    if (!postId) {
+      const cause = graphErrorMessage(posted.json, "facebook_publish_failed");
+      const uncertain = posted.status === 0 || /timeout|network/i.test(cause);
+      if (uncertain && input.existing?.externalPostId) {
+        const found = await lookupFacebookPost(input.existing.externalPostId, input.transport);
+        if (found?.id) {
+          return { ok: true, status: "PUBLISHED", id: found.id, permalink: found.permalink };
+        }
+      }
+      return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+    }
+    const permalink =
+      (await getFacebookPermalink(postId, input.transport)) || `https://www.facebook.com/${postId}`;
+    return { ok: true, status: "PUBLISHED", id: postId, permalink };
+  }
+
+  const mediaFbids: string[] = [];
+  for (const url of urls.slice(0, 10)) {
+    const uploaded = await input.transport.request({
+      method: "POST",
+      path: `${page.id}/photos`,
+      body: { url, published: "false" },
+    });
+    const photoId = uploaded.json.id || "";
+    if (!photoId) {
+      const cause = graphErrorMessage(uploaded.json, "facebook_photo_upload_failed");
+      const uncertain = uploaded.status === 0 || /timeout|network/i.test(cause);
+      return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
+    }
+    mediaFbids.push(photoId);
+  }
+  const body: Record<string, string> = {
+    message: input.caption,
+    published: "true",
+  };
+  mediaFbids.forEach((id, index) => {
+    body[`attached_media[${index}]`] = JSON.stringify({ media_fbid: id });
+  });
   const posted = await input.transport.request({
     method: "POST",
-    path: `${page.id}/photos`,
-    body: { url: input.imageUrl, caption: input.caption, published: "true" },
+    path: `${page.id}/feed`,
+    body,
   });
-  const postId = posted.json.post_id || posted.json.id || "";
+  const postId = posted.json.id || posted.json.post_id || "";
   if (!postId) {
-    const cause = graphErrorMessage(posted.json, "facebook_publish_failed");
+    const cause = graphErrorMessage(posted.json, "facebook_multiphotopost_failed");
     const uncertain = posted.status === 0 || /timeout|network/i.test(cause);
-    if (uncertain && input.existing?.externalPostId) {
-      const found = await lookupFacebookPost(input.existing.externalPostId, input.transport);
-      if (found?.id) {
-        return { ok: true, status: "PUBLISHED", id: found.id, permalink: found.permalink };
-      }
-    }
     return { ok: false, status: uncertain ? "UNCERTAIN" : "FAILED", cause };
   }
   const permalink =
     (await getFacebookPermalink(postId, input.transport)) || `https://www.facebook.com/${postId}`;
-  return { ok: true, status: "PUBLISHED", id: postId, permalink };
+  return { ok: true, status: "PUBLISHED", id: postId, permalink, containerId: mediaFbids.join(",") };
+}
+
+function brandedFeeds(publicId: string, version: number, mediaOrderJson?: string) {
+  return listOrderedBrandedFeeds(publicId, version, mediaOrderJson);
 }
 
 function brandedFeed(publicId: string, version: number) {
-  const branded = listAssets(publicId, "BRANDED", version);
-  const matches = branded.filter((asset) => isBrandedFeedFilename(asset.storedFilename));
-  return (matches.at(-1) || branded.at(-1)) as ContentAsset | undefined;
+  return brandedFeeds(publicId, version)[0] as ContentAsset | undefined;
 }
 
 function formatTelegramResult(publicId: string, live: boolean, rows: PlatformPublishResult[]) {
@@ -300,14 +392,7 @@ export async function publishJob(
   if (campaignJobPaused(publicId)) {
     return { ok: false as const, cause: "campaign_paused" };
   }
-  if ((job.format || "").toUpperCase() === "CAROUSEL") {
-    clearPublishLock(publicId);
-    await sendTelegramMessage({
-      chatId: job.telegramChatId,
-      text: `No publico ${publicId} como carrusel. El publicador actual solo envía 1 imagen por pieza.`,
-    });
-    return { ok: false as const, cause: "carousel_unsupported" };
-  }
+  const isCarousel = (job.format || "").toUpperCase() === "CAROUSEL" || job.publishMode === "album";
   if (settings.mode === "MANUAL" && source === "scheduler") {
     return { ok: false as const, cause: "manual_mode" };
   }
@@ -331,7 +416,7 @@ export async function publishJob(
     return { ok: false as const, cause: "stale_version" };
   }
   const caption = withCanonicalCta(job.selectedCaption || version?.copy || "");
-  if (live) {
+  if (live && !isControlIsolated()) {
     const claims = scanCommercialClaims(caption);
     if (!claims.ok) {
       clearPublishLock(publicId);
@@ -349,13 +434,76 @@ export async function publishJob(
   try {
     updateJob(publicId, { status: "PUBLISHING" });
     recordContentEvent(publicId, "CONTENT_PUBLISHING", `${source}:${live ? "live" : "dry"}`);
-    const feed = versionNumber ? brandedFeed(publicId, versionNumber) : undefined;
+    const feeds = versionNumber ? brandedFeeds(publicId, versionNumber, job.mediaOrderJson) : [];
+    const feed = feeds[0];
     const bytes = feed ? readAssetBytes(feed) : null;
     const results: PlatformPublishResult[] = [];
 
-    let imageUrl = "";
+    let imageUrls: string[] = [];
     if (live) {
-      if (!feed || !bytes) {
+      if (!feeds.length) {
+        for (const platform of platforms) {
+          recordPublication({
+            publicId,
+            platform,
+            dryRun: false,
+            status: "FAILED",
+            caption,
+            error: "image_missing",
+            version: versionNumber,
+          });
+          results.push({ platform, outcome: "failed", cause: "image_missing" });
+        }
+      } else if (isCarousel) {
+        const structure = validateCarouselAssets(feeds);
+        const liveCheck = validateLivePublishImages(feeds);
+        if (!structure.ok || !liveCheck.ok) {
+          const cause = liveCheck.cause || structure.errors[0] || "carousel_invalid";
+          for (const platform of platforms) {
+            recordPublication({
+              publicId,
+              platform,
+              dryRun: false,
+              status: "FAILED",
+              caption,
+              error: cause,
+              version: versionNumber,
+            });
+            results.push({ platform, outcome: "failed", cause });
+          }
+        } else {
+          const urls: string[] = [];
+          let signFailed = "";
+          for (const asset of feeds) {
+            const signed = buildContentMediaUrl({
+              siteUrl: siteBase(),
+              publicId,
+              assetId: asset.id,
+            });
+            if (!signed.ok) {
+              signFailed = signed.cause;
+              break;
+            }
+            urls.push(signed.url);
+          }
+          if (signFailed) {
+            for (const platform of platforms) {
+              recordPublication({
+                publicId,
+                platform,
+                dryRun: false,
+                status: "FAILED",
+                caption,
+                error: signFailed,
+                version: versionNumber,
+              });
+              results.push({ platform, outcome: "failed", cause: signFailed });
+            }
+          } else {
+            imageUrls = urls;
+          }
+        }
+      } else if (!feed || !bytes) {
         for (const platform of platforms) {
           recordPublication({
             publicId,
@@ -408,7 +556,7 @@ export async function publishJob(
               results.push({ platform, outcome: "failed", cause: signed.cause });
             }
           } else {
-            imageUrl = signed.url;
+            imageUrls = [signed.url];
           }
         }
       }
@@ -457,7 +605,7 @@ export async function publishJob(
         });
         continue;
       }
-      if (!imageUrl) {
+      if (!imageUrls.length) {
         results.push({ platform, outcome: "failed", cause: "image_missing" });
         continue;
       }
@@ -474,13 +622,13 @@ export async function publishJob(
         platform === "instagram"
           ? await publishInstagram({
               caption,
-              imageUrl,
+              imageUrls,
               existing,
               transport,
             })
           : await publishFacebook({
               caption,
-              imageUrl,
+              imageUrls,
               existing,
               transport,
               source,
