@@ -1,128 +1,248 @@
 # 13 — Homestead Control Flutter Android
 
-Fecha: 2026-10-03 America/Panama.
+
+
+Fecha: 2026-10-03 America/Panama (cierre etapa aislada + A06).
+
+
 
 ## Entrega
 
+
+
 | Ítem | Valor |
+
 | --- | --- |
+
 | Carpeta | `apps/homestead_control_mobile` |
+
 | applicationId | `lat.homestead.control` |
-| versionName / versionCode | `1.0.0` / `1` |
+
+| versionName / versionCode | `1.1.0` / `2` |
+
 | Android mínimo | API 24 |
+
 | targetSdk | 36 |
-| APK debug instalable | `apps/homestead_control_mobile/dist/homestead-control-1.0.0+1-debug.apk` |
-| SHA-256 debug | `26D0EA4545DEA485B737F06BCC5E67A50C801F78EF68A2561A0AF9A80F9090E6` |
-| APK release (firma debug) | `apps/homestead_control_mobile/dist/homestead-control-1.0.0+1-release-debugsigned.apk` |
-| SHA-256 release-debugsigned | `11C643B963B149FEC2F7988226481B181ACD085312FEAA173F11965797752436` |
-| Firma | Debug keystore de Android SDK. **No** es firma de producción |
-| Flutter | 3.35.5 / Dart 3.9.2 |
-| JDK | Microsoft OpenJDK 17 |
 
-No hay keystore de producción Homestead en el repositorio. El APK “release” está firmado con la clave debug solo para instalación de prueba. No presentar esa firma como release de tienda.
+| APK **producción** (instalado ahora en A06) | `apps/homestead_control_mobile/dist/homestead-control-1.1.0+2-debug.apk` |
 
-## Instalación breve
+| SHA-256 prod | `D677093C8E182E4968B0AF9DA1E70F7C925CB0A1DCE167081352C6CD33BED013` |
 
-1. Copia el APK debug al teléfono o emulador.
-2. Permite instalar apps de orígenes desconocidos.
-3. Instala `homestead-control-1.0.0+1-debug.apk`.
-4. Abre **Homestead Control**.
-5. Inicia sesión con la contraseña de administrador del backend desplegado.
+| API_BASE prod | `https://homestead.lat` |
 
-La app habla con `https://homestead.lat` por defecto (`--dart-define=API_BASE=...` para otro host).
+| APK **aislado** (solo pruebas) | `…/homestead-control-1.1.0+2-isolated-debug.apk` |
 
-## Qué es y qué no es
+| SHA-256 aislado | `8D92C37BB0D3A275180A58403A0FACF34B1D677B77F2AF46DB738DA59ECFFA1E` |
 
-Es una interfaz Flutter nativa (no WebView) sobre las APIs `/api/admin/*`.
+| API_BASE aislado | `http://127.0.0.1:3000` (+ `adb reverse`) |
 
-Conserva la PWA en `/admin`, SQLite, Telegram, n8n y el publicador compartido del servidor. Facebook/Instagram se publican solo en el backend. El APK no incluye tokens Meta, App Secret, secretos de webhook, OpenAI, Telegram, SMTP ni contraseñas.
+| Firma | Debug keystore. **No** es firma de release Play |
 
-## APIs usadas (código contrastado)
+| Teléfono | Samsung Galaxy A06 (`SM-A065M`, `R8YYA17KR3V`, Android 15) |
 
-### Ya existían
 
-- `POST /api/admin/login`, `POST /api/admin/logout`
-- `GET /api/admin/control/session`
-- `GET /api/admin/content/home|jobs|jobs/:id|preview|media|studio|batches|campaigns|errors`
-- `POST /api/admin/content/jobs/:id/action` (`approve`, `approve_and_schedule`, `reschedule`, `reject`, `publish_now`, `retry_platform`)
-- `POST /api/admin/content/intake` (multipart `files`, tope 8)
-- `POST /api/admin/content/studio`, `POST /api/admin/content/campaigns/:id/pause`
-- `GET/PATCH /api/admin/appointments`, `PATCH /api/admin/service-requests/:id`
 
-### Añadidas o adaptadas para el móvil
+**Estado del teléfono al cerrar esta etapa:** APK de producción reinstado, `adb reverse` eliminado, login **sin** banner `ENTORNO DE PRUEBA` (evidencia `evidence/a06-isolated/99-restored-prod-login.png`).
 
-| Cambio | Motivo |
+
+
+## Qué se implementó
+
+
+
+### Carruseles / multi-foto (motor compartido)
+
+
+
+- 2+ fotos: elección **álbum** vs **una publicación por foto**.
+
+- Álbum → `format=CAROUSEL`, `publish_mode=album`, orden `media_order_json`.
+
+- Instagram: hijos `is_carousel_item` + padre `CAROUSEL` + `media_publish`.
+
+- Facebook: fotos `published=false` + `/feed` `attached_media`.
+
+- Reordenar/quitar: `POST …/jobs/:id/media` **invalida** `approved_version`.
+
+- Fallos parciales / UNCERTAIN / retry: `publishJob` compartido (sin publicador paralelo).
+
+
+
+### Rechazo / cancelación / info / reapertura
+
+
+
+- `CANCELLED` + `disposition_kind` (`REJECT` | `CANCEL`).
+
+- Nota interna privada + mensaje al cliente; outbox `service_request_notify_outbox` idempotente.
+
+- Reapertura a `CONTACTED` sin recuperar cita.
+
+- **Fix A06:** doble toque con misma `idempotencyKey` en reject/cancel ya dispuesto → `ok` + `already` (antes 409 `not_rejectable`).
+
+
+
+### Revisión de seguridad
+
+
+
+- Marca `security_review_required` + auditoría.
+
+- Bloquea `createAppointment`, concierge auto-confirm, y **confirm/reschedule** de citas existentes (`PATCH /api/admin/appointments/:id` → 409).
+
+
+
+### Aislamiento / simulación
+
+
+
+- `control:dev` + `HOMESTEAD_CONTROL_ISOLATED`; Meta/SMTP/Telegram/n8n vacíos y simulados.
+
+- Debug-only cleartext `127.0.0.1` en APK debug.
+
+- Endpoint **solo aislado** `GET/POST /api/admin/control-dev/sim` (escenarios Graph + notify `fail_once`).
+
+
+
+## Verificación
+
+
+
+| Prueba | Tipo | Resultado |
+
+| --- | --- | --- |
+
+| `npx tsx scripts/control-carousel-disposition-behavior.mjs` | simulación in-process | PASS |
+
+| `npx tsx scripts/test-homestead-control.mjs` | simulación in-process | PASS |
+
+| `node scripts/control-physical-a06-matrix.mjs` | API aislada + simulación | **25/25 PASS** |
+
+| `flutter analyze` | implementación | PASS |
+
+| Instalación A06 aislada + banner `127.0.0.1:3000` | física | PASS |
+
+| UI carrusel orden/quitar (HC-2026-000001) | física | PASS |
+
+| UI notas internas / disposición / reopen forms | física | PASS |
+
+| Security bloquea confirm/reschedule | API aislada | PASS |
+
+| Cancel libera slot | API aislada | PASS |
+
+| Doble toque / parcial FB / UNCERTAIN / notify retry / sesión revocada | API+sim | PASS |
+
+| Publicación Meta real / email cliente real | real externa | **NO ejecutada** |
+
+| Deploy VPS carrusel+disposición | producción | **PENDIENTE de aprobación** |
+
+
+
+Evidencia: `docs/auditoria-homestead-app/evidence/a06-isolated/` (+ `README.md` con clasificación).
+
+
+
+## Certificación
+
+
+
+**No se declara certificación completa.** Cubierto: implementación + aislado (simulación + física A06). Pendiente para producción: commit/push autorizado, `deploy-control-vps.sh`, smoke admin/móvil en `homestead.lat`, y solo entonces pruebas reales externas si se autorizan.
+
+
+
+## Plan de despliegue y reversión (para aprobar)
+
+**Aún no desplegado.** No se restaura SQLite de producción sobre datos vivos salvo corrupción demostrada.
+
+### Principio de reversión (obligatorio)
+
+1. **Prioridad:** revertir **código** a imagen previa compatible con el esquema SQLite **ya migrado**.
+2. **Prohibido como rollback normal:** restaurar el backup pre-deploy **encima** de la DB de producción si después del despliegue se crearon solicitudes, citas, piezas o publicaciones. Eso destruiría datos posteriores al respaldo.
+3. Si una migración introdujo columnas/tablas nuevas, el código anterior debe **tolerar** el esquema ampliado o el rollback de código debe ir acompañado de un **bloqueo de operaciones incompatibles** (feature flags / pause publish / pause disposition) hasta alinear.
+4. Restaurar DB desde backup solo ante corrupción o pérdida estructural, con procedimiento de **fusión** que preserve filas creadas post-despliegue (solicitudes `HS-*`, piezas `HC-*`, `content_publications`, outbox).
+
+### Precondiciones
+
+1. Commit/push del árbol local cuando lo autorices.
+2. Ventana breve; no tocar n8n/Telegram/Meta tokens/.env salvo lo necesario para el build.
+3. Confirmar en VPS: `HOMESTEAD_CONTROL_ISOLATED` **ausente**.
+
+### Pasos propuestos (respaldo SQLite consistente)
+
+```text
+# En VPS (tras subir tarball/git del SHA aprobado):
+/opt/apps/homestead/deploy/vps/deploy-control-vps.sh <SHA>
+```
+
+El script debe:
+
+1. Etiquetar imagen Docker `homestead-homestead_web:pre-control-<stamp>`.
+2. **Backup WAL-safe** (checkpoint + copia online o `sqlite3 .backup`) de `homestead.sqlite` + media → `/opt/backups/homestead-pre-control-<stamp>/` + `manifest.json` (SHA, tamaño, integridad).
+3. Prueba de restore **aislada** en `/tmp/hs-restore-test-<stamp>` (nunca sobre la DB de producción).
+4. Build/recreate solo `homestead_web`.
+5. Health/ready 200; no apaga dry-run global ni force-live Meta.
+
+### Verificación post-deploy
+
+- `HOMESTEAD_CONTROL_ISOLATED` ausente; flags de publish intactos.
+- Login admin + Bearer móvil.
+- Smoke lectura: home contenido, una solicitud, una cita.
+- **No** publicar en redes ni enviar mensajes a clientes reales en el smoke inicial.
+
+### Rollback de código (caso normal)
+
+```text
+docker tag homestead-homestead_web:pre-control-<stamp> homestead-homestead_web:latest
+# recreate solo homestead_web
+```
+
+Tras el recreate:
+
+1. Verificar health/ready.
+2. Si el código viejo no entiende columnas nuevas: **pausar estudio / no publicar / no disposición masiva** hasta hot-fix forward-compatible.
+3. Inventariar objetos creados **después** del stamp de backup (`service_requests`, `content_jobs`, `content_publications`, `service_request_notify_outbox`) — deben seguir en la DB viva.
+
+### Recuperación con backup (solo incidente)
+
+1. No sobrescribir la DB viva a ciegas.
+2. Restaurar backup a ruta paralela.
+3. Exportar del vivo post-despliegue: solicitudes, piezas, publicaciones y outbox con `created_at` / ids posteriores al stamp.
+4. Reinyectar en la DB restaurada (o fusionar) antes de cortar tráfico.
+5. Documentar en el ticket los `public_id` preservados.
+
+### Resultado concreto para tu aprobación
+
+| Pregunta | Respuesta |
 | --- | --- |
-| Bearer `Authorization` + header `X-Homestead-Client: control-mobile` | Sesión sin depender solo de cookie httpOnly |
-| Login móvil devuelve `session` + `csrf` en JSON | Almacenamiento seguro en el dispositivo |
-| Middleware acepta Bearer | Edge ya no bloquea al móvil sin cookie |
-| `requireAdminSession(request)` en rutas admin | Lee cookie o Bearer |
-| CSRF sigue obligatorio en mutaciones (`X-CSRF-Token`) | No se desactivó el CSRF web |
-| `GET /api/admin/service-requests` | La lista solo existía en SSR |
-| `GET /api/admin/customers` | La lista solo existía en SSR |
-| `q` en `GET /api/admin/content/jobs` | Búsqueda por folio desde el cliente |
-| Actor `admin-mobile` | Distinguir recibos de idempotencia |
+| ¿Se puede desplegar ya? | **Tras commit/push que autorices** y ventana con backup WAL-safe. |
+| ¿Rollback pierde datos post-backup? | **No es aceptable.** Rollback = código (+ bloquear ops incompatibles). DB restore solo con fusión. |
+| ¿Riesgo Meta al desplegar? | Solo si VPS ya tiene publish live; el deploy no force-live. Smoke en lectura. |
+| ¿Qué apruebas? | `deploy-control-vps.sh <SHA>` con el plan de reversión anterior. |
 
-`Origin` ausente (cliente nativo) sigue permitido; un `Origin` de otro host sigue rechazado. Logout revoca la sesión en SQLite.
 
-No se usa `/api/internal/content/publish-live` ni el secreto de webhook desde el móvil.
 
-## Funciones de la app
+## Limitaciones
 
-Implementadas en Flutter:
 
-- Login / logout con `flutter_secure_storage`
-- Inicio (resumen + pausa/reanudación del estudio)
-- Cola de contenido con filtros y búsqueda
-- Detalle: imagen, texto, versión, redes, enlaces FB/IG
-- Acciones: aprobar, rechazar, aprobar y programar, reprogramar
-- Publicar ahora con diálogo de confirmación + idempotency key
-- Reintentar red fallida; bloqueo visible si hay `UNCERTAIN`
-- Crear contenido desde galería/cámara, hasta 8 fotos
-- Solicitudes (estado), agenda (confirmar/completar/cancelar), clientes
-- Lotes, campañas (pausar), centro de fallos
-- Estados de carga/vacío/error/sin conexión
-- Fechas etiquetadas America/Panama
-- Aviso explícito: video/Reels/carrusel no soportados
 
-## Verificación ejecutada
+- Video / Reels / Stories: no.
 
-| Prueba | Resultado |
-| --- | --- |
-| `flutter analyze` | PASS (4 infos, 0 errores) |
-| `flutter test` (API mock + login widget) | PASS 6/6 |
-| `flutter build apk --debug` | PASS |
-| `flutter build apk --release` | PASS (firma debug) |
-| Emulador AVD `Homestead_API36` | Creado; quedó `offline` en este host. Instalación/UI en emulador: **NO PROBADO** |
-| Teléfono físico | **NO PROBADO** |
-| Publicación real / mensajes a clientes / reintentos históricos | **No autorizados** en esta tarea |
-| Lectura producción autenticada | Pendiente de desplegar las APIs Bearer/listas |
+- Email cliente en prod depende de SMTP; fallo → outbox PENDING/FAILED con reintentos.
 
-Las pruebas de escritura/publicación del cliente usan HTTP mockeado. No se presentaron resultados simulados como publicaciones reales.
+- WhatsApp al cliente: asistido (borrador), no API masiva.
 
-## Compatibilidad y despliegue
+- Telegram no crea álbumes automáticamente.
 
-La app **no** está operativa contra producción hasta desplegar el backend con:
+- APK firmado debug.
 
-1. Auth Bearer + login `session` para `control-mobile`
-2. `GET /api/admin/service-requests`
-3. `GET /api/admin/customers`
-4. `q` en jobs
 
-Cambios locales listos en el repo. Recrear solo `homestead_web` con el commit que los contenga. No hace falta segundo dominio ni tocar n8n/Telegram/Meta.
 
-Contra un backend aislado (`npm run control:dev`) se puede ejercitar login/mutaciones con Graph simulado, sin publicar en Meta.
+## Rama / commits
 
-## Pendientes
 
-- Keystore de producción Homestead y firma release real
-- Smoke en emulador/dispositivo cuando el AVD arranque con hardware acceleration
-- Despliegue VPS de las APIs móviles
-- Prueba de lectura autenticada en `https://homestead.lat` tras el deploy
-- Publicación controlada futura (requiere autorización nueva; la de la cola ya se consumió)
 
-## Rama / commit
+- Auth móvil previo: `545c6e7` (desplegado).
 
-- Rama: `main`
-- Commit: `b23699d5af1c8a10b8ddd68c3a0ed53f7a7d1dbe` (`feat(control): add Flutter Android app and mobile admin auth`)
-- Remote: `origin/main` (pushed)
+- Esta etapa: cambios locales (incl. fix doble-toque + `control-dev/sim`). Crear commit/push cuando se autorice.
+
+

@@ -151,6 +151,7 @@ ok(
   afterPartial?.publications.some((row) => row.platform === "instagram" && row.status === "PUBLISHED"),
 );
 setSimulatedGraphScenario("ok");
+resetSimulatedCalls();
 const retryPartial = await runControlJobAction({
   publicId: scheduled.publicId,
   version: latestVersion(scheduled.publicId)?.version || 1,
@@ -160,12 +161,37 @@ const retryPartial = await runControlJobAction({
   idempotencyKey: "pub-partial-retry",
 });
 const afterRetry = toControlJobCard(scheduled.publicId);
+const retryResults = retryPartial.results || [];
 ok(
-  "CTL-17b retry only pending facebook",
+  "CTL-17b retry only pending facebook without re-publishing IG",
   retryPartial.ok &&
+    retryResults.some((row) => row.platform === "instagram" && row.outcome === "already") &&
+    retryResults.some((row) => row.platform === "facebook" && row.outcome === "published") &&
     afterRetry?.publications.some((row) => row.platform === "instagram" && row.status === "PUBLISHED") &&
     afterRetry?.publications.some((row) => row.platform === "facebook" && row.status === "PUBLISHED"),
 );
+
+const copyKey = "save-copy-conflict";
+const copyJob = listControlJobs({ state: "pending_approval" })[0] || approved;
+const saveA = await runControlJobAction({
+  publicId: copyJob.publicId,
+  action: "save_copy",
+  version: latestVersion(copyJob.publicId)?.version || copyJob.version,
+  actor: "test",
+  copy: "Caption versión A",
+  note: "nota-a",
+  idempotencyKey: copyKey,
+});
+const saveB = await runControlJobAction({
+  publicId: copyJob.publicId,
+  action: "save_copy",
+  version: latestVersion(copyJob.publicId)?.version || copyJob.version,
+  actor: "test",
+  copy: "Caption versión B distinta",
+  note: "nota-a",
+  idempotencyKey: copyKey,
+});
+ok("CTL-17c idempotency includes copy payload", saveA.ok && saveB.ok === false && saveB.error === "idempotency_conflict");
 
 setSimulatedGraphScenario("uncertain_facebook");
 const uncertainJob = listControlJobs({ state: "approved_unscheduled" })[0] || approved;

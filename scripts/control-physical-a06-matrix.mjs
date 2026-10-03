@@ -28,6 +28,20 @@ function record(name, kind, ok, detail = {}, evidence = "") {
   console.log(ok ? "PASS" : "FAIL", `[${kind}]`, name, JSON.stringify(detail).slice(0, 180));
 }
 
+/** Deferred checklist items — never auto-PASS. Do not count as FAIL until exercised. */
+function recordPending(name, kind, detail = {}) {
+  const row = {
+    name,
+    kind,
+    result: "PENDING",
+    detail: { ...detail, pending: true },
+    evidence: "",
+    at: new Date().toISOString(),
+  };
+  results.push(row);
+  console.log("PENDING", `[${kind}]`, name, JSON.stringify(detail).slice(0, 180));
+}
+
 async function login() {
   const r = await fetch(`${BASE}/api/admin/login`, {
     method: "POST",
@@ -187,46 +201,96 @@ const auth = await login();
   );
 }
 
-// --- Partial fail facebook (fresh unpublished job — stale seeds may already be PUBLISHED) ---
+// --- Partial fail facebook (fresh unpublished job) ---
 {
   await jpost(auth, "/api/admin/control-dev/sim", { graphScenario: "fail_facebook", resetCalls: true });
-  // Prefer HC-2026-000020-ish from stabilize-final partial test, else use RESULTS path job
-  let targetId = "";
-  const jobs = await jget(auth, "/api/admin/content/jobs");
-  const candidate = (jobs.json.jobs || []).find((j) => {
-    const pubs = j.publications || [];
-    const fbFailed = pubs.some((p) => p.platform === "facebook" && String(p.status).toUpperCase() === "FAILED");
-    const igOk = pubs.some((p) => p.platform === "instagram" && String(p.status).toUpperCase() === "PUBLISHED");
-    return fbFailed && igOk;
+  const a = Buffer.from(
+    await (
+      await import("sharp")
+    ).default({
+      create: { width: 1080, height: 1350, channels: 3, background: { r: 10, g: 40, b: 80 } },
+    })
+      .jpeg()
+      .toBuffer(),
+  );
+  const b = Buffer.from(
+    await (
+      await import("sharp")
+    ).default({
+      create: { width: 1080, height: 1350, channels: 3, background: { r: 80, g: 40, b: 10 } },
+    })
+      .jpeg()
+      .toBuffer(),
+  );
+  const form = new FormData();
+  form.set("note", "parcial A06");
+  form.set("publishMode", "album");
+  form.set("batchKey", `phys-partial-${Date.now()}`);
+  form.append("files", new Blob([new Uint8Array(a)], { type: "image/jpeg" }), "pa.jpg");
+  form.append("files", new Blob([new Uint8Array(b)], { type: "image/jpeg" }), "pb.jpg");
+  const ingest = await fetch(`${BASE}/api/admin/content/intake`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${auth.session}`, "X-Homestead-Client": "control-mobile", "X-CSRF-Token": auth.csrf },
+    body: form,
   });
-  if (candidate?.publicId) {
-    targetId = candidate.publicId;
-    const after = await jget(auth, `/api/admin/content/jobs/${targetId}`);
-    const pubs = after.json.job?.publications || after.json.publications || [];
-    const fbFail = pubs.some((p) => p.platform === "facebook" && String(p.status).toUpperCase() === "FAILED");
-    const igOk = pubs.some(
-      (p) => p.platform === "instagram" && ["PUBLISHED", "SIMULATED"].includes(String(p.status).toUpperCase()),
-    );
-    record("Fallo parcial por plataforma (FB fail / IG ok)", "simulacion", fbFail && igOk, {
-      publications: pubs.map((p) => ({ platform: p.platform, status: p.status })),
-      publicId: targetId,
-      source: "existing_partial",
-    });
-  } else {
-    record("Fallo parcial por plataforma (FB fail / IG ok)", "simulacion", true, {
-      note: "Covered by test-control-stabilize-final.mjs (fresh album + fail_facebook)",
-      deferred: true,
-    });
+  const ingested = await ingest.json();
+  const targetId = ingested.publicId || "";
+  let ready = false;
+  for (let i = 0; i < 40 && targetId; i++) {
+    const card = await jget(auth, `/api/admin/content/jobs/${targetId}`);
+    const st = card.json.job?.status || card.json.status;
+    if (st === "AWAITING_APPROVAL" || st === "APPROVED") {
+      ready = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
+  const ver = Number((await jget(auth, `/api/admin/content/jobs/${targetId}`)).json.job?.version || 1);
+  await jpost(auth, `/api/admin/content/jobs/${targetId}/action`, {
+    action: "approve",
+    version: ver,
+    confirm: true,
+    idempotencyKey: `phys-ap-partial-${Date.now()}`,
+  });
+  const beforeCalls = await jget(auth, "/api/admin/control-dev/sim");
+  const pub = await jpost(auth, `/api/admin/content/jobs/${targetId}/action`, {
+    action: "publish_now",
+    version: ver,
+    confirm: true,
+    idempotencyKey: `phys-pub-partial-${Date.now()}`,
+  });
+  const after = await jget(auth, `/api/admin/content/jobs/${targetId}`);
+  const pubs = after.json.job?.publications || after.json.publications || [];
+  const fbFail = pubs.some((p) => p.platform === "facebook" && String(p.status).toUpperCase() === "FAILED");
+  const igOk = pubs.some(
+    (p) => p.platform === "instagram" && ["PUBLISHED", "SIMULATED"].includes(String(p.status).toUpperCase()),
+  );
+  record("Fallo parcial por plataforma (FB fail / IG ok)", "simulacion", ready && fbFail && igOk, {
+    publications: pubs.map((p) => ({ platform: p.platform, status: p.status })),
+    publicId: targetId,
+    pubOk: pub.json.ok,
+  });
 
-  await jpost(auth, "/api/admin/control-dev/sim", { graphScenario: "ok" });
-  record("Reintento parcial sin duplicar IG", "simulacion", true, {
-    note: "Covered by stabilize-final + nextPlatformAttempt skip_published",
-    deferred: true,
+  // Partial retry: must not re-publish Instagram
+  await jpost(auth, "/api/admin/control-dev/sim", { graphScenario: "ok", resetCalls: true });
+  const retry = await jpost(auth, `/api/admin/content/jobs/${targetId}/action`, {
+    action: "publish_now",
+    version: Number((await jget(auth, `/api/admin/content/jobs/${targetId}`)).json.job?.version || ver),
+    confirm: true,
+    idempotencyKey: `phys-retry-partial-${Date.now()}`,
+  });
+  const resultsRetry = retry.json.results || [];
+  const igAlready = resultsRetry.some((r) => r.platform === "instagram" && (r.outcome === "already" || r.outcome === "published"));
+  const fbOk = resultsRetry.some((r) => r.platform === "facebook" && r.outcome === "published");
+  const afterSim = await jget(auth, "/api/admin/control-dev/sim");
+  record("Reintento parcial sin duplicar IG", "simulacion", Boolean(igAlready && fbOk), {
+    results: resultsRetry,
+    beforeMeta: (beforeCalls.json.simulatedCalls || []).length,
+    afterMeta: (afterSim.json.simulatedCalls || []).length,
   });
 }
 
-// --- Uncertain facebook ---
+// --- Uncertain facebook: real block + no new publish requests ---
 {
   await jpost(auth, "/api/admin/control-dev/sim", { graphScenario: "uncertain_facebook", resetCalls: true });
   const job = await jget(auth, "/api/admin/content/jobs/HC-2026-000003");
@@ -249,18 +313,89 @@ const auth = await login();
   const pubs = after.json.job?.publications || after.json.publications || [];
   const fbUnc = pubs.some((p) => {
     const s = String(p.status).toUpperCase();
-    return p.platform === "facebook" && (s === "UNCERTAIN" || s === "FAILED" || s === "PUBLISHING");
+    return p.platform === "facebook" && (s === "UNCERTAIN" || s === "PUBLISHING");
   });
-  const fbNotDupSuccess =
-    pubs.filter((p) => p.platform === "facebook" && ["PUBLISHED", "SIMULATED"].includes(String(p.status).toUpperCase()))
-      .length === 0;
+  await jpost(auth, "/api/admin/control-dev/sim", { resetCalls: true });
+  const blocked = await jpost(auth, "/api/admin/content/jobs/HC-2026-000003/action", {
+    action: "publish_now",
+    version: Number((await jget(auth, `/api/admin/content/jobs/HC-2026-000003`)).json.job?.version || ver2),
+    confirm: true,
+    idempotencyKey: `phys-unc-retry-${Date.now()}`,
+  });
+  const simAfterBlock = await jget(auth, "/api/admin/control-dev/sim");
+  const newMeta = (simAfterBlock.json.simulatedCalls || []).filter((c) => c.provider === "meta").length;
   record(
-    "Resultado incierto FB sin inventar éxito / sin duplicar",
+    "Resultado incierto FB: bloqueo real sin nuevas peticiones de publicación",
     "simulacion",
-    fbUnc || unc.ok === false || fbNotDupSuccess,
-    { publications: pubs.map((p) => ({ platform: p.platform, status: p.status })), uncOk: unc.ok },
+    (fbUnc || unc.json.error === "uncertain_pending") &&
+      (blocked.json.error === "uncertain_pending" || blocked.ok === false) &&
+      newMeta === 0,
+    {
+      publications: pubs.map((p) => ({ platform: p.platform, status: p.status })),
+      uncOk: unc.ok,
+      blockedError: blocked.json.error,
+      newMetaCalls: newMeta,
+    },
   );
   await jpost(auth, "/api/admin/control-dev/sim", { graphScenario: "ok" });
+}
+
+// --- Stale version edit + concurrency (API) ---
+{
+  const jobs = await jget(auth, "/api/admin/content/jobs");
+  const editable = (jobs.json.jobs || []).find((j) =>
+    ["AWAITING_APPROVAL", "APPROVED", "SCHEDULED", "NEEDS_REVIEW"].includes(String(j.status || "").toUpperCase()),
+  );
+  if (editable?.publicId) {
+    const stale = await jpost(auth, `/api/admin/content/jobs/${editable.publicId}/action`, {
+      action: "save_copy",
+      version: 0,
+      copy: "intento versión obsoleta",
+      idempotencyKey: `phys-stale-${Date.now()}`,
+    });
+    record(
+      "Edición con versión obsoleta rechazada",
+      "api_aislada",
+      stale.json.error === "stale_version" || stale.json.error === "version_required" || stale.status === 409,
+      { error: stale.json.error, status: stale.status },
+    );
+
+    const key = `phys-idem-copy-${Date.now()}`;
+    const ver = Number(editable.version || 1);
+    const a = await jpost(auth, `/api/admin/content/jobs/${editable.publicId}/action`, {
+      action: "save_copy",
+      version: ver,
+      copy: "Caption idem A",
+      note: "nota-a",
+      idempotencyKey: key,
+    });
+    const b = await jpost(auth, `/api/admin/content/jobs/${editable.publicId}/action`, {
+      action: "save_copy",
+      version: Number((await jget(auth, `/api/admin/content/jobs/${editable.publicId}`)).json.job?.version || ver),
+      copy: "Caption idem B distinta",
+      note: "nota-a",
+      idempotencyKey: key,
+    });
+    record(
+      "Idempotencia: misma clave con copy distinto → conflicto",
+      "api_aislada",
+      a.ok && b.json.error === "idempotency_conflict",
+      { aOk: a.ok, bError: b.json.error },
+    );
+  } else {
+    record("Edición con versión obsoleta rechazada", "api_aislada", false, { error: "no_editable_job" });
+    record("Idempotencia: misma clave con copy distinto → conflicto", "api_aislada", false, { error: "no_editable_job" });
+  }
+}
+
+// --- fisica_ui: checklist A06 (PENDING until exercised on device) ---
+{
+  recordPending("UI A06: preview watermark contain + álbum reorder", "fisica_ui", {
+    note: "Ejecutar en APK A06 con evidencia adb; no se auto-aprueba en matriz API",
+  });
+  recordPending("UI A06: disposición / notas internas / security forms", "fisica_ui", {
+    note: "Cubierto parcialmente por api_aislada; confirmación visual pendiente en dispositivo",
+  });
 }
 
 // --- Disposition: reject without appt ---

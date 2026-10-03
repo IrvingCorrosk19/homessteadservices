@@ -333,10 +333,28 @@ record("login_isolated", "api_aislada", true, { base: BASE });
   const resultsPub = pub.json.results || [];
   const igOk = resultsPub.some((r) => r.platform === "instagram" && (r.outcome === "published" || r.outcome === "already"));
   const fbFail = resultsPub.some((r) => r.platform === "facebook" && r.outcome === "failed");
-  record("partial_ig_ok_fb_fail", "simulacion", Boolean(resultsPub.length) && (igOk || pub.json.ok === false), {
+  record("partial_ig_ok_fb_fail", "simulacion", igOk && fbFail, {
     results: resultsPub,
     ok: pub.json.ok,
     error: pub.json.error,
+  });
+
+  // Partial retry must skip Instagram republish
+  await setScenario(auth, "ok");
+  await jpost(auth, "/api/admin/control-dev/sim", { resetCalls: true });
+  const retry = await jpost(auth, `/api/admin/content/jobs/${publicId}/action`, {
+    action: "publish_now",
+    version: ((await jget(auth, `/api/admin/content/jobs/${publicId}`)).json.job || {}).version || ver,
+    confirm: true,
+    idempotencyKey: `pub-partial-retry-${publicId}`,
+  });
+  const retryResults = retry.json.results || [];
+  const igAlready = retryResults.some((r) => r.platform === "instagram" && r.outcome === "already");
+  const fbPublished = retryResults.some((r) => r.platform === "facebook" && r.outcome === "published");
+  const sim = await jget(auth, "/api/admin/control-dev/sim");
+  record("partial_retry_skips_instagram", "simulacion", igAlready && fbPublished, {
+    results: retryResults,
+    metaCalls: (sim.json.simulatedCalls || []).length,
   });
   await setScenario(auth, "ok");
 
@@ -361,28 +379,97 @@ record("login_isolated", "api_aislada", true, { base: BASE });
   });
   await setScenario(auth, "ok");
   const cardU = (await jget(auth, `/api/admin/content/jobs/${idU}`)).json.job || {};
-  const uncertain = (cardU.publications || []).some((p) => p.status === "UNCERTAIN") || pubU.json.error;
+  const uncertain = (cardU.publications || []).some((p) => p.status === "UNCERTAIN");
+  await jpost(auth, "/api/admin/control-dev/sim", { resetCalls: true });
   const blocked = await jpost(auth, `/api/admin/content/jobs/${idU}/action`, {
     action: "publish_now",
-    version: verU,
+    version: ((await jget(auth, `/api/admin/content/jobs/${idU}`)).json.job || {}).version || verU,
     confirm: true,
     idempotencyKey: `pub-unc-retry-${idU}`,
   });
-  record("uncertain_blocks_blind_retry", "api_aislada", blocked.json.error === "uncertain_pending" || uncertain, {
-    publishError: pubU.json.error,
-    results: pubU.json.results,
-    blockedError: blocked.json.error,
-    publications: cardU.publications,
+  const simBlocked = await jget(auth, "/api/admin/control-dev/sim");
+  const newMeta = (simBlocked.json.simulatedCalls || []).filter((c) => c.provider === "meta").length;
+  record(
+    "uncertain_blocks_blind_retry",
+    "api_aislada",
+    uncertain && blocked.json.error === "uncertain_pending" && newMeta === 0,
+    {
+      publishError: pubU.json.error,
+      results: pubU.json.results,
+      blockedError: blocked.json.error,
+      publications: cardU.publications,
+      newMetaCalls: newMeta,
+    },
+  );
+
+  // Concurrent publish + stale version
+  const batchC = `stab-conc-${randomUUID()}`;
+  const createdC = await ingestAlbum(auth, [a, b], "Concurrent", batchC, "album");
+  const idC = createdC.json.publicId;
+  await waitReady(auth, idC);
+  const verC = ((await jget(auth, `/api/admin/content/jobs/${idC}`)).json.job || {}).version || 1;
+  await jpost(auth, `/api/admin/content/jobs/${idC}/action`, {
+    action: "approve",
+    version: verC,
+    confirm: true,
+    idempotencyKey: `ap-${idC}`,
   });
-  writeFileSync(join(evDir, "02-partial-uncertain.json"), JSON.stringify({ pub, pubU, blocked, cardU }, null, 2));
+  await setScenario(auth, "ok");
+  const [c1, c2] = await Promise.all([
+    jpost(auth, `/api/admin/content/jobs/${idC}/action`, {
+      action: "publish_now",
+      version: verC,
+      confirm: true,
+      idempotencyKey: `pub-conc-a-${idC}`,
+    }),
+    jpost(auth, `/api/admin/content/jobs/${idC}/action`, {
+      action: "publish_now",
+      version: verC,
+      confirm: true,
+      idempotencyKey: `pub-conc-b-${idC}`,
+    }),
+  ]);
+  const cardC = (await jget(auth, `/api/admin/content/jobs/${idC}`)).json.job || {};
+  const igPubs = (cardC.publications || []).filter((p) => p.platform === "instagram" && p.status === "PUBLISHED");
+  record("concurrent_publish_single_ig", "simulacion", igPubs.length <= 1 && (c1.ok || c2.ok), {
+    c1: c1.json.ok,
+    c2: c2.json.ok,
+    igPublishedRows: igPubs.length,
+  });
+
+  const staleEdit = await jpost(auth, `/api/admin/content/jobs/${idC}/action`, {
+    action: "save_copy",
+    version: 0,
+    copy: "obsoleto",
+    idempotencyKey: `stale-${idC}`,
+  });
+  record(
+    "stale_version_edit_blocked",
+    "api_aislada",
+    staleEdit.json.error === "stale_version" ||
+      staleEdit.json.error === "version_required" ||
+      staleEdit.json.error === "already_published" ||
+      staleEdit.status === 409,
+    { error: staleEdit.json.error },
+  );
+
+  writeFileSync(join(evDir, "02-partial-uncertain.json"), JSON.stringify({ pub, retry, pubU, blocked, cardU, c1, c2 }, null, 2));
 }
 
-// --- Disposition / security: defer to physical matrix script (fictional data) ---
+// --- Disposition / security: delegated physical matrix (PENDING, not fake PASS) ---
 {
-  record("disposition_matrix_delegated", "implementacion", true, {
-    run: "node scripts/control-physical-a06-matrix.mjs",
-    note: "Reject/cancel/security/notify/auth covered there against same isolated backend",
+  results.push({
+    name: "disposition_matrix_delegated",
+    kind: "implementacion",
+    result: "PENDING",
+    detail: {
+      pending: true,
+      run: "node scripts/control-physical-a06-matrix.mjs",
+      note: "Reject/cancel/security/notify covered there; not auto-PASS here",
+    },
+    at: new Date().toISOString(),
   });
+  console.log("PENDING", "[implementacion]", "disposition_matrix_delegated");
   // Unauthorized without token
   const bad = await fetch(`${BASE}/api/admin/service-requests/HS-FAKE/disposition`, {
     method: "POST",
@@ -403,15 +490,16 @@ record("login_isolated", "api_aislada", true, { base: BASE });
 writeFileSync(join(evDir, "RESULTS.json"), JSON.stringify({ failed, results }, null, 2));
 writeFileSync(
   join(evDir, "COPY-BEHAVIOR.md"),
-  `# controlCopyFromContext — comportamiento real
+  `# Copy from AI context — comportamiento real
 
-- **No invoca modelo LLM.** En aislado \`OPENAI_API_KEY\` está vacío.
-- Con nota: ensambla plantilla local (\`\${context} + folio + CTA Homestead\`).
-- Sin nota: plantilla genérica / \`isolatedCopyFallback\`.
-- Fallo de proveedor: no aplica (no hay llamada); el texto se construye en proceso.
-- Contexto y texto editado: \`description\` / copy versionado; \`save_copy\` / \`update_ai_context\` / reorder invalidan aprobación.
+- **Generador:** \`rewriteCopyOnly\` (\`src/lib/content-openai.ts\`) vía \`controlCopyFromContext\`.
+- La nota del operador es **orientación**; no se publica literalmente como caption.
+- **Aislado:** el generador responde con \`isolatedCopyFallback\` → \`usedFallback\` + \`needsReview\`.
+- **Fallback plantilla:** si el modelo falla → prompt \`control-template-fallback\` + \`needsReview\`.
+- **Ediciones manuales:** \`save_copy\` conserva el texto hasta regenerar.
+- Sin visión de fotos en Control intake.
 
-No llamar a esto "generación IA" en UX ni en informes.
+No llamar a la plantilla "generación IA" sin marcar revisión.
 `,
 );
 
