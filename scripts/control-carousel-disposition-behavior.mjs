@@ -272,6 +272,7 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
     .get(created.publicId);
   ok("whatsapp assisted never SENT", row?.status !== "SENT" && (row?.status === "NEEDS_ACTION" || row?.status === "DRAFT"), row?.status);
 
+  const targetMessage = `mensaje-unico-${Date.now()}`;
   const created2 = saveServiceRequest({
     name: "Notify Conc",
     phone: "+50760000098",
@@ -288,10 +289,78 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
         (public_id, kind, channel, payload_json, status, idempotency_key, attempts, last_error, created_at, updated_at)
        VALUES (?, 'INFO', 'SIMULATED', ?, 'PENDING', ?, 0, '', ?, ?)`,
     )
-    .run(created2.publicId, JSON.stringify({ message: "hola" }), `conc-${created2.publicId}`, now2, now2);
+    .run(created2.publicId, JSON.stringify({ message: targetMessage }), `conc-${created2.publicId}`, now2, now2);
+  resetSimulatedCalls();
   const [d1, d2] = await Promise.all([drainCustomerNotifyOutbox(10), drainCustomerNotifyOutbox(10)]);
   const sent = [...d1, ...d2].filter((r) => r.ok && r.status === "SENT");
-  ok("notify atomic claim concurrent", new Set(sent.map((r) => r.id)).size >= 1, String(sent.length));
+  const persisted = getHomesteadDb()
+    .prepare(`SELECT status, payload_json FROM service_request_notify_outbox WHERE public_id = ?`)
+    .get(created2.publicId);
+  const smtpHits = listSimulatedCalls().filter(
+    (c) => c.provider === "smtp" && String(c.detail || "").includes(`customer_notify:${created2.publicId}`),
+  );
+  ok(
+    "notify exactly one SENT for target message",
+    sent.length === 1 &&
+      persisted?.status === "SENT" &&
+      String(persisted.payload_json).includes(targetMessage) &&
+      smtpHits.length === 1,
+    `sent=${sent.length} status=${persisted?.status} smtp=${smtpHits.length}`,
+  );
+
+  // Uncertain after accept must not auto-retry to PENDING
+  const { setSimulatedNotifyScenario } = await import("../src/lib/control-isolation.ts");
+  setSimulatedNotifyScenario("uncertain_after_accept");
+  const created3 = saveServiceRequest({
+    name: "Notify Uncertain",
+    phone: "+50760000097",
+    email: "u@example.invalid",
+    property: "house",
+    service: "plumbing",
+    message: "unc",
+    photos: [],
+  });
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO service_request_notify_outbox
+        (public_id, kind, channel, payload_json, status, idempotency_key, attempts, last_error, created_at, updated_at)
+       VALUES (?, 'INFO', 'SIMULATED', ?, 'PENDING', ?, 0, '', ?, ?)`,
+    )
+    .run(created3.publicId, JSON.stringify({ message: "after-accept" }), `unc-${created3.publicId}`, new Date().toISOString(), new Date().toISOString());
+  await drainCustomerNotifyOutbox(5);
+  const uncRow = getHomesteadDb()
+    .prepare(`SELECT status FROM service_request_notify_outbox WHERE public_id = ?`)
+    .get(created3.publicId);
+  ok("notify uncertain after accept stays UNCERTAIN", uncRow?.status === "UNCERTAIN", uncRow?.status);
+  setSimulatedNotifyScenario("ok");
+
+  // Lease expiry without send → ABANDONED then requeued PENDING; with send_attempted → UNCERTAIN
+  const created4 = saveServiceRequest({
+    name: "Notify Lease",
+    phone: "+50760000096",
+    email: "l@example.invalid",
+    property: "house",
+    service: "plumbing",
+    message: "lease",
+    photos: [],
+  });
+  const past = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO service_request_notify_outbox
+        (public_id, kind, channel, payload_json, status, idempotency_key, attempts, last_error, created_at, updated_at, claim_token, lease_until, send_attempted)
+       VALUES (?, 'INFO', 'SIMULATED', ?, 'SENDING', ?, 0, '', ?, ?, 'old-token', ?, 0)`,
+    )
+    .run(created4.publicId, JSON.stringify({ message: "lease-no-send" }), `lease-${created4.publicId}`, past, past, past);
+  await drainCustomerNotifyOutbox(5);
+  const leaseRow = getHomesteadDb()
+    .prepare(`SELECT status FROM service_request_notify_outbox WHERE public_id = ?`)
+    .get(created4.publicId);
+  ok(
+    "notify lease expired without send requeued or SENT once",
+    leaseRow?.status === "SENT" || leaseRow?.status === "PENDING" || leaseRow?.status === "ABANDONED",
+    leaseRow?.status,
+  );
 }
 
 {
@@ -318,6 +387,42 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   });
   ok("idempotency conflict on different copy", first.ok === true && conflict.ok === false && conflict.error === "idempotency_conflict");
 
+  // Two editors same initial revision — second must not overwrite silently
+  const ver2 = latestVersion(publicId)?.version || 1;
+  const a = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: ver2,
+    actor: "editor-a",
+    copy: "Editor A wins",
+    idempotencyKey: `dual-a-${publicId}`,
+  });
+  const b = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: ver2,
+    actor: "editor-b",
+    copy: "Editor B stale",
+    idempotencyKey: `dual-b-${publicId}`,
+  });
+  const jobAfter = getJobByPublicId(publicId);
+  ok(
+    "two edits same revision one wins",
+    a.ok === true && b.ok === false && b.error === "stale_version" && jobAfter?.selectedCaption === "Editor A wins",
+    `a=${a.ok} b=${b.error} caption=${jobAfter?.selectedCaption}`,
+  );
+
+  // Version absent
+  const missing = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: undefined,
+    actor: "test",
+    copy: "no version",
+    idempotencyKey: `nov-${publicId}`,
+  });
+  ok("version absent rejected", missing.ok === false && (missing.error === "version_required" || missing.error === "stale_version"), missing.error);
+
   await runControlJobAction({
     publicId,
     action: "regenerate_copy",
@@ -338,6 +443,135 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   ok("stale version edit rejected", stale.ok === false && stale.error === "stale_version", stale.error);
   const job = getJobByPublicId(publicId);
   ok("copy not literal operator note", job?.selectedCaption?.trim() !== "instruccion operador no literal");
+}
+
+{
+  // Concurrent regen with edit during openai hold
+  const { holdSimulatedOpenAi, releaseSimulatedOpenAi } = await import("../src/lib/control-isolation.ts");
+  const { publicId } = await prepareAlbum("regen-race");
+  const ver = latestVersion(publicId)?.version || 1;
+  holdSimulatedOpenAi();
+  const regenPromise = runControlJobAction({
+    publicId,
+    action: "regenerate_copy",
+    version: ver,
+    actor: "regen",
+    note: "contexto durante espera",
+    idempotencyKey: `regen-race-${publicId}`,
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  const editDuring = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: ver,
+    actor: "editor",
+    copy: "Editado durante regen",
+    idempotencyKey: `edit-during-${publicId}`,
+  });
+  releaseSimulatedOpenAi();
+  const regen = await regenPromise;
+  const finalCaption = getJobByPublicId(publicId)?.selectedCaption;
+  ok(
+    "regen concurrent with edit conflicts",
+    editDuring.ok === true &&
+      regen.ok === false &&
+      String(regen.error).includes("conflict") &&
+      finalCaption === "Editado durante regen",
+    `edit=${editDuring.ok} regen=${regen.error} caption=${finalCaption}`,
+  );
+}
+
+{
+  // Regenerar → version linked to media → approve → publish (album)
+  const { getContentVersion, listAssets: listA } = await import("../src/lib/content-catalog.ts");
+  const { listOrderedBrandedFeeds, listAllBrandedFeeds } = await import("../src/lib/content-multi-photo.ts");
+  const { publicId } = await prepareAlbum("link-media");
+  const beforeAssets = listAllBrandedFeeds(publicId).length;
+  const ver0 = latestVersion(publicId)?.version || 1;
+  const regen = await runControlJobAction({
+    publicId,
+    action: "regenerate_copy",
+    version: ver0,
+    actor: "test",
+    note: "nuevo texto",
+    idempotencyKey: `link-regen-${publicId}`,
+  });
+  const ver1 = latestVersion(publicId);
+  ok(
+    "regen creates content_version with media_order",
+    regen.ok && ver1?.version > ver0 && Boolean(ver1.mediaOrderJson) && JSON.parse(ver1.mediaOrderJson).length >= 2,
+    `v=${ver1?.version} order=${ver1?.mediaOrderJson}`,
+  );
+  ok("regen keeps branded assets", listAllBrandedFeeds(publicId).length === beforeAssets, String(listAllBrandedFeeds(publicId).length));
+
+  // Remove one photo from carousel
+  const orderIds = JSON.parse(ver1.mediaOrderJson);
+  const removeId = orderIds[orderIds.length - 1];
+  const keepIds = orderIds.slice(0, -1);
+  const { applyContentEditAtomic } = await import("../src/lib/content-edit-guard.ts");
+  const removed = applyContentEditAtomic({
+    publicId,
+    expectedVersion: ver1.version,
+    kind: "image",
+    actor: "test",
+    event: "CONTENT_MEDIA_CHANGED",
+    copy: getJobByPublicId(publicId).selectedCaption,
+    mediaOrderJson: JSON.stringify(keepIds),
+    jobPatch: {
+      mediaOrderJson: JSON.stringify(keepIds),
+      format: keepIds.length >= 2 ? "CAROUSEL" : "SINGLE_IMAGE",
+      publishMode: keepIds.length >= 2 ? "album" : "separate",
+      approvedVersion: null,
+      status: "AWAITING_APPROVAL",
+      lastError: "media_changed",
+    },
+  });
+  const ordered = listOrderedBrandedFeeds(publicId, 1, getJobByPublicId(publicId).mediaOrderJson);
+  ok(
+    "removed photo excluded from order but retained",
+    removed.ok &&
+      ordered.every((a) => a.id !== removeId) &&
+      listAllBrandedFeeds(publicId).some((a) => a.id === removeId),
+    `ordered=${ordered.map((a) => a.id)} remove=${removeId}`,
+  );
+
+  tryApproveContentJob(publicId, "test");
+  updateJob(publicId, { approvedVersion: latestVersion(publicId)?.version || 1, status: "APPROVED" });
+  resetSimulatedCalls();
+  setSimulatedGraphScenario("ok");
+  const published = await publishJob(publicId, "now", createGraphTransport());
+  const igCalls = listSimulatedCalls().filter((c) => c.provider === "meta" && c.request?.isCarouselItem);
+  const childCreates = igCalls.length;
+  ok(
+    "publish uses remaining slides only",
+    published.ok === true && childCreates === keepIds.length,
+    `ok=${published.ok} children=${childCreates} keep=${keepIds.length}`,
+  );
+}
+
+{
+  // Single image regenerate → approve → publish
+  const ingested = await ingestControlPhotos({
+    files: [{ filename: "one.jpg", bytes: await jpeg("Z") }],
+    note: "single",
+    actor: "test-runner",
+    publishMode: "separate",
+  });
+  const publicId = ingested.items.find((i) => i.ok)?.publicId;
+  const ver = latestVersion(publicId)?.version || 1;
+  const regen = await runControlJobAction({
+    publicId,
+    action: "regenerate_copy",
+    version: ver,
+    actor: "test",
+    note: "single ctx",
+    idempotencyKey: `single-regen-${publicId}`,
+  });
+  tryApproveContentJob(publicId, "test");
+  updateJob(publicId, { approvedVersion: latestVersion(publicId)?.version || 1, status: "APPROVED" });
+  setSimulatedGraphScenario("ok");
+  const published = await publishJob(publicId, "now", createGraphTransport());
+  ok("single image regen approve publish", regen.ok && published.ok, `regen=${regen.ok} pub=${published.ok}`);
 }
 
 {
@@ -365,6 +599,382 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   ]);
   const ig = listPublicationsForJob(publicId).filter((p) => p.platform === "instagram" && p.status === "PUBLISHED");
   ok("concurrent publish single IG", ig.length <= 1 && (a.ok || b.ok), `ig=${ig.length} a=${a.ok} b=${b.ok}`);
+}
+
+{
+  // Action receipt lease expiry: expired active → abandoned (row kept), reclaimable by SAME payload only
+  const { createHash } = await import("node:crypto");
+  const receiptHashOf = (input) =>
+    createHash("sha256")
+      .update(
+        [
+          input.key,
+          input.publicId,
+          input.action,
+          input.actor,
+          String(input.version),
+          input.confirm ? "1" : "0",
+          String(input.copy ?? ""),
+          String(input.note ?? ""),
+        ].join("|"),
+      )
+      .digest("hex");
+
+  const { publicId } = await prepareAlbum("receipt-lease");
+  const key = `lease-op-${publicId}`;
+  const past = new Date(Date.now() - 60_000).toISOString();
+  const ver = latestVersion(publicId)?.version || 1;
+  const reclaimCopy = "Reclaimed after lease expiry";
+  const reclaimHash = receiptHashOf({
+    key,
+    publicId,
+    action: "save_copy",
+    actor: "new-executor",
+    version: ver,
+    copy: reclaimCopy,
+  });
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO control_action_receipts
+        (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
+       VALUES (?, ?, 'save_copy', 'old-executor', ?, ?, ?)`,
+    )
+    .run(
+      key,
+      publicId,
+      JSON.stringify({ __pending: true, owner: "old-executor-token", leaseUntil: past, state: "abandoned" }),
+      reclaimHash,
+      past,
+    );
+  const reclaim = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: ver,
+    actor: "new-executor",
+    copy: reclaimCopy,
+    idempotencyKey: key,
+  });
+  const row = getHomesteadDb()
+    .prepare(`SELECT result_json FROM control_action_receipts WHERE idempotency_key = ?`)
+    .get(key);
+  const payload = JSON.parse(row.result_json);
+  ok(
+    "action receipt past lease reclaimed without DELETE",
+    reclaim.ok === true &&
+      payload.__pending !== true &&
+      getJobByPublicId(publicId)?.selectedCaption === reclaimCopy &&
+      Boolean(row),
+    `ok=${reclaim.ok} pending=${payload.__pending} caption=${getJobByPublicId(publicId)?.selectedCaption}`,
+  );
+
+  // Same key + different payload after abandon → conflict (reservation expired does not clear hash)
+  const keyDiff = `lease-diff-${publicId}`;
+  const hashA = receiptHashOf({
+    key: keyDiff,
+    publicId,
+    action: "save_copy",
+    actor: "old",
+    version: latestVersion(publicId)?.version || 1,
+    copy: "Payload A",
+  });
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO control_action_receipts
+        (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
+       VALUES (?, ?, 'save_copy', 'old', ?, ?, ?)`,
+    )
+    .run(
+      keyDiff,
+      publicId,
+      JSON.stringify({ __pending: true, owner: "old-a", leaseUntil: past, state: "abandoned" }),
+      hashA,
+      past,
+    );
+  const conflictAfterLease = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: latestVersion(publicId)?.version || 1,
+    actor: "new",
+    copy: "Payload B different",
+    idempotencyKey: keyDiff,
+  });
+  ok(
+    "idempotency conflict after lease expiry with different payload",
+    conflictAfterLease.ok === false && conflictAfterLease.error === "idempotency_conflict",
+    `err=${conflictAfterLease.error}`,
+  );
+
+  // Old executor cannot overwrite finished result of newer owner
+  const keyRace = `stale-finish-${publicId}`;
+  const raceCopy = "Newer executor result";
+  const raceVer = latestVersion(publicId)?.version || 1;
+  const raceHash = receiptHashOf({
+    key: keyRace,
+    publicId,
+    action: "save_copy",
+    actor: "newer",
+    version: raceVer,
+    copy: raceCopy,
+  });
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO control_action_receipts
+        (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
+       VALUES (?, ?, 'save_copy', 'old', ?, ?, ?)`,
+    )
+    .run(
+      keyRace,
+      publicId,
+      JSON.stringify({ __pending: true, owner: "old-owner-token", leaseUntil: past, state: "abandoned" }),
+      raceHash,
+      past,
+    );
+  const newer = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: raceVer,
+    actor: "newer",
+    copy: raceCopy,
+    idempotencyKey: keyRace,
+  });
+  const beforeOverwrite = getHomesteadDb()
+    .prepare(`SELECT result_json FROM control_action_receipts WHERE idempotency_key = ?`)
+    .get(keyRace);
+  // Simulate late finish from old executor (conditional UPDATE must affect 0 rows)
+  const late = getHomesteadDb()
+    .prepare(
+      `UPDATE control_action_receipts
+       SET result_json = ?
+       WHERE idempotency_key = ?
+         AND request_hash = ?
+         AND result_json LIKE '%"__pending":true%'
+         AND result_json LIKE '%"state":"active"%'
+         AND result_json LIKE ?`,
+    )
+    .run(JSON.stringify({ ok: false, error: "stale_overwrite" }), keyRace, raceHash, `%"owner":"old-owner-token"%`);
+  const afterOverwrite = getHomesteadDb()
+    .prepare(`SELECT result_json FROM control_action_receipts WHERE idempotency_key = ?`)
+    .get(keyRace);
+  ok(
+    "old executor cannot overwrite finished newer receipt",
+    newer.ok === true &&
+      late.changes === 0 &&
+      afterOverwrite.result_json === beforeOverwrite.result_json &&
+      !String(afterOverwrite.result_json).includes("stale_overwrite"),
+    `newer=${newer.ok} changes=${late.changes}`,
+  );
+
+  // Stale executor must not finish a receipt owned by another
+  const key2 = `stale-owner-${publicId}`;
+  const future = new Date(Date.now() + 10 * 60_000).toISOString();
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO control_action_receipts
+        (idempotency_key, public_id, action, actor, result_json, request_hash, created_at)
+       VALUES (?, ?, 'save_copy', 'holder', ?, 'hash-stale-2', ?)`,
+    )
+    .run(
+      key2,
+      publicId,
+      JSON.stringify({ __pending: true, owner: "current-owner", leaseUntil: future, state: "active" }),
+      new Date().toISOString(),
+    );
+  const stale = await runControlJobAction({
+    publicId,
+    action: "save_copy",
+    version: latestVersion(publicId)?.version || 1,
+    actor: "stale-executor",
+    copy: "Must not overwrite",
+    idempotencyKey: key2,
+  });
+  const row2 = getHomesteadDb()
+    .prepare(`SELECT result_json FROM control_action_receipts WHERE idempotency_key = ?`)
+    .get(key2);
+  const p2 = JSON.parse(row2.result_json);
+  ok(
+    "stale executor cannot finish stolen receipt",
+    stale.ok === false &&
+      (stale.error === "idempotency_inflight" || stale.error === "idempotency_conflict") &&
+      p2.__pending === true &&
+      p2.owner === "current-owner",
+    `err=${stale.error} owner=${p2.owner} pending=${p2.__pending}`,
+  );
+}
+
+{
+  // Regen concurrent with publish during OpenAI hold
+  const { holdSimulatedOpenAi, releaseSimulatedOpenAi } = await import("../src/lib/control-isolation.ts");
+  const { publicId } = await prepareAlbum("regen-pub-race");
+  const ver = latestVersion(publicId)?.version || 1;
+  tryApproveContentJob(publicId, "test");
+  updateJob(publicId, { approvedVersion: ver, status: "APPROVED" });
+  holdSimulatedOpenAi();
+  const regenPromise = runControlJobAction({
+    publicId,
+    action: "regenerate_copy",
+    version: ver,
+    actor: "regen",
+    note: "durante publish",
+    idempotencyKey: `regen-pub-${publicId}`,
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  const pubDuring = await runControlJobAction({
+    publicId,
+    action: "publish_now",
+    version: ver,
+    actor: "publisher",
+    confirm: true,
+    idempotencyKey: `pub-during-regen-${publicId}`,
+  });
+  releaseSimulatedOpenAi();
+  const regen = await regenPromise;
+  const pubs = listPublicationsForJob(publicId);
+  const live = pubs.some((p) => p.status === "PUBLISHED");
+  ok(
+    "regen concurrent with publish conflicts",
+    pubDuring.ok === true &&
+      regen.ok === false &&
+      String(regen.error).includes("conflict") &&
+      live,
+    `pub=${pubDuring.ok} regen=${regen.error} live=${live}`,
+  );
+}
+
+{
+  // Notify: lose lease just before send → zero SMTP from old executor
+  const { setNotifyPreSendHook, listSimulatedCalls, resetSimulatedCalls } = await import(
+    "../src/lib/control-isolation.ts"
+  );
+  const createdSteal = saveServiceRequest({
+    name: "Notify Steal",
+    phone: "+50760000097",
+    email: "steal@example.invalid",
+    property: "house",
+    service: "plumbing",
+    message: "steal-lease",
+    photos: [],
+  });
+  getHomesteadDb()
+    .prepare(
+      `INSERT INTO service_request_notify_outbox
+        (public_id, kind, channel, payload_json, status, idempotency_key, attempts, last_error, created_at, updated_at)
+       VALUES (?, 'INFO', 'SIMULATED', ?, 'PENDING', ?, 0, '', ?, ?)`,
+    )
+    .run(
+      createdSteal.publicId,
+      JSON.stringify({ message: "should-not-send" }),
+      `steal-${createdSteal.publicId}`,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+  resetSimulatedCalls();
+  setNotifyPreSendHook(({ id, claimToken }) => {
+    getHomesteadDb()
+      .prepare(
+        `UPDATE service_request_notify_outbox
+         SET claim_token = 'stolen-by-other', lease_until = ?, updated_at = ?
+         WHERE id = ? AND claim_token = ?`,
+      )
+      .run(new Date(Date.now() - 60_000).toISOString(), new Date().toISOString(), id, claimToken);
+  });
+  const drainedSteal = await drainCustomerNotifyOutbox(5);
+  setNotifyPreSendHook(null);
+  const smtpFromSteal = listSimulatedCalls().filter(
+    (c) => c.provider === "smtp" && String(c.detail || "").includes(createdSteal.publicId),
+  );
+  const stealRow = getHomesteadDb()
+    .prepare(`SELECT status, send_attempted, claim_token FROM service_request_notify_outbox WHERE public_id = ?`)
+    .get(createdSteal.publicId);
+  ok(
+    "notify stolen lease before send: zero SMTP",
+    smtpFromSteal.length === 0 &&
+      drainedSteal.some((r) => r.status === "stolen_or_expired") &&
+      Number(stealRow?.send_attempted || 0) === 0,
+    `smtp=${smtpFromSteal.length} drain=${JSON.stringify(drainedSteal)} row=${JSON.stringify(stealRow)}`,
+  );
+}
+
+{
+  // Reprocess: each ORIGINAL → new BRANDED (no overwrite); 3 distinct images; atomic version
+  const { reprocessControlBrand } = await import("../src/lib/control-intake.ts");
+  const { listOrderedBrandedFeeds, listAllBrandedFeeds } = await import("../src/lib/content-multi-photo.ts");
+  const { existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { homesteadDataDir } = await import("../src/lib/service-requests.ts");
+
+  const colors = [
+    { r: 220, g: 20, b: 20 },
+    { r: 20, g: 180, b: 40 },
+    { r: 30, g: 40, b: 220 },
+  ];
+  const files = [];
+  for (let i = 0; i < 3; i++) {
+    const bytes = await sharp({
+      create: { width: 1080, height: 1350, channels: 3, background: colors[i] },
+    })
+      .jpeg()
+      .toBuffer();
+    files.push({ filename: `repro-${i + 1}.jpg`, bytes });
+  }
+  const ingested = await ingestControlPhotos({
+    files,
+    note: "reprocess-pair-test",
+    actor: "test-runner",
+    publishMode: "album",
+  });
+  const publicId = ingested.publicId;
+  const originals = listAssets(publicId, "ORIGINAL", 0).sort((a, b) => a.id - b.id);
+  const beforeFeeds = listAllBrandedFeeds(publicId);
+  const beforePaths = beforeFeeds.map((a) => a.relativePath);
+  const beforeSha = beforeFeeds.map((a) => a.sha256);
+  const ver0 = latestVersion(publicId)?.version || 1;
+  const order0 = JSON.parse(getJobByPublicId(publicId)?.mediaOrderJson || "[]");
+
+  const rep = await reprocessControlBrand(publicId, ver0);
+  const ver1 = latestVersion(publicId);
+  const afterFeeds = listAllBrandedFeeds(publicId);
+  const order1 = JSON.parse(getJobByPublicId(publicId)?.mediaOrderJson || "[]");
+  const ordered = listOrderedBrandedFeeds(publicId, ver1?.version || 0, getJobByPublicId(publicId)?.mediaOrderJson);
+  const newAssets = afterFeeds.filter((a) => order1.includes(a.id));
+  const oldStillExist = beforePaths.every((p) => existsSync(join(homesteadDataDir(), "content", p)));
+  const shasDistinct = new Set(newAssets.map((a) => a.sha256)).size;
+  ok(
+    "reprocess pairs each original to new branded without overwrite",
+    rep.ok === true &&
+      originals.length === 3 &&
+      order1.length === 3 &&
+      order1.every((id) => !order0.includes(id)) &&
+      newAssets.length === 3 &&
+      oldStillExist &&
+      beforeSha.every((s) => afterFeeds.some((a) => a.sha256 === s)) &&
+      ver1?.version === ver0 + 1 &&
+      ordered.length === 3 &&
+      shasDistinct === 3,
+    `ok=${rep.ok} v=${ver1?.version} order0=${order0} order1=${order1} shas=${shasDistinct} oldExist=${oldStillExist}`,
+  );
+
+  // Conflict: concurrent version bump keeps current selection intact
+  const verNow = latestVersion(publicId)?.version || 1;
+  const orderBeforeConflict = getJobByPublicId(publicId)?.mediaOrderJson;
+  const { applyContentEditAtomic } = await import("../src/lib/content-edit-guard.ts");
+  applyContentEditAtomic({
+    publicId,
+    expectedVersion: verNow,
+    kind: "copy",
+    actor: "concurrent",
+    event: "CONTENT_EDITED",
+    copy: "bumped during reprocess",
+    jobPatch: { selectedCaption: "bumped during reprocess", approvedVersion: null, status: "AWAITING_APPROVAL" },
+  });
+  const conflicted = await reprocessControlBrand(publicId, verNow);
+  ok(
+    "reprocess conflict keeps current version intact",
+    conflicted.ok === false &&
+      (String(conflicted.error).includes("conflict") || conflicted.error === "stale_version") &&
+      getJobByPublicId(publicId)?.mediaOrderJson === orderBeforeConflict &&
+      latestVersion(publicId)?.version === verNow + 1,
+    `err=${conflicted.error} order=${getJobByPublicId(publicId)?.mediaOrderJson}`,
+  );
 }
 
 if (failed) {

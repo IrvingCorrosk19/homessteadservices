@@ -4,7 +4,14 @@
  */
 import { PUBLIC_ID_PATTERN, isRequestStatus, type RequestStatus } from "@/lib/admin-format";
 import { enqueueOutbox } from "@/lib/automation-outbox";
-import { isControlIsolated, maybeThrowSimulatedNotifyFailure, recordSimulatedCall } from "@/lib/control-isolation";
+import {
+  isControlIsolated,
+  maybeThrowSimulatedNotifyFailureAfterAccept,
+  maybeThrowSimulatedNotifyFailureBeforeSend,
+  recordSimulatedCall,
+  runNotifyPreSendHook,
+} from "@/lib/control-isolation";
+import { createHash, randomUUID } from "crypto";
 import { logError, logInfo } from "@/lib/log";
 import {
   cancelServiceRequest,
@@ -196,18 +203,58 @@ function enqueueCustomerNotify(input: {
   return { ok: true as const, already: false, id: Number(info.lastInsertRowid), status: "PENDING" };
 }
 
+const NOTIFY_LEASE_MS = 5 * 60 * 1000;
+
+function finishNotifyOwned(
+  id: number,
+  claimToken: string,
+  patch: { status: string; attempts: number; lastError: string; now: string },
+) {
+  const info = getHomesteadDb()
+    .prepare(
+      `UPDATE service_request_notify_outbox
+       SET status = ?, attempts = ?, last_error = ?, updated_at = ?, claim_token = claim_token
+       WHERE id = ? AND claim_token = ? AND status = 'SENDING'`,
+    )
+    .run(patch.status, patch.attempts, patch.lastError, patch.now, id, claimToken);
+  return info.changes === 1;
+}
+
+/**
+ * Drain customer notify outbox with ownership leases.
+ * - Confirmed failure before send → PENDING retry (or FAILED after budget).
+ * - Uncertain after send accepted → UNCERTAIN (never auto-retry).
+ * - Expired lease without send_attempted → ABANDONED (reconcile may re-queue once).
+ * - Expired lease with send_attempted → UNCERTAIN.
+ * Old executors cannot finish a job whose claim_token no longer matches.
+ */
 export async function drainCustomerNotifyOutbox(limit = 20) {
-  const SENDING_STALE_MS = 5 * 60 * 1000;
   const nowIso = new Date().toISOString();
-  const staleBefore = new Date(Date.now() - SENDING_STALE_MS).toISOString();
-  // Recover crash mid-send: SENDING older than TTL returns to PENDING (at-least-once; not exactly-once SMTP).
+  const staleBefore = new Date(Date.now() - NOTIFY_LEASE_MS).toISOString();
+
+  // Reconcile expired leases — do NOT blindly return UNCERTAIN/send_attempted to PENDING.
   getHomesteadDb()
     .prepare(
       `UPDATE service_request_notify_outbox
-       SET status = 'PENDING', last_error = 'reclaimed_stale_sending', updated_at = ?
-       WHERE status = 'SENDING' AND updated_at <= ?`,
+       SET status = 'UNCERTAIN', last_error = 'lease_expired_after_send_attempt', updated_at = ?, claim_token = ''
+       WHERE status = 'SENDING' AND lease_until != '' AND lease_until <= ? AND send_attempted = 1`,
     )
     .run(nowIso, staleBefore);
+  getHomesteadDb()
+    .prepare(
+      `UPDATE service_request_notify_outbox
+       SET status = 'ABANDONED', last_error = 'lease_expired_no_send', updated_at = ?, claim_token = ''
+       WHERE status = 'SENDING' AND lease_until != '' AND lease_until <= ? AND send_attempted = 0`,
+    )
+    .run(nowIso, staleBefore);
+  // Controlled requeue of abandoned (never sent) — not uncertain.
+  getHomesteadDb()
+    .prepare(
+      `UPDATE service_request_notify_outbox
+       SET status = 'PENDING', last_error = 'requeued_abandoned', updated_at = ?
+       WHERE status = 'ABANDONED' AND send_attempted = 0`,
+    )
+    .run(nowIso);
 
   const candidates = getHomesteadDb()
     .prepare(
@@ -215,20 +262,22 @@ export async function drainCustomerNotifyOutbox(limit = 20) {
     )
     .all(limit) as Array<{ id: number }>;
 
-  const results: Array<{ id: number; ok: boolean; status: string }> = [];
+  const results: Array<{ id: number; ok: boolean; status: string; claimToken?: string }> = [];
   for (const candidate of candidates) {
+    const claimToken = randomUUID();
+    const leaseUntil = new Date(Date.now() + NOTIFY_LEASE_MS).toISOString();
     const claimed = getHomesteadDb()
       .prepare(
         `UPDATE service_request_notify_outbox
-         SET status = 'SENDING', updated_at = ?
+         SET status = 'SENDING', claim_token = ?, lease_until = ?, send_attempted = 0, updated_at = ?
          WHERE id = ? AND status = 'PENDING'`,
       )
-      .run(new Date().toISOString(), candidate.id);
+      .run(claimToken, leaseUntil, new Date().toISOString(), candidate.id);
     if (claimed.changes !== 1) continue;
 
     const row = getHomesteadDb()
       .prepare(
-        `SELECT id, public_id, kind, channel, payload_json, attempts, idempotency_key
+        `SELECT id, public_id, kind, channel, payload_json, attempts, idempotency_key, claim_token
          FROM service_request_notify_outbox WHERE id = ?`,
       )
       .get(candidate.id) as {
@@ -239,76 +288,108 @@ export async function drainCustomerNotifyOutbox(limit = 20) {
       payload_json: string;
       attempts: number;
       idempotency_key: string;
+      claim_token: string;
     };
 
     const now = new Date().toISOString();
+    const persistOwned = (status: string, attempts: number, lastError: string) => {
+      if (!finishNotifyOwned(row.id, claimToken, { status, attempts, lastError, now })) {
+        results.push({ id: row.id, ok: false, status: "stolen_or_expired", claimToken });
+        return false;
+      }
+      getHomesteadDb()
+        .prepare(
+          `UPDATE service_requests
+           SET customer_notify_status = ?, customer_notify_attempts = ?, customer_notify_last_error = ?, updated_at = ?
+           WHERE public_id = ?`,
+        )
+        .run(status, attempts, lastError.slice(0, 180), now, row.public_id);
+      return true;
+    };
+
     try {
       const payload = JSON.parse(row.payload_json || "{}") as { message?: string };
-      if (row.channel === "SIMULATED" || (isControlIsolated() && row.channel !== "WHATSAPP_LINK")) {
-        maybeThrowSimulatedNotifyFailure();
-        recordSimulatedCall("smtp", `customer_notify:${row.public_id}:${row.kind}`);
-      } else if (row.channel === "EMAIL") {
+      // Phase 1: confirmed pre-send failures (config / simulated before contact).
+      maybeThrowSimulatedNotifyFailureBeforeSend();
+      // Test hook: steal/expire lease after claim but before send_attempted gate.
+      runNotifyPreSendHook({ id: row.id, claimToken, publicId: row.public_id });
+
+      if (row.channel === "WHATSAPP_LINK") {
+        recordSimulatedCall("telegram", `customer_wa_link_draft:${row.public_id}`);
+        if (persistOwned("NEEDS_ACTION", row.attempts + 1, "whatsapp_assisted_pending")) {
+          results.push({ id: row.id, ok: true, status: "NEEDS_ACTION", claimToken });
+        }
+        continue;
+      }
+
+      // Gate send: must still own a live SENDING lease. If stolen/expired, do not contact the customer.
+      const markSendAttempted = () => {
+        const marked = getHomesteadDb()
+          .prepare(
+            `UPDATE service_request_notify_outbox
+             SET send_attempted = 1, updated_at = ?
+             WHERE id = ?
+               AND claim_token = ?
+               AND status = 'SENDING'
+               AND lease_until != ''
+               AND lease_until > ?`,
+          )
+          .run(now, row.id, claimToken, now);
+        return marked.changes === 1;
+      };
+
+      if (row.channel === "EMAIL") {
         const mail = await import("@/lib/mail");
         const req = getRequestByPublicId(row.public_id);
         if (!req?.email || !mail.isMailConfigured()) {
-          throw new Error(req?.email ? "smtp_unavailable" : "no_email");
+          throw Object.assign(new Error(req?.email ? "smtp_unavailable" : "no_email"), { phase: "before_send" });
+        }
+        if (!markSendAttempted()) {
+          results.push({ id: row.id, ok: false, status: "stolen_or_expired", claimToken });
+          continue;
         }
         await mail.sendCustomerDispositionEmail({
           to: req.email,
           publicId: row.public_id,
           body: String(payload.message || ""),
         });
-      } else if (row.channel === "WHATSAPP_LINK") {
-        // Assisted WhatsApp: generating/storing a deep-link draft is NOT delivery.
-        recordSimulatedCall("telegram", `customer_wa_link_draft:${row.public_id}`);
-        getHomesteadDb()
-          .prepare(
-            `UPDATE service_request_notify_outbox
-             SET status = 'NEEDS_ACTION', attempts = attempts + 1, updated_at = ?, last_error = 'whatsapp_assisted_pending'
-             WHERE id = ?`,
-          )
-          .run(now, row.id);
-        getHomesteadDb()
-          .prepare(
-            `UPDATE service_requests
-             SET customer_notify_status = 'NEEDS_ACTION', customer_notify_last_error = 'whatsapp_assisted_pending', updated_at = ?
-             WHERE public_id = ?`,
-          )
-          .run(now, row.public_id);
-        results.push({ id: row.id, ok: true, status: "NEEDS_ACTION" });
-        continue;
+        maybeThrowSimulatedNotifyFailureAfterAccept();
+      } else if (row.channel === "SIMULATED" || isControlIsolated()) {
+        if (!markSendAttempted()) {
+          results.push({ id: row.id, ok: false, status: "stolen_or_expired", claimToken });
+          continue;
+        }
+        recordSimulatedCall("smtp", `customer_notify:${row.public_id}:${row.kind}:${createHash("sha256").update(String(payload.message || "")).digest("hex").slice(0, 12)}`);
+        maybeThrowSimulatedNotifyFailureAfterAccept();
       } else {
-        throw new Error(`unsupported_channel:${row.channel}`);
+        throw Object.assign(new Error(`unsupported_channel:${row.channel}`), { phase: "before_send" });
       }
-      getHomesteadDb()
-        .prepare(
-          `UPDATE service_request_notify_outbox SET status = 'SENT', attempts = attempts + 1, updated_at = ?, last_error = '' WHERE id = ?`,
-        )
-        .run(now, row.id);
-      getHomesteadDb()
-        .prepare(
-          `UPDATE service_requests SET customer_notify_status = 'SENT', customer_notify_last_error = '', updated_at = ? WHERE public_id = ?`,
-        )
-        .run(now, row.public_id);
-      results.push({ id: row.id, ok: true, status: "SENT" });
-      void payload;
+
+      if (persistOwned("SENT", row.attempts + 1, "")) {
+        results.push({ id: row.id, ok: true, status: "SENT", claimToken });
+      }
     } catch (error) {
       const cause = error instanceof Error ? error.message : "notify_failed";
+      const phase =
+        (error as { phase?: string })?.phase ||
+        (/before_send|smtp_unavailable|no_email|unsupported_channel|simulated_smtp_denied_before_send/i.test(cause)
+          ? "before_send"
+          : /uncertain_after_accept/i.test(cause)
+            ? "after_accept"
+            : "after_accept");
       const attempts = row.attempts + 1;
-      // Uncertain SMTP: keep PENDING for retry; after budget → FAILED. Never claim exactly-once.
-      const status = attempts >= 5 ? "FAILED" : "PENDING";
-      getHomesteadDb()
-        .prepare(
-          `UPDATE service_request_notify_outbox SET status = ?, attempts = ?, last_error = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(status, attempts, cause.slice(0, 180), now, row.id);
-      getHomesteadDb()
-        .prepare(
-          `UPDATE service_requests SET customer_notify_status = ?, customer_notify_attempts = ?, customer_notify_last_error = ?, updated_at = ? WHERE public_id = ?`,
-        )
-        .run(status, attempts, cause.slice(0, 180), now, row.public_id);
+      if (phase === "before_send") {
+        const status = attempts >= 5 ? "FAILED" : "PENDING";
+        if (persistOwned(status, attempts, cause.slice(0, 180))) {
+          results.push({ id: row.id, ok: false, status, claimToken });
+        }
+      } else {
+        // After accept: UNCERTAIN — never auto-retry.
+        if (persistOwned("UNCERTAIN", attempts, cause.slice(0, 180))) {
+          results.push({ id: row.id, ok: false, status: "UNCERTAIN", claimToken });
+        }
+      }
       logError("ServiceRequestNotifyFailed", { stage: row.kind, contentJobId: row.public_id.slice(0, 24) });
-      results.push({ id: row.id, ok: false, status });
     }
   }
   return results;

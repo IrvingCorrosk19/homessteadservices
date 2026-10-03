@@ -7,7 +7,7 @@ import {
   getJobByPublicId,
   latestVersion,
   listAssets,
-  overwriteBrandedFeed,
+  listPublicationsForJob,
   readAssetBytes,
   recordContentEvent,
   saveVersion,
@@ -15,13 +15,13 @@ import {
   storeDerivedAsset,
   storeOriginal,
   updateJob,
-  nextVersionNumber,
 } from "@/lib/content-catalog";
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import { nextBatchPublicId } from "@/lib/content-photo-batch";
 import { brandedSocialSet, metadataOf, toJpeg } from "@/lib/content-images";
 import { isControlIsolated } from "@/lib/control-isolation";
 import { rewriteCopyOnly } from "@/lib/content-openai";
+import { applyContentEditAtomic, assertContentJobEditable, assertExpectedContentVersion } from "@/lib/content-edit-guard";
 import { validatePublishImage } from "@/lib/content-media-url";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { sniffImage } from "@/lib/photos";
@@ -206,50 +206,120 @@ export async function brandControlJob(
   return { ok: true as const, assetId: asset?.id || 0 };
 }
 
-/** Re-brand from ORIGINAL for pieces processed without feed crop (e.g. aspect 0.75). */
-export async function reprocessControlBrand(publicId: string) {
+/** Re-brand each ORIGINAL into a new BRANDED feed asset (never overwrite historical files). */
+export async function reprocessControlBrand(publicId: string, expectedVersion?: number) {
   const job = getJobByPublicId(publicId);
   if (!job) return { ok: false as const, error: "missing" as const };
-  const original = listAssets(publicId, "ORIGINAL", 0)[0];
-  if (!original) return { ok: false as const, error: "original_missing" as const };
-  const bytes = readAssetBytes(original);
-  if (!bytes) return { ok: false as const, error: "original_unreadable" as const };
+  const before = assertContentJobEditable(publicId);
+  if (!before.ok) return { ok: false as const, error: before.error };
+  const expected = expectedVersion ?? before.version;
+  const gate = assertExpectedContentVersion(publicId, expected);
+  if (!gate.ok) return { ok: false as const, error: gate.error, current: gate.current };
 
+  const originals = listAssets(publicId, "ORIGINAL", 0).sort((a, b) => a.id - b.id);
+  if (!originals.length) return { ok: false as const, error: "original_missing" as const };
+
+  const restoreStatus =
+    job.status === "PROCESSING" || job.status === "RECEIVING" ? "AWAITING_APPROVAL" : job.status;
   updateJob(publicId, { status: "PROCESSING", lastError: null, approvedVersion: null });
+  const keepCurrent = (cause: string, current?: number) => {
+    updateJob(publicId, { status: restoreStatus, lastError: null });
+    return { ok: false as const, error: "conflict_during_regen" as const, cause, current };
+  };
   try {
-    const jpeg = await toJpeg(bytes);
-    const set = await brandedSocialSet(jpeg);
-    const valid = validatePublishImage({
-      bytes: set.feed.bytes,
-      mime: "image/jpeg",
-      width: set.feed.width,
-      height: set.feed.height,
-    });
-    if (!valid.ok) {
-      updateJob(publicId, { status: "FAILED", lastError: valid.cause });
-      return { ok: false as const, error: valid.cause };
-    }
-    const existing = listAssets(publicId, "BRANDED").filter((a) => a.storedFilename.includes("-feed")).at(-1);
-    if (existing) {
-      overwriteBrandedFeed(publicId, set.feed.bytes, set.feed.width, set.feed.height);
-    } else {
-      const branded = await brandControlJob(publicId, bytes, { skipCopy: true, index: 1 });
-      if (!branded.ok) {
-        updateJob(publicId, { status: "FAILED", lastError: branded.error });
-        return { ok: false as const, error: branded.error };
+    const nextVersion = expected + 1;
+    const newFeedIds: number[] = [];
+    const widths: number[] = [];
+    const heights: number[] = [];
+    const batchTag = randomUUID().slice(0, 8);
+
+    for (let i = 0; i < originals.length; i++) {
+      const original = originals[i];
+      const bytes = readAssetBytes(original);
+      if (!bytes) {
+        updateJob(publicId, { status: "FAILED", lastError: "original_unreadable" });
+        return { ok: false as const, error: "original_unreadable" as const };
       }
+      const jpeg = await toJpeg(bytes);
+      const set = await brandedSocialSet(jpeg);
+      const valid = validatePublishImage({
+        bytes: set.feed.bytes,
+        mime: "image/jpeg",
+        width: set.feed.width,
+        height: set.feed.height,
+      });
+      if (!valid.ok) {
+        updateJob(publicId, { status: "FAILED", lastError: valid.cause });
+        return { ok: false as const, error: valid.cause };
+      }
+
+      // Pair by ORIGINAL filename index when present (original-001…); else 1-based position.
+      const fromName = original.storedFilename.match(/original-(\d+)/i);
+      const index = fromName ? Number(fromName[1]) : i + 1;
+      const role = index === 1 ? "PRIMARY" : "SECONDARY";
+      // Unique filename — never overwrite historical branded files.
+      const filename = `branded-v${nextVersion}-${String(index).padStart(3, "0")}-${batchTag}-feed.jpg`;
+      storeDerivedAsset({
+        job,
+        version: nextVersion,
+        assetType: "BRANDED",
+        role,
+        bytes: set.feed.bytes,
+        mime: "image/jpeg",
+        ext: "jpg",
+        folder: "branded",
+        filename,
+        width: set.feed.width,
+        height: set.feed.height,
+      });
+      const created = listAssets(publicId, "BRANDED", nextVersion).find((a) => a.storedFilename === filename);
+      if (!created) {
+        updateJob(publicId, { status: "FAILED", lastError: "brand_store_failed" });
+        return { ok: false as const, error: "brand_store_failed" as const };
+      }
+      newFeedIds.push(created.id);
+      widths.push(set.feed.width);
+      heights.push(set.feed.height);
     }
-    updateJob(publicId, {
-      status: "AWAITING_APPROVAL",
-      lastError: null,
-      approvedVersion: null,
+
+    // Re-check after brand work — concurrent edit/publish wins; keep current version intact.
+    const afterVer = latestVersion(publicId)?.version || 0;
+    if (afterVer !== expected) {
+      return keepCurrent("stale_version", afterVer);
+    }
+    const live = listPublicationsForJob(publicId).some((p) => p.status === "PUBLISHED" && !p.dry_run);
+    if (live || getJobByPublicId(publicId)?.status === "PUBLISHING") {
+      return keepCurrent("already_published");
+    }
+
+    const mediaOrderJson = JSON.stringify(newFeedIds);
+    const applied = applyContentEditAtomic({
+      publicId,
+      expectedVersion: expected,
+      kind: "image",
+      actor: "reprocess-brand",
+      event: "CONTENT_REPROCESSED",
+      copy: getJobByPublicId(publicId)?.selectedCaption || "",
+      mediaOrderJson,
+      jobPatch: {
+        status: "AWAITING_APPROVAL",
+        lastError: null,
+        approvedVersion: null,
+        mediaOrderJson,
+        format: newFeedIds.length >= 2 ? "CAROUSEL" : "SINGLE_IMAGE",
+        publishMode: newFeedIds.length >= 2 ? "album" : getJobByPublicId(publicId)?.publishMode || "separate",
+      },
     });
-    recordContentEvent(publicId, "CONTENT_READY", "reprocess-brand");
+    if (!applied.ok) {
+      return keepCurrent(applied.error, applied.current);
+    }
     return {
       ok: true as const,
-      width: set.feed.width,
-      height: set.feed.height,
+      width: widths[0] || 0,
+      height: heights[0] || 0,
+      feedIds: newFeedIds,
       invalidatedApproval: true as const,
+      version: applied.version,
     };
   } catch {
     updateJob(publicId, { status: "FAILED", lastError: "process_failed" });
@@ -257,52 +327,82 @@ export async function reprocessControlBrand(publicId: string) {
   }
 }
 
-/** Rebuild caption via rewriteCopyOnly from stored AI context. Invalidates approval. Preserves manual edits unless regenerating. */
-export async function regenerateControlCopy(publicId: string, noteOverride?: string) {
+/** Rebuild caption via rewriteCopyOnly. Re-validates revision after provider wait. */
+export async function regenerateControlCopy(
+  publicId: string,
+  noteOverride?: string,
+  expectedVersion?: number,
+) {
   const job = getJobByPublicId(publicId);
   if (!job) return { ok: false as const, error: "missing" as const };
+  const before = assertContentJobEditable(publicId);
+  if (!before.ok) return { ok: false as const, error: before.error };
+  const expected = expectedVersion ?? before.version;
+  const gate = assertExpectedContentVersion(publicId, expected);
+  if (!gate.ok) return { ok: false as const, error: gate.error, current: gate.current };
+
   const note = (noteOverride ?? job.description ?? "").trim();
   const copy = await controlCopyFromContext(publicId, note);
+
+  // Re-validate after provider latency — concurrent edit/approve/publish wins.
+  const afterEditable = assertContentJobEditable(publicId);
+  if (!afterEditable.ok) {
+    return { ok: false as const, error: "conflict_during_regen" as const, cause: afterEditable.error };
+  }
+  const afterGate = assertExpectedContentVersion(publicId, expected);
+  if (!afterGate.ok) {
+    return { ok: false as const, error: "conflict_during_regen" as const, cause: afterGate.error, current: afterGate.current };
+  }
+
   const nextStatus =
-    job.status === "APPROVED" || job.status === "SCHEDULED" || job.status === "NEEDS_REVIEW"
+    afterEditable.job.status === "APPROVED" ||
+    afterEditable.job.status === "SCHEDULED" ||
+    afterEditable.job.status === "NEEDS_REVIEW"
       ? ("AWAITING_APPROVAL" as const)
-      : job.status;
-  updateJob(publicId, {
-    description: note.slice(0, 2000),
-    selectedCaption: copy.copy.full,
-    captionsJson: JSON.stringify({
-      ...copy.copy,
-      usedFallback: copy.usedFallback,
-      needsReview: copy.needsReview,
-      prompt: copy.prompt,
-    }),
-    approvedVersion: null,
-    status: nextStatus,
-    lastError: null,
+      : afterEditable.job.status;
+
+  const applied = applyContentEditAtomic({
+    publicId,
+    expectedVersion: expected,
+    kind: "copy",
+    actor: "regenerate-copy",
+    event: copy.usedFallback ? "CONTENT_COPY_FALLBACK" : "CONTENT_COPY_REGENERATED",
+    copy: copy.copy.full,
+    cta: copy.copy.cta,
+    hashtags: copy.copy.hashtags.join(" "),
+    prompt: copy.prompt,
+    privacyNote: copy.needsReview ? "needs_review:template_or_isolated_fallback" : "",
+    mediaOrderJson: afterEditable.job.mediaOrderJson || "",
+    jobPatch: {
+      description: note.slice(0, 2000),
+      selectedCaption: copy.copy.full,
+      captionsJson: JSON.stringify({
+        ...copy.copy,
+        usedFallback: copy.usedFallback,
+        needsReview: copy.needsReview,
+        prompt: copy.prompt,
+      }),
+      approvedVersion: null,
+      status: nextStatus,
+      lastError: null,
+    },
   });
-  const nextVer = nextVersionNumber(publicId);
-  saveVersion({
-      job,
-      version: nextVer,
-      kind: "copy",
-      copy: copy.copy.full,
-      cta: copy.copy.cta,
-      hashtags: copy.copy.hashtags.join(" "),
-      prompt: copy.prompt,
-      privacyNote: copy.needsReview ? "needs_review:template_or_isolated_fallback" : "",
-    });
-  recordContentEvent(publicId, "CONTENT_READY", copy.usedFallback ? "regenerate-copy-fallback" : "regenerate-copy");
+  if (!applied.ok) {
+    return { ok: false as const, error: "conflict_during_regen" as const, cause: applied.error, current: applied.current };
+  }
   return {
     ok: true as const,
     copy: copy.copy.full,
     invalidatedApproval: true as const,
     usedFallback: copy.usedFallback,
     needsReview: copy.needsReview,
+    version: applied.version,
+    mediaOrderJson: applied.job.mediaOrderJson,
   };
 }
 
-/** Persist operator-edited caption. Invalidates approval. */
-export function saveControlCopy(publicId: string, copyText: string) {
+/** Persist operator-edited caption with atomic revision bump. */
+export function saveControlCopy(publicId: string, copyText: string, expectedVersion: number) {
   const job = getJobByPublicId(publicId);
   if (!job) return { ok: false as const, error: "missing" as const };
   const text = copyText.trim().slice(0, 2200);
@@ -311,13 +411,29 @@ export function saveControlCopy(publicId: string, copyText: string) {
     job.status === "APPROVED" || job.status === "SCHEDULED" || job.status === "NEEDS_REVIEW"
       ? ("AWAITING_APPROVAL" as const)
       : job.status;
-  updateJob(publicId, {
-    selectedCaption: text,
-    approvedVersion: null,
-    status: nextStatus,
+  const applied = applyContentEditAtomic({
+    publicId,
+    expectedVersion,
+    kind: "copy",
+    actor: "save-copy",
+    event: "CONTENT_COPY_SAVED",
+    copy: text,
+    mediaOrderJson: job.mediaOrderJson || "",
+    jobPatch: {
+      selectedCaption: text,
+      approvedVersion: null,
+      status: nextStatus,
+    },
   });
-  recordContentEvent(publicId, "CONTENT_READY", "save-copy");
-  return { ok: true as const, copy: text, invalidatedApproval: true as const };
+  if (!applied.ok) {
+    return { ok: false as const, error: applied.error, current: applied.current };
+  }
+  return {
+    ok: true as const,
+    copy: text,
+    invalidatedApproval: true as const,
+    version: applied.version,
+  };
 }
 
 function actorOwnsOriginal(publicId: string, actor: string) {

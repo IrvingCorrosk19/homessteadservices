@@ -10,7 +10,7 @@ export type SimulatedGraphScenario =
   | "fail_ig_second_child"
   | "fail_ig_child_wait"
   | "fail_ig_carousel_parent";
-export type SimulatedNotifyScenario = "ok" | "fail_once" | "fail";
+export type SimulatedNotifyScenario = "ok" | "fail_once" | "fail" | "fail_before_send" | "uncertain_after_accept";
 
 export type SimulatedCallRecord = {
   provider: SimulatedProvider;
@@ -35,6 +35,31 @@ let notifyScenario: SimulatedNotifyScenario = "ok";
 let notifyFailBudget = 0;
 /** Counts IG carousel children created in the current scenario (process-local). */
 let igCarouselChildCreates = 0;
+
+/** Deliberate pause for isolated OpenAI so tests can race edits during regen. */
+let openaiHold: { promise: Promise<void>; release: () => void } | null = null;
+
+export function holdSimulatedOpenAi() {
+  if (openaiHold) return;
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  openaiHold = { promise, release };
+}
+
+export function releaseSimulatedOpenAi() {
+  openaiHold?.release();
+  openaiHold = null;
+}
+
+export async function awaitSimulatedOpenAiHold() {
+  if (openaiHold) await openaiHold.promise;
+}
+
+export function isSimulatedOpenAiHeld() {
+  return Boolean(openaiHold);
+}
 
 export function isControlIsolated() {
   return process.env.HOMESTEAD_CONTROL_ISOLATED === "true";
@@ -122,22 +147,53 @@ export function getSimulatedGraphScenario() {
 
 export function setSimulatedNotifyScenario(scenario: SimulatedNotifyScenario) {
   notifyScenario = scenario;
-  notifyFailBudget = scenario === "fail_once" ? 1 : scenario === "fail" ? Number.POSITIVE_INFINITY : 0;
+  notifyFailBudget =
+    scenario === "fail_once" || scenario === "fail_before_send" || scenario === "uncertain_after_accept"
+      ? 1
+      : scenario === "fail"
+        ? Number.POSITIVE_INFINITY
+        : 0;
 }
 
 export function getSimulatedNotifyScenario() {
   return notifyScenario;
 }
 
-/** Throws when isolated notify drain should simulate SMTP failure. */
-export function maybeThrowSimulatedNotifyFailure() {
+/** Test-only: run just before send_attempted gate (steal lease / expire). */
+let notifyPreSendHook: ((ctx: { id: number; claimToken: string; publicId: string }) => void) | null = null;
+export function setNotifyPreSendHook(hook: typeof notifyPreSendHook) {
+  notifyPreSendHook = hook;
+}
+export function runNotifyPreSendHook(ctx: { id: number; claimToken: string; publicId: string }) {
+  if (!isControlIsolated() || !notifyPreSendHook) return;
+  notifyPreSendHook(ctx);
+}
+
+/** Confirmed failure before the provider is contacted. */
+export function maybeThrowSimulatedNotifyFailureBeforeSend() {
   if (!isControlIsolated()) return;
+  if (notifyScenario !== "fail_before_send" && notifyScenario !== "fail" && notifyScenario !== "fail_once") return;
   if (notifyFailBudget <= 0) return;
   notifyFailBudget -= 1;
-  if (notifyFailBudget <= 0 && notifyScenario === "fail_once") {
+  if (notifyFailBudget <= 0 && (notifyScenario === "fail_once" || notifyScenario === "fail_before_send")) {
     notifyScenario = "ok";
   }
-  throw new Error("simulated_smtp_denied");
+  throw new Error("simulated_smtp_denied_before_send");
+}
+
+/** Uncertain outcome after the provider may have accepted the message. */
+export function maybeThrowSimulatedNotifyFailureAfterAccept() {
+  if (!isControlIsolated()) return;
+  if (notifyScenario !== "uncertain_after_accept") return;
+  if (notifyFailBudget <= 0) return;
+  notifyFailBudget -= 1;
+  notifyScenario = "ok";
+  throw new Error("simulated_smtp_uncertain_after_accept");
+}
+
+/** @deprecated use before/after variants */
+export function maybeThrowSimulatedNotifyFailure() {
+  maybeThrowSimulatedNotifyFailureBeforeSend();
 }
 
 export function isolatedCopyFallback(publicId: string) {

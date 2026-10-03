@@ -73,7 +73,7 @@ function assessPublishImage(publicId: string) {
   return { ready: true as const, cause: "", branded, original };
 }
 
-const PENDING_RECEIPT_TTL_MS = 5 * 60 * 1000;
+const PENDING_RECEIPT_LEASE_MS = 5 * 60 * 1000;
 
 function receiptHash(input: {
   key: string;
@@ -101,16 +101,35 @@ function receiptHash(input: {
     .digest("hex");
 }
 
-/** Reclaim stuck __pending receipts after crash/restart so the same key can resume. */
-function reclaimStalePendingReceipts() {
-  const cutoff = new Date(Date.now() - PENDING_RECEIPT_TTL_MS).toISOString();
-  getHomesteadDb()
-    .prepare(
-      `DELETE FROM control_action_receipts
-       WHERE result_json LIKE '%"__pending":true%'
-         AND created_at <= ?`,
-    )
-    .run(cutoff);
+type PendingReceiptMeta = {
+  __pending: true;
+  owner: string;
+  leaseUntil: string;
+  state: "active" | "abandoned" | "uncertain";
+};
+
+/** Mark expired active leases abandoned — never DELETE receipts by age alone. */
+function reconcilePendingReceipts() {
+  const now = Date.now();
+  const rows = getHomesteadDb()
+    .prepare(`SELECT idempotency_key, result_json FROM control_action_receipts WHERE result_json LIKE '%"__pending":true%'`)
+    .all() as Array<{ idempotency_key: string; result_json: string }>;
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.result_json) as PendingReceiptMeta;
+      if (!payload?.__pending) continue;
+      if (payload.state === "active" && new Date(payload.leaseUntil).getTime() <= now) {
+        getHomesteadDb()
+          .prepare(`UPDATE control_action_receipts SET result_json = ? WHERE idempotency_key = ?`)
+          .run(
+            JSON.stringify({ ...payload, state: "abandoned" as const }),
+            row.idempotency_key,
+          );
+      }
+    } catch {
+      /* ignore corrupt */
+    }
+  }
 }
 
 function publicationsView(publicId: string): PlatformPublicationView[] {
@@ -133,9 +152,15 @@ function readReceipt(key: string, hash: string) {
     return { conflict: true as const };
   }
   try {
-    const payload = JSON.parse(row.result_json) as Record<string, unknown>;
+    const payload = JSON.parse(row.result_json) as Record<string, unknown> & Partial<PendingReceiptMeta>;
     if (payload && payload.__pending === true) {
-      return { inflight: true as const };
+      if (payload.state === "abandoned") {
+        return { abandoned: true as const, payload };
+      }
+      if (payload.state === "uncertain") {
+        return { uncertain: true as const, payload };
+      }
+      return { inflight: true as const, owner: String(payload.owner || ""), leaseUntil: String(payload.leaseUntil || "") };
     }
     return { payload };
   } catch {
@@ -149,13 +174,69 @@ function claimReceipt(input: {
   action: string;
   actor: string;
   hash: string;
-}): { ok: true } | { conflict: true } | { inflight: true } | { payload: Record<string, unknown> } {
-  if (!input.key) return { ok: true };
-  reclaimStalePendingReceipts();
+}):
+  | { ok: true; owner: string }
+  | { conflict: true }
+  | { inflight: true }
+  | { uncertain: true }
+  | { payload: Record<string, unknown> } {
+  if (!input.key) return { ok: true, owner: "" };
+  reconcilePendingReceipts();
+
+  const rawRow = getHomesteadDb()
+    .prepare("SELECT result_json, request_hash FROM control_action_receipts WHERE idempotency_key = ?")
+    .get(input.key) as { result_json: string; request_hash?: string } | undefined;
+
+  // Same key + different payload is always a conflict — including after lease expiry/abandon.
+  if (rawRow?.request_hash && rawRow.request_hash !== input.hash) {
+    return { conflict: true };
+  }
+
+  let abandonedPayload: PendingReceiptMeta | null = null;
+  if (rawRow) {
+    try {
+      const parsed = JSON.parse(rawRow.result_json) as PendingReceiptMeta;
+      if (parsed?.__pending === true && parsed.state === "abandoned") abandonedPayload = parsed;
+      if (parsed?.__pending === true && parsed.state === "uncertain") return { uncertain: true };
+    } catch {
+      /* ignore */
+    }
+  }
+
   const existing = readReceipt(input.key, input.hash);
   if (existing?.conflict) return { conflict: true };
+  if (existing && "uncertain" in existing && existing.uncertain) return { uncertain: true };
   if (existing?.inflight) return { inflight: true };
-  if (existing?.payload) return { payload: existing.payload };
+  if (existing?.payload && !("abandoned" in existing) && !abandonedPayload) return { payload: existing.payload };
+
+  const owner = createHash("sha256").update(`${input.key}:${input.actor}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 24);
+  const leaseUntil = new Date(Date.now() + PENDING_RECEIPT_LEASE_MS).toISOString();
+  const pending: PendingReceiptMeta = { __pending: true, owner, leaseUntil, state: "active" };
+
+  if (abandonedPayload || (existing && "abandoned" in existing && existing.abandoned)) {
+    // Reclaim abandoned lease only with the SAME request hash — do not delete the row.
+    const info = getHomesteadDb()
+      .prepare(
+        `UPDATE control_action_receipts
+         SET result_json = ?, actor = ?, created_at = ?
+         WHERE idempotency_key = ?
+           AND request_hash = ?
+           AND result_json LIKE '%"state":"abandoned"%'`,
+      )
+      .run(JSON.stringify(pending), input.actor.slice(0, 80), new Date().toISOString(), input.key, input.hash);
+    if (info.changes !== 1) {
+      const again = readReceipt(input.key, input.hash);
+      if (again?.conflict) return { conflict: true };
+      if (again?.payload) return { payload: again.payload };
+      if (again?.inflight) return { inflight: true };
+      return { inflight: true };
+    }
+    const check = readReceipt(input.key, input.hash);
+    if (check?.inflight && "owner" in check && check.owner === owner) return { ok: true, owner };
+    if (check?.payload) return { payload: check.payload };
+    return { inflight: true };
+  }
+
   const info = getHomesteadDb()
     .prepare(
       `INSERT OR IGNORE INTO control_action_receipts
@@ -167,20 +248,22 @@ function claimReceipt(input: {
       input.publicId,
       input.action,
       input.actor.slice(0, 80),
-      JSON.stringify({ __pending: true }),
+      JSON.stringify(pending),
       input.hash,
       new Date().toISOString(),
     );
   if (info.changes === 0) {
     const again = readReceipt(input.key, input.hash);
     if (again?.conflict) return { conflict: true };
+    if (again && "uncertain" in again && again.uncertain) return { uncertain: true };
     if (again?.inflight) return { inflight: true };
     if (again?.payload) return { payload: again.payload };
     return { inflight: true };
   }
-  return { ok: true };
+  return { ok: true, owner };
 }
 
+/** Finish receipt only if this executor still owns an active pending lease. */
 function writeReceipt(input: {
   key: string;
   publicId: string;
@@ -188,8 +271,27 @@ function writeReceipt(input: {
   actor: string;
   hash: string;
   result: Record<string, unknown>;
-}) {
-  if (!input.key) return;
+  owner?: string;
+}): boolean {
+  if (!input.key) return true;
+  const now = new Date().toISOString();
+  const resultJson = JSON.stringify(input.result);
+  if (input.owner) {
+    // Conditional atomic finish: owner + active pending + matching hash. Never overwrite a finished/newer result.
+    const ownerNeedle = `"owner":"${input.owner}"`;
+    const info = getHomesteadDb()
+      .prepare(
+        `UPDATE control_action_receipts
+         SET result_json = ?, actor = ?, created_at = ?
+         WHERE idempotency_key = ?
+           AND request_hash = ?
+           AND result_json LIKE '%"__pending":true%'
+           AND result_json LIKE '%"state":"active"%'
+           AND result_json LIKE ?`,
+      )
+      .run(resultJson, input.actor.slice(0, 80), now, input.key, input.hash, `%${ownerNeedle}%`);
+    return info.changes === 1;
+  }
   getHomesteadDb()
     .prepare(
       `INSERT INTO control_action_receipts
@@ -199,15 +301,8 @@ function writeReceipt(input: {
          result_json = excluded.result_json,
          request_hash = excluded.request_hash`,
     )
-    .run(
-      input.key,
-      input.publicId,
-      input.action,
-      input.actor.slice(0, 80),
-      JSON.stringify(input.result),
-      input.hash,
-      new Date().toISOString(),
-    );
+    .run(input.key, input.publicId, input.action, input.actor.slice(0, 80), resultJson, input.hash, now);
+  return true;
 }
 
 function assertVersion(publicId: string, version: number) {
@@ -610,10 +705,15 @@ export async function runControlJobAction(input: {
     hash,
   });
   if ("conflict" in claimed && claimed.conflict) return { ok: false as const, error: "idempotency_conflict" as const };
+  if ("uncertain" in claimed && claimed.uncertain) {
+    return { ok: false as const, error: "idempotency_uncertain" as const };
+  }
   if ("inflight" in claimed && claimed.inflight) {
     return { ok: false as const, error: "idempotency_inflight" as const };
   }
   if ("payload" in claimed && claimed.payload) return { ...claimed.payload, replayed: true };
+
+  const receiptOwner = "owner" in claimed ? claimed.owner : "";
 
   const finish = (payload: Record<string, unknown>) => {
     writeReceipt({
@@ -623,6 +723,7 @@ export async function runControlJobAction(input: {
       actor: input.actor,
       hash,
       result: payload,
+      owner: receiptOwner,
     });
     return payload;
   };
@@ -655,110 +756,83 @@ export async function runControlJobAction(input: {
 
   if (input.action === "reject") {
     const result = tryRejectContentJob(input.publicId, input.actor);
-    const payload = { ok: result.ok, already: result.already, error: result.ok ? "" : result.reason };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
-    });
-    return payload;
+    return finish({ ok: result.ok, already: result.already, error: result.ok ? "" : result.reason });
   }
 
   if (input.action === "reprocess_media") {
     const { reprocessControlBrand } = await import("@/lib/control-intake");
-    const result = await reprocessControlBrand(input.publicId);
-    const payload = {
+    const result = await reprocessControlBrand(input.publicId, input.version);
+    return finish({
       ok: result.ok,
       error: result.ok ? "" : result.error,
       invalidatedApproval: result.ok ? true : false,
+      version: result.ok ? result.version : undefined,
       job: toControlJobCard(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
     });
-    return payload;
   }
 
   if (input.action === "regenerate_copy") {
     const { regenerateControlCopy } = await import("@/lib/control-intake");
-    const result = await regenerateControlCopy(input.publicId, input.note);
-    const payload = {
+    const result = await regenerateControlCopy(input.publicId, input.note, input.version);
+    return finish({
       ok: result.ok,
       error: result.ok ? "" : result.error,
       invalidatedApproval: result.ok ? true : false,
       usedFallback: result.ok ? result.usedFallback : false,
       needsReview: result.ok ? result.needsReview : false,
+      version: result.ok ? result.version : undefined,
+      mediaOrderJson: result.ok ? result.mediaOrderJson : undefined,
       job: getControlJobDetail(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
     });
-    return payload;
   }
 
   if (input.action === "update_ai_context") {
     const jobNow = getJobByPublicId(input.publicId);
-    if (!jobNow) return { ok: false as const, error: "missing" as const };
+    if (!jobNow) return finish({ ok: false, error: "missing" });
     const note = String(input.note ?? "").trim().slice(0, 2000);
     const nextStatus =
       jobNow.status === "APPROVED" || jobNow.status === "SCHEDULED" || jobNow.status === "NEEDS_REVIEW"
         ? ("AWAITING_APPROVAL" as const)
         : jobNow.status;
-    updateJob(input.publicId, {
-      description: note,
-      approvedVersion: null,
-      status: nextStatus,
-    });
-    recordContentEvent(input.publicId, "CONTENT_READY", "ai-context-updated");
-    const payload = {
-      ok: true as const,
-      error: "",
-      invalidatedApproval: true as const,
-      regeneratedCopy: false as const,
-      job: getControlJobDetail(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
+    const { applyContentEditAtomic } = await import("@/lib/content-edit-guard");
+    const applied = applyContentEditAtomic({
       publicId: input.publicId,
-      action: input.action,
+      expectedVersion: input.version,
+      kind: "copy",
       actor: input.actor,
-      hash,
-      result: payload,
+      event: "CONTENT_AI_CONTEXT_UPDATED",
+      copy: jobNow.selectedCaption || "",
+      mediaOrderJson: jobNow.mediaOrderJson || "",
+      jobPatch: {
+        description: note,
+        approvedVersion: null,
+        status: nextStatus,
+      },
     });
-    return payload;
+    if (!applied.ok) {
+      return finish({ ok: false, error: applied.error, current: applied.current });
+    }
+    return finish({
+      ok: true,
+      error: "",
+      invalidatedApproval: true,
+      regeneratedCopy: false,
+      version: applied.version,
+      job: getControlJobDetail(input.publicId),
+    });
   }
 
   if (input.action === "save_copy") {
     const { saveControlCopy } = await import("@/lib/control-intake");
-    const result = saveControlCopy(input.publicId, input.copy || "");
-    const payload = {
+    const result = saveControlCopy(input.publicId, input.copy || "", input.version);
+    return finish({
       ok: result.ok,
       error: result.ok ? "" : result.error,
       invalidatedApproval: result.ok ? true : false,
+      version: result.ok ? result.version : undefined,
+      current: result.ok ? undefined : "current" in result ? result.current : undefined,
       job: getControlJobDetail(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
     });
-    return payload;
   }
 
   if (input.action === "approve" || input.action === "approve_and_schedule") {
@@ -787,29 +861,20 @@ export async function runControlJobAction(input: {
     } else {
       recordContentEvent(input.publicId, "CONTENT_APPROVED", "control:approve_only");
     }
-    const payload = {
-      ok: true as const,
+    return finish({
+      ok: true,
       already: approved.already,
       scheduled: input.action === "approve_and_schedule",
       slot,
       job: toControlJobCard(input.publicId),
-    };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
     });
-    return payload;
   }
 
   if (input.action === "reschedule") {
     const current = getJobByPublicId(input.publicId);
-    if (!current) return { ok: false as const, error: "missing" as const };
+    if (!current) return finish({ ok: false, error: "missing" });
     if (current.status !== "SCHEDULED") {
-      return { ok: false as const, error: "not_scheduled" as const };
+      return finish({ ok: false, error: "not_scheduled" });
     }
     const slots = assignStaggeredSlots([input.publicId]);
     const slot = slots[0];
@@ -820,16 +885,7 @@ export async function runControlJobAction(input: {
         recommendationReason: slot.reason,
       });
     }
-    const payload = { ok: true as const, slot, job: toControlJobCard(input.publicId) };
-    writeReceipt({
-      key: input.idempotencyKey || "",
-      publicId: input.publicId,
-      action: input.action,
-      actor: input.actor,
-      hash,
-      result: payload,
-    });
-    return payload;
+    return finish({ ok: true, slot, job: toControlJobCard(input.publicId) });
   }
 
   if (input.action === "publish_now" || input.action === "retry_platform") {
