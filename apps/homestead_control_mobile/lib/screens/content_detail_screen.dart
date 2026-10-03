@@ -583,9 +583,9 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                         const Text("Contexto para la IA", style: TextStyle(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 4),
                         const Text(
-                          "Describe qué muestran las fotos y qué quieres destacar. "
-                          "Esta nota orienta el texto y no se publica automáticamente. "
-                          "El servidor no analiza visualmente las fotos: solo usa este contexto y metadatos.",
+                          "Orienta el generador de texto del proyecto; no se publica literalmente. "
+                          "Si el modelo falla, se usa plantilla marcada para revisión. "
+                          "Sin visión de las fotos: solo este contexto y metadatos.",
                           style: TextStyle(color: HomesteadColors.mist, fontSize: 13),
                         ),
                         const SizedBox(height: 8),

@@ -190,8 +190,8 @@ class _ContentCreateScreenState extends State<ContentCreateScreen> {
               ),
             ),
           const Text(
-            "Hasta 8 fotos. El texto se orienta con el contexto que indiques. "
-            "El servidor no analiza visualmente las fotos. El video no está soportado.",
+            "Hasta 8 fotos. El contexto orienta el generador de texto (no se publica literalmente). "
+            "Sin visión de las fotos. El video no está soportado.",
             style: TextStyle(color: HomesteadColors.mist),
           ),
           const SizedBox(height: 12),
@@ -217,7 +217,7 @@ class _ContentCreateScreenState extends State<ContentCreateScreen> {
             decoration: const InputDecoration(
               labelText: "Contexto para la IA",
               helperText:
-                  "Describe qué muestran las fotos y qué quieres destacar. Esta nota orienta el texto y no se publica automáticamente",
+                  "Orienta el generador; no se publica literalmente. Plantilla de fallback exige revisión",
               hintText:
                   "Ej.: Instalamos esta cerradura digital en un apartamento. Destaca la comodidad y el acceso sin llaves",
               alignLabelWithHint: true,
