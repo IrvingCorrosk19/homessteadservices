@@ -1,0 +1,92 @@
+﻿{
+    "ok":  true,
+    "job":  {
+                "publicId":  "HC-2026-000071",
+                "status":  "AWAITING_APPROVAL",
+                "displayState":  "pending_approval",
+                "displayLabel":  "Pendiente de aprobaciÃ³n",
+                "version":  1,
+                "approvedVersion":  null,
+                "copy":  "Trabajo documentado por Homestead. Folio HC-2026-000071. Texto generado en modo aislado: no describe un resultado que no estÃ© en la foto.",
+                "serviceType":  "",
+                "batchId":  "",
+                "campaignId":  "",
+                "recommendedPublishAt":  null,
+                "recommendedPublishLabel":  "",
+                "lastError":  "",
+                "lastErrorLabel":  "",
+                "publications":  [
+
+                                 ],
+                "previewAssetId":  413,
+                "originalAssetId":  412,
+                "brandedAssetId":  413,
+                "publishImageReady":  true,
+                "publishImageIssue":  "",
+                "publishImageIssueLabel":  "",
+                "processingPhase":  "ready",
+                "brandedWidth":  1080,
+                "brandedHeight":  1350,
+                "originalWidth":  null,
+                "originalHeight":  null,
+                "updatedAt":  "2026-10-03T18:25:01.839Z",
+                "createdAt":  "2026-10-03T18:25:00.825Z",
+                "paused":  false,
+                "dryRun":  false,
+                "description":  "fisica ui r2",
+                "cta":  "Agenda en homestead.lat",
+                "hashtags":  "#HomesteadServices #Panama",
+                "history":  [
+                                {
+                                    "event":  "CONTENT_READY",
+                                    "detail":  "control-intake-album-fallback",
+                                    "createdAt":  "2026-10-03T18:25:01.839Z"
+                                }
+                            ],
+                "format":  "CAROUSEL",
+                "publishMode":  "album",
+                "mediaItems":  [
+                                   {
+                                       "assetId":  413,
+                                       "index":  0,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  10773,
+                                       "role":  "PRIMARY"
+                                   },
+                                   {
+                                       "assetId":  415,
+                                       "index":  1,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  10797,
+                                       "role":  "SECONDARY"
+                                   },
+                                   {
+                                       "assetId":  417,
+                                       "index":  2,
+                                       "width":  1080,
+                                       "height":  1350,
+                                       "size":  10622,
+                                       "role":  "SECONDARY"
+                                   }
+                               ],
+                "videoSupported":  false,
+                "carouselSupported":  true,
+                "laterNote":  "Ãlbum: Instagram publica carrusel oficial; Facebook usa multi-foto orgÃ¡nica (fotos no publicadas + attached_media). Video/Reels no soportados.",
+                "actions":  {
+                                "approve":  true,
+                                "approveAndSchedule":  true,
+                                "reschedule":  false,
+                                "reject":  true,
+                                "publishNow":  false,
+                                "retryPlatform":  false,
+                                "retryBlockedByUncertain":  false,
+                                "reprocessMedia":  false,
+                                "regenerateCopy":  true,
+                                "saveCopy":  true,
+                                "updateAiContext":  true,
+                                "blockedByIncompleteImage":  false
+                            }
+            }
+}

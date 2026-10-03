@@ -1,0 +1,145 @@
+﻿
+PASS [simulacion] isolated 
+PASS [simulacion] album ingest HC-2026-000001
+PASS [simulacion] album format 
+PASS [simulacion] album branded count 3
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:29:59.054Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:29:59.054Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:29:59.054Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:29:59.054Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] album publish ok {"ok":true,"dryRun":false,"results":[{"platform":"instagram","outcome":"published","
+id":"sim-1791052199051","permalink":"https://example.invalid/sim"},{"platform":"facebook","outcome":"published","id":"s
+im-feed-1791052199054","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] parent container not child sim-carousel-1791052199051
+PASS [simulacion] album meta calls 15
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:00.126Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:00.127Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:00.127Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:00.127Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] fail_ig_second_child fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome":"f
+ailed","cause":"simulated_second_child_denied"},{"platform":"facebook","outcome":"published","id":"sim-feed-17910522001
+27","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_second_child no child as parent 
+PASS [simulacion] fail_ig_second_child recovers 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:01.156Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:01.156Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:01.156Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:01.156Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] fail_ig_child_wait fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome":"fai
+led","cause":"simulated_child_wait_failed"},{"platform":"facebook","outcome":"published","id":"sim-feed-1791052201156",
+"permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_child_wait no child as parent 
+PASS [simulacion] fail_ig_child_wait recovers 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:02.204Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:02.204Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:02.204Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:02.205Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] fail_ig_carousel_parent fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome"
+:"failed","cause":"simulated_carousel_parent_denied"},{"platform":"facebook","outcome":"published","id":"sim-feed-17910
+52202205","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_carousel_parent no child as parent 
+PASS [simulacion] fail_ig_carousel_parent recovers 
+PASS [simulacion] separate two jobs HC-2026-000005,HC-2026-000006
+PASS [simulacion] customer msg no secret 
+{"event":"SERVICE_REQUEST_CANCELLED","timestamp":"2026-10-03T18:30:02.910Z","contentJobId":"HS-2026-000001","stage":"ok
+:0"}
+PASS [simulacion] reject ok 
+PASS [simulacion] reject cancelled 
+PASS [simulacion] internal note stored 
+PASS [simulacion] internal note not in customer draft 
+PASS [simulacion] reopen 
+PASS [simulacion] security set 
+PASS [simulacion] security blocks booking gate 
+PASS [simulacion] security blocks createAppointment 
+PASS [simulacion] security resolve 
+{"event":"SERVICE_REQUEST_CANCELLED","timestamp":"2026-10-03T18:30:02.922Z","contentJobId":"HS-2026-000001","stage":"ok
+:0"}
+PASS [simulacion] cancel accepted service 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:03.948Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+PASS [simulacion] partial IG ok AND FB fail instagram:PUBLISHED,facebook:FAILED
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:03.954Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:03.954Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:03.954Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:03.954Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] partial retry skips IG republish [{"platform":"instagram","outcome":"already","id":"sim-1791052203946
+","permalink":"https://example.invalid/sim"},{"platform":"facebook","outcome":"published","id":"sim-feed-1791052203954"
+,"permalink":"https://example.invalid/sim"}]
+PASS [simulacion] whatsapp assisted never SENT NEEDS_ACTION
+PASS [simulacion] notify exactly one SENT for target message sent=1 status=SENT smtp=1
+{"event":"ServiceRequestNotifyFailed","timestamp":"2026-10-03T18:30:03.968Z","stage":"INFO","contentJobId":"HS-2026-000
+004"}
+PASS [simulacion] notify uncertain after accept stays UNCERTAIN UNCERTAIN
+PASS [simulacion] notify lease expired without send requeued or SENT once SENT
+PASS [simulacion] idempotency conflict on different copy 
+PASS [simulacion] two edits same revision one wins a=true b=stale_version caption=Editor A wins
+PASS [simulacion] version absent rejected version_required
+PASS [simulacion] stale version edit rejected stale_version
+PASS [simulacion] copy not literal operator note 
+PASS [simulacion] regen concurrent with edit conflicts edit=true regen=conflict_during_regen caption=Editado durante 
+regen
+PASS [simulacion] regen creates content_version with media_order v=2 order=[51,53,54]
+PASS [simulacion] regen keeps branded assets 3
+PASS [simulacion] removed photo excluded from order but retained ordered=51,53 remove=54
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:07.105Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:07.106Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:07.106Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] publish uses remaining slides only ok=true children=2 keep=2
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:07.455Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+PASS [simulacion] single image regen approve publish regen=true pub=true
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:08.488Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:08.488Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:08.488Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:08.488Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] concurrent publish single IG ig=1 a=true b=false
+PASS [simulacion] action receipt past lease reclaimed without DELETE ok=true pending=undefined caption=Reclaimed after 
+lease expiry
+PASS [simulacion] idempotency conflict after lease expiry with different payload err=idempotency_conflict
+PASS [simulacion] old executor cannot overwrite finished newer receipt newer=true changes=0
+PASS [simulacion] stale executor cannot finish stolen receipt err=idempotency_conflict owner=current-owner pending=true
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:10.583Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:10.583Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:10.583Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/p"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:30:10.583Z","stage":"meta","contentJobId":"POST 
+sim-facebook-page/f"}
+PASS [simulacion] regen concurrent with publish conflicts pub=true regen=conflict_during_regen live=true
+PASS [simulacion] notify stolen lease before send: zero SMTP smtp=0 
+drain=[{"id":6,"ok":false,"status":"stolen_or_expired","claimToken":"da7f7217-7afb-4607-a6c5-83896f817415"}] 
+row={"status":"SENDING","send_attempted":0,"claim_token":"stolen-by-other"}
+PASS [simulacion] reprocess pairs each original to new branded without overwrite ok=true v=2 order0=81,83,85 
+order1=86,87,88 shas=3 oldExist=true
+PASS [simulacion] reprocess conflict keeps current version intact err=stale_version order=[86,87,88]
+CAROUSEL/DISPOSITION checks OK
+
+

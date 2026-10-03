@@ -233,7 +233,11 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
     if (order.length != items.length) return;
     setState(() => _busy = true);
     try {
-      await context.read<SessionController>().api.updateJobMedia(publicId: job.publicId, order: order);
+      await context.read<SessionController>().api.updateJobMedia(
+            publicId: job.publicId,
+            order: order,
+            version: job.version,
+          );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Orden actualizado. La aprobación queda invalidada.")),
@@ -272,6 +276,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
       await api.updateJobMedia(
             publicId: job.publicId,
             order: remaining,
+            version: job.version,
             remove: [assetId],
           );
       if (!mounted) return;
@@ -523,7 +528,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
               : job == null
                   ? const Center(child: Text("No encontrada"))
                   : ListView(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                       children: [
                         if (!online)
                           Container(
@@ -689,27 +694,39 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                                         style: const TextStyle(fontWeight: FontWeight.w600),
                                       ),
                                     ),
-                                    IconButton(
-                                      tooltip: "Subir",
-                                      onPressed: _busy || i == 0 ? null : () => _reorderMedia(i, i - 1),
-                                      icon: const Icon(Icons.arrow_upward),
-                                      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                    Semantics(
+                                      label: "Subir foto",
+                                      button: true,
+                                      child: IconButton(
+                                        tooltip: "Subir",
+                                        onPressed: _busy || i == 0 ? null : () => _reorderMedia(i, i - 1),
+                                        icon: const Icon(Icons.arrow_upward),
+                                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                      ),
                                     ),
-                                    IconButton(
-                                      tooltip: "Bajar",
-                                      onPressed: _busy || i >= job.mediaItems.length - 1
-                                          ? null
-                                          : () => _reorderMedia(i, i + 1),
-                                      icon: const Icon(Icons.arrow_downward),
-                                      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                    Semantics(
+                                      label: "Bajar foto",
+                                      button: true,
+                                      child: IconButton(
+                                        tooltip: "Bajar",
+                                        onPressed: _busy || i >= job.mediaItems.length - 1
+                                            ? null
+                                            : () => _reorderMedia(i, i + 1),
+                                        icon: const Icon(Icons.arrow_downward),
+                                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                      ),
                                     ),
-                                    IconButton(
-                                      tooltip: "Quitar",
-                                      onPressed: _busy || item.assetId <= 0
-                                          ? null
-                                          : () => _removeMedia(item.assetId),
-                                      icon: const Icon(Icons.delete_outline, color: HomesteadColors.danger),
-                                      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                    Semantics(
+                                      label: "Quitar foto",
+                                      button: true,
+                                      child: IconButton(
+                                        tooltip: "Quitar",
+                                        onPressed: _busy || item.assetId <= 0
+                                            ? null
+                                            : () => _removeMedia(item.assetId),
+                                        icon: const Icon(Icons.delete_outline, color: HomesteadColors.danger),
+                                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                      ),
                                     ),
                                   ],
                                 ),
