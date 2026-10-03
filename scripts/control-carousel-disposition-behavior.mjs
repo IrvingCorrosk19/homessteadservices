@@ -895,17 +895,19 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
 }
 
 {
-  // Reprocess: each ORIGINAL → new BRANDED (no overwrite); 3 distinct images; atomic version
+  // Reprocess respects current selection/order; conflict during processing leaves concurrent state intact
   const { reprocessControlBrand } = await import("../src/lib/control-intake.ts");
   const { listOrderedBrandedFeeds, listAllBrandedFeeds } = await import("../src/lib/content-multi-photo.ts");
   const { existsSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { homesteadDataDir } = await import("../src/lib/service-requests.ts");
+  const { holdSimulatedReprocess, releaseSimulatedReprocess } = await import("../src/lib/control-isolation.ts");
+  const { applyContentEditAtomic } = await import("../src/lib/content-edit-guard.ts");
 
   const colors = [
-    { r: 220, g: 20, b: 20 },
-    { r: 20, g: 180, b: 40 },
-    { r: 30, g: 40, b: 220 },
+    { r: 220, g: 20, b: 20 }, // A
+    { r: 20, g: 180, b: 40 }, // B
+    { r: 30, g: 40, b: 220 }, // C
   ];
   const files = [];
   for (let i = 0; i < 3; i++) {
@@ -918,7 +920,7 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   }
   const ingested = await ingestControlPhotos({
     files,
-    note: "reprocess-pair-test",
+    note: "reprocess-selection-test",
     actor: "test-runner",
     publishMode: "album",
   });
@@ -929,8 +931,58 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   const beforeSha = beforeFeeds.map((a) => a.sha256);
   const ver0 = latestVersion(publicId)?.version || 1;
   const order0 = JSON.parse(getJobByPublicId(publicId)?.mediaOrderJson || "[]");
+  // A/B/C branded ids in ingest order
+  const [idA, idB, idC] = order0;
 
-  const rep = await reprocessControlBrand(publicId, ver0);
+  // Reorder to C/A/B then remove A → selection C/B
+  const reorderCab = applyContentEditAtomic({
+    publicId,
+    expectedVersion: ver0,
+    kind: "image",
+    actor: "test",
+    event: "CONTENT_MEDIA_CHANGED",
+    copy: getJobByPublicId(publicId).selectedCaption,
+    mediaOrderJson: JSON.stringify([idC, idA, idB]),
+    jobPatch: {
+      mediaOrderJson: JSON.stringify([idC, idA, idB]),
+      format: "CAROUSEL",
+      publishMode: "album",
+      approvedVersion: null,
+      status: "AWAITING_APPROVAL",
+      lastError: "media_changed",
+    },
+  });
+  const verAfterReorder = latestVersion(publicId)?.version || 1;
+  const removeA = applyContentEditAtomic({
+    publicId,
+    expectedVersion: verAfterReorder,
+    kind: "image",
+    actor: "test",
+    event: "CONTENT_MEDIA_CHANGED",
+    copy: getJobByPublicId(publicId).selectedCaption,
+    mediaOrderJson: JSON.stringify([idC, idB]),
+    jobPatch: {
+      mediaOrderJson: JSON.stringify([idC, idB]),
+      format: "CAROUSEL",
+      publishMode: "album",
+      approvedVersion: null,
+      status: "AWAITING_APPROVAL",
+      lastError: "media_changed",
+    },
+  });
+  const verBeforeRep = latestVersion(publicId)?.version || 1;
+  const orderBeforeRep = JSON.parse(getJobByPublicId(publicId)?.mediaOrderJson || "[]");
+  ok(
+    "reprocess setup: order C/A/B then remove A leaves C/B",
+    reorderCab.ok === true &&
+      removeA.ok === true &&
+      orderBeforeRep.length === 2 &&
+      orderBeforeRep[0] === idC &&
+      orderBeforeRep[1] === idB,
+    `order=${orderBeforeRep} cab=${reorderCab.ok} rm=${removeA.ok}`,
+  );
+
+  const rep = await reprocessControlBrand(publicId, verBeforeRep);
   const ver1 = latestVersion(publicId);
   const afterFeeds = listAllBrandedFeeds(publicId);
   const order1 = JSON.parse(getJobByPublicId(publicId)?.mediaOrderJson || "[]");
@@ -938,42 +990,74 @@ for (const scenario of ["fail_ig_second_child", "fail_ig_child_wait", "fail_ig_c
   const newAssets = afterFeeds.filter((a) => order1.includes(a.id));
   const oldStillExist = beforePaths.every((p) => existsSync(join(homesteadDataDir(), "content", p)));
   const shasDistinct = new Set(newAssets.map((a) => a.sha256)).size;
+  // New feeds must link to C then B (indexes 3 and 2) — not revive A (index 1)
+  const indexes = newAssets.map((a) => {
+    const m = a.storedFilename.match(/branded-v\d+-(\d+)/i);
+    return m ? Number(m[1]) : -1;
+  });
   ok(
-    "reprocess pairs each original to new branded without overwrite",
+    "reprocess only selected C/B with new assets, no revive A",
     rep.ok === true &&
       originals.length === 3 &&
-      order1.length === 3 &&
-      order1.every((id) => !order0.includes(id)) &&
-      newAssets.length === 3 &&
+      order1.length === 2 &&
+      order1.every((id) => !order0.includes(id) && !orderBeforeRep.includes(id)) &&
+      newAssets.length === 2 &&
+      indexes[0] === 3 &&
+      indexes[1] === 2 &&
+      !indexes.includes(1) &&
       oldStillExist &&
       beforeSha.every((s) => afterFeeds.some((a) => a.sha256 === s)) &&
-      ver1?.version === ver0 + 1 &&
-      ordered.length === 3 &&
-      shasDistinct === 3,
-    `ok=${rep.ok} v=${ver1?.version} order0=${order0} order1=${order1} shas=${shasDistinct} oldExist=${oldStillExist}`,
+      ver1?.version === verBeforeRep + 1 &&
+      ordered.length === 2 &&
+      shasDistinct === 2,
+    `ok=${rep.ok} v=${ver1?.version} order1=${order1} idx=${indexes} shas=${shasDistinct} oldExist=${oldStillExist}`,
   );
 
-  // Conflict: concurrent version bump keeps current selection intact
+  // Concurrent conflict DURING processing: pause reprocess, edit, then release — edit must stay intact
   const verNow = latestVersion(publicId)?.version || 1;
   const orderBeforeConflict = getJobByPublicId(publicId)?.mediaOrderJson;
-  const { applyContentEditAtomic } = await import("../src/lib/content-edit-guard.ts");
-  applyContentEditAtomic({
+  const captionBefore = "concurrent-wins-during-reprocess";
+  holdSimulatedReprocess();
+  const reprocessPromise = reprocessControlBrand(publicId, verNow);
+  let claimed = false;
+  for (let i = 0; i < 100; i++) {
+    const pending = String(getJobByPublicId(publicId)?.pendingInput || "");
+    if (pending.startsWith("reprocess:")) {
+      claimed = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const concurrent = applyContentEditAtomic({
     publicId,
     expectedVersion: verNow,
     kind: "copy",
     actor: "concurrent",
     event: "CONTENT_EDITED",
-    copy: "bumped during reprocess",
-    jobPatch: { selectedCaption: "bumped during reprocess", approvedVersion: null, status: "AWAITING_APPROVAL" },
+    copy: captionBefore,
+    jobPatch: {
+      selectedCaption: captionBefore,
+      approvedVersion: null,
+      status: "NEEDS_REVIEW",
+      lastError: "concurrent_edit",
+    },
   });
-  const conflicted = await reprocessControlBrand(publicId, verNow);
+  releaseSimulatedReprocess();
+  const conflicted = await reprocessPromise;
+  const jobAfter = getJobByPublicId(publicId);
   ok(
-    "reprocess conflict keeps current version intact",
-    conflicted.ok === false &&
+    "reprocess conflict during pause leaves concurrent state intact",
+    claimed === true &&
+      concurrent.ok === true &&
+      conflicted.ok === false &&
       (String(conflicted.error).includes("conflict") || conflicted.error === "stale_version") &&
-      getJobByPublicId(publicId)?.mediaOrderJson === orderBeforeConflict &&
-      latestVersion(publicId)?.version === verNow + 1,
-    `err=${conflicted.error} order=${getJobByPublicId(publicId)?.mediaOrderJson}`,
+      jobAfter?.selectedCaption === captionBefore &&
+      jobAfter?.status === "NEEDS_REVIEW" &&
+      jobAfter?.lastError === "concurrent_edit" &&
+      jobAfter?.mediaOrderJson === orderBeforeConflict &&
+      latestVersion(publicId)?.version === verNow + 1 &&
+      (jobAfter?.pendingInput === "" || jobAfter?.pendingInput == null || !String(jobAfter?.pendingInput).startsWith("reprocess:")),
+    `claimed=${claimed} conc=${concurrent.ok} err=${conflicted.error} status=${jobAfter?.status} caption=${jobAfter?.selectedCaption} order=${jobAfter?.mediaOrderJson} pending=${jobAfter?.pendingInput}`,
   );
 }
 

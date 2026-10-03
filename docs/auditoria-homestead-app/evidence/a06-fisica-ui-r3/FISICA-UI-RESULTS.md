@@ -1,18 +1,20 @@
-﻿# Fisica UI A06 r3
+﻿# Fisica UI A06 r3b
 
-passed=10 failed=0
+passed=10 failed=1
 APK=versionName=1.1.8 / versionCode=10 minSdk=24 targetSdk=36
 isolated=True
-commit=2964773eb9784d62637067a0333de47c7c3a6a7f
+commit=2a91b7ec85f30d8f45255e784d74bc0f87e68fe8
 dirty=True
-album=HC-2026-000071
-request=HS-2026-000004
+album=HC-2026-000083
+request=HS-2026-000035
+secReason=sec-fisica-r3b-eb7efafad8
 
 ## Criterios
-- Persistencia real tras acciÃ³n UI
+- Persistencia real tras accion UI
 - API solo corrobora
-- OCR para texto UI (dump Flutter vacÃ­o)
-- Publicar = dry-run simulado ambas plataformas
+- OCR para texto UI (dump Flutter vacio)
+- Publicar = transporte Meta simulado (dryRun=false + example.invalid; no Meta real)
+- Seguridad: consulta previa != activacion; motivo unico + auditoria nueva
 
 - **PASS** Entorno: APK 1.1.8+10 + aislado + commit
 - **PASS** Login UI muestra entorno aislado
@@ -22,5 +24,6 @@ request=HS-2026-000004
 - **PASS** Quitar: disminuye cantidad y la foto no reaparece en orden
 - **PASS** Regenerar: resultado y revision actualizados
 - **PASS** Publicar simulado: resultado final por ambas plataformas
-- **PASS** Marcar seguridad: estado persistido al reabrir
-- **PASS** Rechazar: guardar con motivo valido y estado persistido
+- **PASS** Seguridad: consulta previa sin marca
+- **PASS** Marcar seguridad: activacion desde A06
+- **FAIL** Rechazar: guardar con motivo valido y estado persistido

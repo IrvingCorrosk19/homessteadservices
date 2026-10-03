@@ -1,0 +1,46 @@
+﻿
+> homestead-services@1.0.0 control:test:carousel
+> npx tsx scripts/control-carousel-disposition-behavior.mjs
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:08.434Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] parent container not child sim-carousel-1791053348434
+PASS [simulacion] fail_ig_second_child fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome":"f
+ailed","cause":"simulated_second_child_denied"},{"platform":"facebook","outcome":"published","id":"sim-feed-17910533496
+12","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_second_child no child as parent 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:09.622Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] fail_ig_second_child recovers 
+PASS [simulacion] fail_ig_child_wait fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome":"fai
+led","cause":"simulated_child_wait_failed"},{"platform":"facebook","outcome":"published","id":"sim-feed-1791053350742",
+"permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_child_wait no child as parent 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:10.758Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] fail_ig_child_wait recovers 
+PASS [simulacion] fail_ig_carousel_parent fails {"ok":false,"dryRun":false,"results":[{"platform":"instagram","outcome"
+:"failed","cause":"simulated_carousel_parent_denied"},{"platform":"facebook","outcome":"published","id":"sim-feed-17910
+53351844","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] fail_ig_carousel_parent no child as parent 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:11.851Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] fail_ig_carousel_parent recovers 
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:13.599Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] partial IG ok AND FB fail instagram:PUBLISHED,facebook:FAILED
+{"event":"ServiceRequestNotifyFailed","timestamp":"2026-10-03T18:49:13.622Z","stage":"INFO","contentJobId":"HS-2026-000
+004"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:16.806Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:18.192Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+{"event":"ControlProviderSimulated","timestamp":"2026-10-03T18:49:20.343Z","stage":"meta","contentJobId":"GET 
+sim-carousel-1791053"}
+PASS [simulacion] reprocess setup: order C/A/B then remove A leaves C/B order=85,83 cab=true rm=true
+PASS [simulacion] reprocess only selected C/B with new assets, no revive A ok=true v=4 order1=86,87 idx=3,2 shas=2 
+oldExist=true
+PASS [simulacion] reprocess conflict during pause leaves concurrent state intact claimed=true conc=true 
+err=conflict_during_regen status=NEEDS_REVIEW caption=concurrent-wins-during-reprocess order=[86,87] pending=
+CAROUSEL/DISPOSITION checks OK
+
+

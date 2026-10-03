@@ -154,22 +154,25 @@ $vcLine = ($pkgDump | Select-String "versionCode=" | Select-Object -First 1).ToS
 $env:CONTROL_SESSION = $login.session
 $env:CONTROL_CSRF = $login.csrf
 
-# Use existing NEW request for disposition (seed HS-2026-000004 or first NEW)
-$list = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests?status=NEW&limit=5" -Headers $authH
-$pick = @($list.requests) | Where-Object { $_.publicId -and $_.status -eq "NEW" } | Select-Object -First 1
-if (-not $pick) {
-  # Reopen seed if no NEW available
-  try {
-    Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/HS-2026-000004/disposition" -Method POST -Headers ($authH + @{"Content-Type"="application/json"; "X-CSRF-Token"=$login.csrf}) -Body '{"action":"reopen","reasonCategory":"OTHER","idempotencyKey":"fisica-reopen"}' | Out-Null
-  } catch {}
-  $list = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests?status=NEW&limit=5" -Headers $authH
-  $pick = @($list.requests) | Where-Object { $_.publicId } | Select-Object -First 1
+# Fresh fictitious request with securityReviewRequired=false (never treat preexisting mark as activation)
+$seedOut = & npx.cmd --yes tsx "scripts\seed-fisica-security-request.mjs" 2>&1
+$script:reqId = ($seedOut | Where-Object { $_ -match '^HS-\d{4}-\d+$' } | Select-Object -Last 1)
+if (-not $script:reqId) {
+  Write-Host $seedOut
+  throw "seed-fisica-security-request failed"
 }
-$script:reqId = if ($pick) { $pick.publicId } else { "HS-2026-000004" }
+$script:reqId = [string]$script:reqId
+$script:secReason = "sec-fisica-r3b-" + [guid]::NewGuid().ToString("N").Substring(0, 10)
+$script:secTestStart = (Get-Date).ToUniversalTime().ToString("o")
+# Separate NEW request for reject (security-marked request changes UI / is not the prior reject fixture)
+$rejOut = & npx.cmd --yes tsx "scripts\seed-fisica-security-request.mjs" 2>&1
+$script:rejectReqId = ($rejOut | Where-Object { $_ -match '^HS-\d{4}-\d+$' } | Select-Object -Last 1)
+if (-not $script:rejectReqId) { $script:rejectReqId = $script:reqId }
+$script:rejectReqId = [string]$script:rejectReqId
 
 $albumId = (node scripts/seed-fisica-album.mjs).Trim()
-Write-Host "albumId=$albumId reqId=$script:reqId"
-@{ albumId=$albumId; requestId=$script:reqId; head=$git; dirty=$dirty } | ConvertTo-Json | Set-Content (Join-Path $ev "seed.json")
+Write-Host "albumId=$albumId reqId=$script:reqId rejectReqId=$script:rejectReqId secReason=$script:secReason"
+@{ albumId=$albumId; requestId=$script:reqId; rejectRequestId=$script:rejectReqId; secReason=$script:secReason; secTestStart=$script:secTestStart; head=$git; dirty=$dirty } | ConvertTo-Json | Set-Content (Join-Path $ev "seed.json")
 
 $before = GetJob $albumId
 $orderBefore = MediaOrder $before
@@ -371,6 +374,39 @@ function SubmitSearch() {
   Tap 660 250
   Start-Sleep 1.5
 }
+function DismissKeyboard() {
+  & adb -s $D shell input keyevent 111 | Out-Null
+  Start-Sleep 0.35
+  # Tap empty area under search so Flutter unfocuses TextField
+  Tap 360 700
+  Start-Sleep 0.35
+}
+function OpenRequestFromSearch([string]$id, [string]$label) {
+  $ocr = OcrPath (Shot "sol-before-$label")
+  if (-not (TapOcr $ocr "Buscar")) { Tap 360 250 }
+  Start-Sleep 0.45
+  & adb -s $D shell input keyevent 123 | Out-Null
+  1..55 | ForEach-Object { & adb -s $D shell input keyevent 67 | Out-Null }
+  TypeText $id
+  Start-Sleep 0.55
+  SubmitSearch
+  Start-Sleep 1.2
+  DismissKeyboard
+  $ocr = OcrPath (Shot "sol-search-$label")
+  $opened = $false
+  $card = $ocr.words | Where-Object { $_.text -eq $id -and $_.y -gt 300 -and $_.y -lt 900 } | Select-Object -First 1
+  if ($card) { Tap 360 ([int]($card.y + 40)); $opened = $true; Start-Sleep 1.2 }
+  if (-not $opened) { $opened = TapOcrBottom $ocr "Abrir" 350 }
+  if (-not $opened) { $opened = TapDesc "Abrir detalle" -Partial }
+  if (-not $opened) { Tap 360 520 }
+  Start-Sleep 2.4
+  $shot = Shot "solicitud-detalle-$label"
+  $ocr = OcrPath $shot
+  $onDetail = (OcrHasExact $ocr $id) -and (
+    (OcrHas $ocr "Disposición") -or (OcrHas $ocr "Estado") -or (OcrHas $ocr "Historial") -or (OcrHas $ocr "Seguridad") -or (OcrHas $ocr "Contactada")
+  )
+  return @{ ok=$onDetail; shot=$shot; ocr=$ocr }
+}
 function DismissDialogIfAny() {
   $u = DumpUi "dismiss"
   if ($u -match 'content-desc="Cancelar"' -or $u -match 'text="Cancelar"') {
@@ -501,11 +537,10 @@ $ig = $pubs | Where-Object { $_.platform -eq "instagram" } | Select-Object -Firs
 $fbOk = $fb -and ($fb.status -eq "PUBLISHED")
 $igOk = $ig -and ($ig.status -eq "PUBLISHED")
 $simOk = $session.isolated -eq $true -and $fb -and $ig -and (
-  ($fb.dryRun -eq $true) -or ($ig.dryRun -eq $true) -or
   ([string]$fb.permalink -match "example\.invalid|sim-") -or
   ([string]$ig.permalink -match "example\.invalid|sim-")
 )
-Rec "Publicar simulado: resultado final por ambas plataformas" ([bool]($fbOk -and $igOk -and $simOk)) @{ facebook=$(if($fb){$fb.status}else{$null}); facebookDryRun=$(if($fb){$fb.dryRun}else{$null}); facebookPermalink=$(if($fb){$fb.permalink}else{$null}); instagram=$(if($ig){$ig.status}else{$null}); instagramDryRun=$(if($ig){$ig.dryRun}else{$null}); instagramPermalink=$(if($ig){$ig.permalink}else{$null}); jobStatus=$jobPub.job.status; isolated=$session.isolated; tappedAp=$tappedAp; tappedPub=$tappedPub; confOk=$confOk; note="simulado aislado; no Meta real" } "$apShot;$pubShot"
+Rec "Publicar simulado: resultado final por ambas plataformas" ([bool]($fbOk -and $igOk -and $simOk)) @{ facebook=$(if($fb){$fb.status}else{$null}); facebookDryRun=$(if($fb){$fb.dryRun}else{$null}); facebookPermalink=$(if($fb){$fb.permalink}else{$null}); instagram=$(if($ig){$ig.status}else{$null}); instagramDryRun=$(if($ig){$ig.dryRun}else{$null}); instagramPermalink=$(if($ig){$ig.permalink}else{$null}); jobStatus=$jobPub.job.status; isolated=$session.isolated; tappedAp=$tappedAp; tappedPub=$tappedPub; confOk=$confOk; note="transporte Meta simulado; dryRun=false + example.invalid; no Meta real (llamar dry-run es impreciso)" } "$apShot;$pubShot"
 
 # Leave album detail before Solicitudes (pushed route has no bottom tabs)
 DismissDialogIfAny
@@ -525,142 +560,115 @@ if (-not (TapOcr $ocr "Solicitudes")) { Tap 360 1540 }
 Start-Sleep 2
 $solShot = Shot "solicitudes-lista"
 
-# Ensure target request is NEW (rejectable server-side). Prefer PATCH reset over reopen.
-$targetReq = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
-$tr = if ($targetReq.request) { $targetReq.request } else { $targetReq }
-if (-not $tr -or $tr.status -ne "NEW") {
-  try {
-    Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Method PATCH -Headers ($authH + @{"Content-Type"="application/json"; "X-CSRF-Token"=$login.csrf}) -Body '{"status":"NEW"}' | Out-Null
-  } catch {
-    try {
-      $reopenKey = "fisica-reopen-" + [guid]::NewGuid().ToString("N").Substring(0,8)
-      Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)/disposition" -Method POST -Headers ($authH + @{"Content-Type"="application/json"; "X-CSRF-Token"=$login.csrf}) -Body (@{ action="reopen"; reasonCategory="OTHER"; idempotencyKey=$reopenKey } | ConvertTo-Json) | Out-Null
-    } catch {}
-  }
-  $list = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests?status=NEW&limit=10" -Headers $authH
-  $pick = @($list.requests) | Where-Object { $_.status -eq "NEW" } | Select-Object -First 1
-  if ($pick) { $script:reqId = $pick.publicId }
-}
-
-# Focus search via placeholder, type exact folio, SUBMIT search (icon/Realiz), open matching card
-$ocr = OcrPath (Shot "sol-before-search")
-if (-not (TapOcr $ocr "Buscar")) { Tap 360 250 }
-Start-Sleep 0.5
-# Clear any prior query
-& adb -s $D shell input keyevent 123 | Out-Null
-1..40 | ForEach-Object { & adb -s $D shell input keyevent 67 | Out-Null }
-TypeText $script:reqId
-Start-Sleep 0.6
-SubmitSearch
-Start-Sleep 1.5
-# Dismiss keyboard so card taps aren't intercepted
-& adb -s $D shell input keyevent 111 | Out-Null  # ESCAPE
-Start-Sleep 0.4
-$ocr = OcrPath (Shot "sol-search")
-# Do NOT tap the folio in the search field — open the card via "Abrir detalle"
-$opened = (TapOcrBottom $ocr "Abrir" 350) -or (TapDesc "Abrir detalle" -Partial)
-if (-not $opened) {
-  # Tap card body below search (avoid y of search field ~250)
-  $card = $ocr.words | Where-Object { $_.text -eq $script:reqId -and $_.y -gt 320 } | Select-Object -First 1
-  if ($card) { Tap 360 $card.y } else { Tap 360 520 }
-}
-Start-Sleep 2.5
-$reqShot = Shot "solicitud-detalle"
-$ocr = OcrPath $reqShot
-if (-not (OcrHas $ocr $script:reqId) -or (OcrHas $ocr "Buscar HS")) {
-  # Still on list — retry open
-  SubmitSearch
-  Start-Sleep 1
-  & adb -s $D shell input keyevent 111 | Out-Null
-  Start-Sleep 0.3
-  $ocr = OcrPath (Shot "sol-search-2")
-  if (-not (TapOcrBottom $ocr "Abrir" 350)) { Tap 360 520 }
-  Start-Sleep 2.5
-  $reqShot = Shot "solicitud-detalle-2"
-  $ocr = OcrPath $reqShot
-}
-
-# --- Marcar seguridad ---
-$secUi = $false
-ScrollUntilOcr "Seguridad" 8 | Out-Null
-$ocr = OcrPath (Shot "sec-ocr")
-$tappedSec = (TapDesc "Marcar revisión seguridad" -Partial) -or (TapDesc "Marcar" -Partial) -or (TapOcr $ocr "Marcar")
-Start-Sleep 1.4
-$ocr = OcrPath (Shot "security-form")
-$secUi = (OcrHas $ocr "seguridad") -or (OcrHas $ocr "Marcar") -or (OcrHas $ocr "Confirmar") -or (OcrHas $ocr "Motivo")
-if ($secUi -or $tappedSec) {
-  if (OcrHas $ocr "Motivo") {
-    $mw = $ocr.words | Where-Object { $_.text -match 'Motivo' } | Select-Object -First 1
-    if ($mw) { Tap 360 ([int]($mw.y + 50)); Start-Sleep 0.35; TypeText "revision-seguridad-fisica" }
-  }
-  Start-Sleep 0.4
-  if (-not (TapDesc "Confirmar")) { if (-not (TapOcr (OcrPath (Shot "sec-confirm")) "Confirmar")) { Tap 360 1100 } }
-  Start-Sleep 2.8
-}
-Tap 48 110
-Start-Sleep 1.2
-if (-not (FocusPkg)) {
-  & adb -s $D shell am start -n $ACT | Out-Null
-  WaitFocus 15 | Out-Null
-  Start-Sleep 2
-  if (-not (TapOcr (OcrPath (Shot "relaunch-tabs")) "Solicitudes")) { Tap 360 1540 }
-  Start-Sleep 1.5
-}
-$ocr = OcrPath (Shot "sol-reopen-list")
-if (-not (TapOcr $ocr "Buscar")) { Tap 360 250 }
-Start-Sleep 0.3
-& adb -s $D shell input keyevent 123 | Out-Null
-1..40 | ForEach-Object { & adb -s $D shell input keyevent 67 | Out-Null }
-TypeText $script:reqId
-Start-Sleep 0.5
-SubmitSearch
-Start-Sleep 1.5
-& adb -s $D shell input keyevent 111 | Out-Null
-Start-Sleep 0.3
-$ocr = OcrPath (Shot "sol-reopen-search")
-if (-not (TapOcrBottom $ocr "Abrir" 350)) {
-  $card = $ocr.words | Where-Object { $_.text -eq $script:reqId -and $_.y -gt 320 } | Select-Object -First 1
-  if ($card) { Tap 360 $card.y } else { Tap 360 520 }
-}
-Start-Sleep 2.2
-$reopenShot = Shot "solicitud-reopen-sec"
-$afterSec = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
-$secFlag = $false
-$reqObj = if ($afterSec.request) { $afterSec.request } else { $afterSec }
-if ($reqObj) {
-  $secFlag = ($reqObj.securityReviewRequired -eq $true) -or ($reqObj.securityReviewRequired -eq 1) -or ($reqObj.security_review_required -eq 1)
-}
-if ($secFlag) {
-  Rec "Marcar seguridad: estado persistido al reabrir" $true @{ securityReviewRequired=$true; requestId=$script:reqId; form=$secUi; tapped=$tappedSec } $reopenShot
-} elseif ($secUi) {
-  Rec "Marcar seguridad: formulario visible (flujo completo no confirmado en UI)" $false @{ formVisible=$true; requestId=$script:reqId } $reopenShot
-} else {
-  Rec "Marcar seguridad: estado persistido al reabrir" $false @{ securityReviewRequired=$secFlag; requestId=$script:reqId; tapped=$tappedSec } $reopenShot
-}
-
-# --- Rechazar: Confirmo + submit (sendCustomer defaults OFF in APK 1.1.8+) ---
-# Avoid "En curso" quick-status: scroll with left-edge swipes only, tap Rechazar by a11y
-$preRej = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
-$preSt = [string]$(if ($preRej.request.status) { $preRej.request.status } else { $preRej.status })
-if ($preSt -ne "NEW" -and $preSt -ne "CONTACTED") {
-  try {
-    Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Method PATCH -Headers ($authH + @{"Content-Type"="application/json"; "X-CSRF-Token"=$login.csrf}) -Body '{"status":"NEW"}' | Out-Null
-  } catch {}
+# --- Seguridad FIRST (fresh NEW reqId), then reject on separate request after soft home ---
+$openSec = OpenRequestFromSearch $script:reqId "sec"
+$reqShot = $openSec.shot
+if (-not $openSec.ok) {
+  # One retry from list
   Tap 48 110; Start-Sleep 1
-  $ocr = OcrPath (Shot "sol-rej-reopen")
-  if (-not (TapOcr $ocr "Buscar")) { Tap 360 250 }
-  & adb -s $D shell input keyevent 123 | Out-Null
-  1..40 | ForEach-Object { & adb -s $D shell input keyevent 67 | Out-Null }
-  TypeText $script:reqId; SubmitSearch; Start-Sleep 1
-  & adb -s $D shell input keyevent 111 | Out-Null
-  $ocr = OcrPath (Shot "sol-rej-open")
-  if (-not (TapOcrBottom $ocr "Abrir" 350)) { Tap 360 520 }
-  Start-Sleep 2.2
+  $openSec = OpenRequestFromSearch $script:reqId "sec-retry"
+  $reqShot = $openSec.shot
 }
-# Scroll carefully — never OCR-tap "En curso"
-for ($i=0; $i -lt 6; $i++) {
+
+$beforeSec = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
+$beforeObj = if ($beforeSec.request) { $beforeSec.request } else { $beforeSec }
+$beforeFlag = ($beforeObj.securityReviewRequired -eq $true) -or ($beforeObj.securityReviewRequired -eq 1) -or ($beforeObj.security_review_required -eq 1)
+$beforeReason = [string]$(if ($beforeObj.securityReviewReason) { $beforeObj.securityReviewReason } else { $beforeObj.security_review_reason })
+Rec "Seguridad: consulta previa sin marca" (-not $beforeFlag -and $openSec.ok) @{
+  securityReviewRequired=$beforeFlag; reason=$beforeReason; requestId=$script:reqId; phase="lookup"; note="consulta de estado, no activacion"; onDetail=$openSec.ok
+} (Shot "sec-before-lookup")
+
+$secUi = $false
+$activated = $false
+$tappedSec = $false
+if (-not $openSec.ok) {
+  Rec "Marcar seguridad: activacion desde A06" $false @{
+    requestId=$script:reqId; phase="activation"; error="detail_not_opened"
+  } $reqShot
+} elseif ($beforeFlag) {
+  Rec "Marcar seguridad: activacion desde A06" $false @{
+    requestId=$script:reqId; phase="activation"; error="preexisting_mark"; note="solicitud ya marcada; no cuenta como accion de esta corrida"
+  } (Shot "sec-preexisting")
+} else {
+  ScrollUntilOcr "Marcar" 10 | Out-Null
+  ScrollUntilDesc "Marcar revisión seguridad" 6 | Out-Null
+  $ocr = OcrPath (Shot "sec-ocr")
+  $tappedSec = (TapDesc "Marcar revisión seguridad" -Partial) -or (TapDesc "Marcar revisión" -Partial)
+  if (-not $tappedSec) {
+    $hits = @($ocr.words | Where-Object { $_.text -match 'Marcar' -and $_.y -gt 900 })
+    if ($hits.Count -gt 0) { Tap 360 $hits[0].y; $tappedSec = $true }
+  }
+  Start-Sleep 1.4
+  $ocr = OcrPath (Shot "security-form")
+  $secUi = (OcrHas $ocr "Motivo") -or (OcrHas $ocr "Confirmar") -or (OcrHas $ocr "Marcar revisión de seguridad")
+  if ($secUi -and $tappedSec) {
+    if (OcrHas $ocr "Motivo") {
+      $mw = $ocr.words | Where-Object { $_.text -match 'Motivo' } | Select-Object -First 1
+      if ($mw) { Tap 360 ([int]($mw.y + 50)); Start-Sleep 0.35; TypeText $script:secReason }
+    }
+    Start-Sleep 0.4
+    if (-not (TapDesc "Confirmar")) { if (-not (TapOcr (OcrPath (Shot "sec-confirm")) "Confirmar")) { Tap 360 1100 } }
+    Start-Sleep 2.8
+    $activated = $true
+  }
+  # Reopen: back to list → search same folio → open again; API is source of truth
+  Tap 48 110
+  Start-Sleep 1.2
+  if (-not (FocusPkg)) {
+    & adb -s $D shell am start -n $ACT | Out-Null
+    WaitFocus 15 | Out-Null
+    Start-Sleep 2
+    if (-not (TapOcr (OcrPath (Shot "relaunch-tabs")) "Solicitudes")) { Tap 360 1540 }
+    Start-Sleep 1.5
+  }
+  $reopen = OpenRequestFromSearch $script:reqId "reopen-sec"
+  $reopenShot = $reopen.shot
+  $afterSec = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
+  $reqObj = if ($afterSec.request) { $afterSec.request } else { $afterSec }
+  $secFlag = ($reqObj.securityReviewRequired -eq $true) -or ($reqObj.securityReviewRequired -eq 1) -or ($reqObj.security_review_required -eq 1)
+  $secReasonAfter = [string]$(if ($reqObj.securityReviewReason) { $reqObj.securityReviewReason } else { $reqObj.security_review_reason })
+  $hist = @($reqObj.history)
+  if (-not $hist -or $hist.Count -eq 0) { $hist = @($afterSec.history) }
+  $auditHit = $hist | Where-Object {
+    ([string]$_.action -eq "SECURITY_REVIEW_SET") -and
+    ([string]$_.reasonPublic -eq $script:secReason -or [string]$_.note -eq $script:secReason) -and
+    ([string]$_.at -gt $script:secTestStart -or [string]$_.createdAt -gt $script:secTestStart)
+  } | Select-Object -First 1
+  $reasonExact = ($secReasonAfter -eq $script:secReason)
+  $auditOk = [bool]$auditHit
+  $passAct = [bool]($activated -and $tappedSec -and $secFlag -and $reasonExact -and $auditOk)
+  Rec "Marcar seguridad: activacion desde A06" $passAct @{
+    phase="activation"
+    requestId=$script:reqId
+    beforeFlag=$beforeFlag
+    securityReviewRequired=$secFlag
+    expectedReason=$script:secReason
+    reasonAfter=$secReasonAfter
+    reasonExact=$reasonExact
+    auditAction=$(if($auditHit){$auditHit.action}else{$null})
+    auditAt=$(if($auditHit){if($auditHit.at){$auditHit.at}else{$auditHit.createdAt}}else{$null})
+    auditAfterTestStart=$auditOk
+    testStart=$script:secTestStart
+    form=$secUi
+    tapped=$tappedSec
+    activated=$activated
+    reopenDetail=$reopen.ok
+  } $reopenShot
+}
+
+# --- Rechazar on separate NEW request after soft home ---
+& adb -s $D shell am start -n $ACT | Out-Null
+Start-Sleep 2
+$homeUi = WaitHome 20
+if (-not (TapOcr $homeUi.ocr "Solicitudes")) { Tap 360 1540 }
+Start-Sleep 2
+$openRej = OpenRequestFromSearch $script:rejectReqId "reject"
+$reqShot = $openRej.shot
+for ($i=0; $i -lt 8; $i++) {
   $u = DumpUi "rej-scroll-$i"
   if ($u -match 'content-desc="Rechazar"') { break }
+  $ocr = OcrPath (Shot "rej-ocr-$i")
+  if (OcrHas $ocr "Rechazar") { break }
   Swipe 80 1250 80 700
   Start-Sleep 0.4
 }
@@ -668,29 +676,23 @@ $rejectUi = $false
 $tappedRej = TapDesc "Rechazar"
 if (-not $tappedRej) {
   $ocr = OcrPath (Shot "pre-reject")
-  # Prefer exact bottom "Rechazar" in Disposición, not other words
   $hits = @($ocr.words | Where-Object { $_.text -eq "Rechazar" -and $_.y -gt 700 })
   if ($hits.Count -gt 0) { Tap 360 $hits[0].y; $tappedRej = $true }
 }
 Start-Sleep 2.0
-# Do NOT send KEYCODE_ESCAPE here — it closes the bottom sheet
 $ocr = OcrPath (Shot "rechazo-form")
 $rejectUi = (OcrHas $ocr "Motivo") -or (OcrHas $ocr "Confirmo") -or (OcrHas $ocr "Rechazar solicitud") -or (OcrHas $ocr "categoría") -or (OcrHas $ocr "Otro")
 if (-not $rejectUi -and $tappedRej) {
-  # Retry open once
   TapDesc "Rechazar" | Out-Null
   Start-Sleep 2
   $ocr = OcrPath (Shot "rechazo-form-retry")
   $rejectUi = (OcrHas $ocr "Motivo") -or (OcrHas $ocr "Confirmo") -or (OcrHas $ocr "Rechazar solicitud") -or (OcrHas $ocr "Otro")
 }
 if ($rejectUi -or $tappedRej) {
-  # Category "Otro" is already the default valid choice
-  # Check Confirmo via a11y checkbox / label
   $u = DumpUi "rej-confirm"
   $cm = [regex]::Match($u, 'text="Confirmo esta acción"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
   if (-not $cm.Success) { $cm = [regex]::Match($u, 'content-desc="[^"]*Confirmo[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"') }
   if ($cm.Success) {
-    # Tap left side for the checkbox control
     Tap ([int]$cm.Groups[1].Value + 24) ([int]((([int]$cm.Groups[2].Value)+([int]$cm.Groups[4].Value))/2))
   } else {
     $ocr = OcrPath (Shot "rechazo-confirm")
@@ -698,25 +700,22 @@ if ($rejectUi -or $tappedRej) {
     if ($cw) { Tap 72 $cw.y } else { TapDesc "Confirmo" -Partial | Out-Null }
   }
   Start-Sleep 0.9
-  # Turn OFF customer notify if the switch is still on (no real sends)
   $u = DumpUi "rej-switch"
   $sw = [regex]::Match($u, 'content-desc="[^"]*Enviar mensaje[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
   if ($sw.Success) {
-    # SwitchListTile: tap right side to toggle off
     Tap ([int]$sw.Groups[3].Value - 40) ([int]((([int]$sw.Groups[2].Value)+([int]$sw.Groups[4].Value))/2))
     Start-Sleep 0.5
   }
   $ocr = OcrPath (Shot "rechazo-submit")
   $u = DumpUi "rej-submit"
-  # Title and primary share content-desc — must pick clickable+enabled button (lower on screen)
   $sms = [regex]::Matches($u, 'content-desc="Rechazar solicitud"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
   $picked = $null
   foreach ($m in $sms) {
     $y1 = [int]$m.Groups[2].Value
-    if ($y1 -lt 800) { continue } # skip sheet title
+    if ($y1 -lt 800) { continue }
     $slice = $u.Substring([Math]::Max(0, $m.Index - 80), [Math]::Min(200, $u.Length - [Math]::Max(0, $m.Index - 80)))
     if ($slice -match 'clickable="true"' -and $slice -match 'enabled="true"') { $picked = $m; break }
-    if ($y1 -gt 1200) { $picked = $m } # fallback: lowest title-named node
+    if ($y1 -gt 1200) { $picked = $m }
   }
   if ($picked) {
     Tap ([int]((([int]$picked.Groups[1].Value)+([int]$picked.Groups[3].Value))/2)) ([int]((([int]$picked.Groups[2].Value)+([int]$picked.Groups[4].Value))/2))
@@ -725,15 +724,15 @@ if ($rejectUi -or $tappedRej) {
   }
   Start-Sleep 3.5
 }
-$afterReject = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:reqId)" -Headers $authH
+$afterReject = Invoke-RestMethod -Uri "$BASE/api/admin/service-requests/$($script:rejectReqId)" -Headers $authH
 $rejStatus = [string]$(if ($afterReject.request.status) { $afterReject.request.status } else { $afterReject.status })
 $rejectPersisted = $rejStatus -eq "CANCELLED"
 if ($rejectPersisted) {
-  Rec "Rechazar: guardar con motivo valido y estado persistido" $true @{ status=$rejStatus; form=$rejectUi; tapped=$tappedRej; requestId=$script:reqId } "$solShot;$reqShot"
+  Rec "Rechazar: guardar con motivo valido y estado persistido" $true @{ status=$rejStatus; form=$rejectUi; tapped=$tappedRej; requestId=$script:rejectReqId; onDetail=$openRej.ok } "$solShot;$reqShot"
 } elseif ($rejectUi) {
-  Rec "Rechazar: formulario de validacion visible (flujo completo no confirmado en UI)" $false @{ formVisible=$true; status=$rejStatus; requestId=$script:reqId } "$solShot;$reqShot"
+  Rec "Rechazar: formulario de validacion visible (flujo completo no confirmado en UI)" $false @{ formVisible=$true; status=$rejStatus; requestId=$script:rejectReqId } "$solShot;$reqShot"
 } else {
-  Rec "Rechazar: guardar con motivo valido y estado persistido" $false @{ status=$rejStatus; tapped=$tappedRej; requestId=$script:reqId } "$solShot;$reqShot"
+  Rec "Rechazar: guardar con motivo valido y estado persistido" $false @{ status=$rejStatus; tapped=$tappedRej; requestId=$script:rejectReqId; onDetail=$openRej.ok } "$solShot;$reqShot"
 }
 
 $passed = @($results | Where-Object { $_.result -eq "PASS" }).Count
@@ -747,12 +746,13 @@ $out = [ordered]@{
     "PASS requires persisted job/request state after UI action (API corroboration only)",
     "UI text verified via OCR when accessibility dump is empty",
     "No PASS on opened/focus/screenshot-size alone",
-    "Publish PASS only for simulated dry-run on both platforms"
+    "Publish PASS for Meta-simulated transport (dryRun=false + example.invalid links; not live Meta)",
+    "Security: prior lookup != activation; unique reason + new SECURITY_REVIEW_SET audit after test start"
   )
   results=$results
 }
 $out | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $ev "FISICA-UI-RESULTS.json") -Encoding utf8
-$md = @("# Fisica UI A06 r3","", "passed=$passed failed=$failed", "APK=$vnLine / $vcLine", "isolated=$($session.isolated)", "commit=$($out.backendCommit)", "dirty=$dirty", "album=$albumId", "request=$($script:reqId)", "", "## Criterios", "- Persistencia real tras acciÃ³n UI", "- API solo corrobora", "- OCR para texto UI (dump Flutter vacÃ­o)", "- Publicar = dry-run simulado ambas plataformas", "")
+$md = @("# Fisica UI A06 r3b","", "passed=$passed failed=$failed", "APK=$vnLine / $vcLine", "isolated=$($session.isolated)", "commit=$($out.backendCommit)", "dirty=$dirty", "album=$albumId", "request=$($script:reqId)", "secReason=$($script:secReason)", "", "## Criterios", "- Persistencia real tras accion UI", "- API solo corrobora", "- OCR para texto UI (dump Flutter vacio)", "- Publicar = transporte Meta simulado (dryRun=false + example.invalid; no Meta real)", "- Seguridad: consulta previa != activacion; motivo unico + auditoria nueva", "")
 $md += $results | ForEach-Object { "- **$($_.result)** $($_.name)" }
 $md -join "`n" | Set-Content (Join-Path $ev "FISICA-UI-RESULTS.md") -Encoding utf8
 Write-Host "SUMMARY passed=$passed failed=$failed"

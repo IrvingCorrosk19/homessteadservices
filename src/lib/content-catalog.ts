@@ -576,13 +576,14 @@ export function saveVersion(input: {
   hashtags: string;
   prompt: string;
   privacyNote: string;
+  mediaOrderJson?: string;
 }) {
   const now = new Date().toISOString();
   getHomesteadDb()
     .prepare(
       `INSERT INTO content_versions
-        (job_id, public_id, version, kind, copy, cta, hashtags, prompt, privacy_note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (job_id, public_id, version, kind, copy, cta, hashtags, prompt, privacy_note, media_order_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.job.id,
@@ -594,6 +595,7 @@ export function saveVersion(input: {
       input.hashtags,
       input.prompt,
       input.privacyNote,
+      input.mediaOrderJson ?? input.job.mediaOrderJson ?? "",
       now,
     );
 }
@@ -657,6 +659,7 @@ export function getContentVersion(publicId: string, version: number) {
         hashtags: string;
         prompt: string;
         privacy_note: string;
+        media_order_json?: string;
         created_at: string;
       }
     | undefined;
@@ -672,6 +675,7 @@ export function getContentVersion(publicId: string, version: number) {
     hashtags: row.hashtags,
     prompt: row.prompt,
     privacyNote: row.privacy_note,
+    mediaOrderJson: row.media_order_json || "",
     createdAt: row.created_at,
   } satisfies ContentVersion;
 }
@@ -693,6 +697,7 @@ export function latestVersion(publicId: string) {
         hashtags: string;
         prompt: string;
         privacy_note: string;
+        media_order_json?: string;
         created_at: string;
       }
     | undefined;
@@ -708,6 +713,7 @@ export function latestVersion(publicId: string) {
     hashtags: row.hashtags,
     prompt: row.prompt,
     privacyNote: row.privacy_note,
+    mediaOrderJson: row.media_order_json || "",
     createdAt: row.created_at,
   } satisfies ContentVersion;
 }

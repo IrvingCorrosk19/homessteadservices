@@ -19,10 +19,11 @@ import {
 import { getHomesteadDb, homesteadDataDir } from "@/lib/service-requests";
 import { nextBatchPublicId } from "@/lib/content-photo-batch";
 import { brandedSocialSet, metadataOf, toJpeg } from "@/lib/content-images";
-import { isControlIsolated } from "@/lib/control-isolation";
+import { isControlIsolated, awaitSimulatedReprocessHold } from "@/lib/control-isolation";
 import { rewriteCopyOnly } from "@/lib/content-openai";
 import { applyContentEditAtomic, assertContentJobEditable, assertExpectedContentVersion } from "@/lib/content-edit-guard";
 import { validatePublishImage } from "@/lib/content-media-url";
+import { listOrderedBrandedFeeds } from "@/lib/content-multi-photo";
 import { MAX_CONTENT_PHOTO_BYTES, MAX_CONTENT_PHOTOS } from "@/lib/content-types";
 import { sniffImage } from "@/lib/photos";
 
@@ -206,7 +207,83 @@ export async function brandControlJob(
   return { ok: true as const, assetId: asset?.id || 0 };
 }
 
-/** Re-brand each ORIGINAL into a new BRANDED feed asset (never overwrite historical files). */
+/** Index stamped in original-NNN / branded-vX-NNN filenames. */
+function assetIndexFromFilename(filename: string): number | null {
+  const branded = filename.match(/branded-v\d+-(\d+)/i);
+  if (branded) return Number(branded[1]);
+  const original = filename.match(/original-(\d+)/i);
+  if (original) return Number(original[1]);
+  return null;
+}
+
+/**
+ * Map current selection (mediaOrderJson branded ids, in order) → ORIGINAL assets.
+ * Removed slides are absent from mediaOrderJson and must not be reprocessed.
+ */
+function resolveSelectedOriginals(publicId: string, mediaOrderJson: string) {
+  const originals = listAssets(publicId, "ORIGINAL", 0);
+  const byIndex = new Map<number, (typeof originals)[number]>();
+  for (const o of originals) {
+    const idx = assetIndexFromFilename(o.storedFilename);
+    if (idx != null) byIndex.set(idx, o);
+  }
+  const orderedBranded = listOrderedBrandedFeeds(
+    publicId,
+    latestVersion(publicId)?.version || 0,
+    mediaOrderJson,
+  );
+  const selected: Array<{ original: (typeof originals)[number]; index: number; previousBrandedId: number }> = [];
+  const seenOrig = new Set<number>();
+  for (const branded of orderedBranded) {
+    const idx = assetIndexFromFilename(branded.storedFilename);
+    if (idx == null) continue;
+    const original = byIndex.get(idx);
+    if (!original || seenOrig.has(original.id)) continue;
+    seenOrig.add(original.id);
+    selected.push({ original, index: idx, previousBrandedId: branded.id });
+  }
+  return selected;
+}
+
+function claimReprocessOwner(publicId: string, expectedVersion: number, claimToken: string) {
+  const now = new Date().toISOString();
+  const result = getHomesteadDb()
+    .prepare(
+      `UPDATE content_jobs
+       SET status = 'PROCESSING',
+           approved_version = NULL,
+           last_error = NULL,
+           pending_input = ?,
+           updated_at = ?
+       WHERE public_id = ?
+         AND status NOT IN ('PUBLISHING', 'PUBLISHED', 'SIMULATED')
+         AND (
+           SELECT COALESCE(MAX(version), 0) FROM content_versions WHERE public_id = ?
+         ) = ?`,
+    )
+    .run(claimToken, now, publicId, publicId, expectedVersion);
+  return result.changes === 1;
+}
+
+/** Clear our claim marker only — never rewrite status/caption/order/approval left by others. */
+function clearReprocessClaimIfOwner(publicId: string, claimToken: string) {
+  const now = new Date().toISOString();
+  getHomesteadDb()
+    .prepare(
+      `UPDATE content_jobs
+       SET pending_input = '',
+           updated_at = ?
+       WHERE public_id = ? AND pending_input = ?`,
+    )
+    .run(now, publicId, claimToken);
+}
+
+function stillOwnsReprocess(publicId: string, claimToken: string) {
+  const job = getJobByPublicId(publicId);
+  return Boolean(job && job.pendingInput === claimToken);
+}
+
+/** Re-brand only CURRENTLY SELECTED originals (mediaOrderJson order). Never revive removed slides. */
 export async function reprocessControlBrand(publicId: string, expectedVersion?: number) {
   const job = getJobByPublicId(publicId);
   if (!job) return { ok: false as const, error: "missing" as const };
@@ -216,30 +293,52 @@ export async function reprocessControlBrand(publicId: string, expectedVersion?: 
   const gate = assertExpectedContentVersion(publicId, expected);
   if (!gate.ok) return { ok: false as const, error: gate.error, current: gate.current };
 
-  const originals = listAssets(publicId, "ORIGINAL", 0).sort((a, b) => a.id - b.id);
-  if (!originals.length) return { ok: false as const, error: "original_missing" as const };
+  const selected = resolveSelectedOriginals(publicId, job.mediaOrderJson || "");
+  if (!selected.length) return { ok: false as const, error: "original_missing" as const };
 
-  const restoreStatus =
-    job.status === "PROCESSING" || job.status === "RECEIVING" ? "AWAITING_APPROVAL" : job.status;
-  updateJob(publicId, { status: "PROCESSING", lastError: null, approvedVersion: null });
-  const keepCurrent = (cause: string, current?: number) => {
-    updateJob(publicId, { status: restoreStatus, lastError: null });
+  const claimToken = `reprocess:${randomUUID()}`;
+  if (!claimReprocessOwner(publicId, expected, claimToken)) {
+    return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+  }
+
+  const conflictNoMutate = (cause: string, current?: number) => {
+    // Drop our claim if we still own it; never restore/overwrite foreign status or selection.
+    clearReprocessClaimIfOwner(publicId, claimToken);
     return { ok: false as const, error: "conflict_during_regen" as const, cause, current };
   };
+
+  const failOwned = (error: string) => {
+    if (!stillOwnsReprocess(publicId, claimToken)) {
+      return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+    }
+    updateJob(publicId, { status: "FAILED", lastError: error, pendingInput: "" });
+    return { ok: false as const, error: error as "original_unreadable" | "brand_store_failed" | "process_failed" };
+  };
+
   try {
+    // Pause point for concurrency tests (isolated only).
+    await awaitSimulatedReprocessHold();
+
+    if (!stillOwnsReprocess(publicId, claimToken)) {
+      return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+    }
+    const afterHoldVer = latestVersion(publicId)?.version || 0;
+    if (afterHoldVer !== expected) {
+      return conflictNoMutate("stale_version", afterHoldVer);
+    }
+
     const nextVersion = expected + 1;
     const newFeedIds: number[] = [];
     const widths: number[] = [];
     const heights: number[] = [];
     const batchTag = randomUUID().slice(0, 8);
 
-    for (let i = 0; i < originals.length; i++) {
-      const original = originals[i];
-      const bytes = readAssetBytes(original);
-      if (!bytes) {
-        updateJob(publicId, { status: "FAILED", lastError: "original_unreadable" });
-        return { ok: false as const, error: "original_unreadable" as const };
+    for (const item of selected) {
+      if (!stillOwnsReprocess(publicId, claimToken)) {
+        return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
       }
+      const bytes = readAssetBytes(item.original);
+      if (!bytes) return failOwned("original_unreadable");
       const jpeg = await toJpeg(bytes);
       const set = await brandedSocialSet(jpeg);
       const valid = validatePublishImage({
@@ -249,15 +348,16 @@ export async function reprocessControlBrand(publicId: string, expectedVersion?: 
         height: set.feed.height,
       });
       if (!valid.ok) {
-        updateJob(publicId, { status: "FAILED", lastError: valid.cause });
+        if (!stillOwnsReprocess(publicId, claimToken)) {
+          return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+        }
+        updateJob(publicId, { status: "FAILED", lastError: valid.cause, pendingInput: "" });
         return { ok: false as const, error: valid.cause };
       }
 
-      // Pair by ORIGINAL filename index when present (original-001…); else 1-based position.
-      const fromName = original.storedFilename.match(/original-(\d+)/i);
-      const index = fromName ? Number(fromName[1]) : i + 1;
+      const index = item.index;
       const role = index === 1 ? "PRIMARY" : "SECONDARY";
-      // Unique filename — never overwrite historical branded files.
+      // Unique filename — never overwrite historical branded files. Index keeps original→result link.
       const filename = `branded-v${nextVersion}-${String(index).padStart(3, "0")}-${batchTag}-feed.jpg`;
       storeDerivedAsset({
         job,
@@ -273,23 +373,23 @@ export async function reprocessControlBrand(publicId: string, expectedVersion?: 
         height: set.feed.height,
       });
       const created = listAssets(publicId, "BRANDED", nextVersion).find((a) => a.storedFilename === filename);
-      if (!created) {
-        updateJob(publicId, { status: "FAILED", lastError: "brand_store_failed" });
-        return { ok: false as const, error: "brand_store_failed" as const };
-      }
+      if (!created) return failOwned("brand_store_failed");
       newFeedIds.push(created.id);
       widths.push(set.feed.width);
       heights.push(set.feed.height);
     }
 
-    // Re-check after brand work — concurrent edit/publish wins; keep current version intact.
+    // Re-check after brand work — concurrent edit/publish wins; leave their state intact.
+    if (!stillOwnsReprocess(publicId, claimToken)) {
+      return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+    }
     const afterVer = latestVersion(publicId)?.version || 0;
     if (afterVer !== expected) {
-      return keepCurrent("stale_version", afterVer);
+      return conflictNoMutate("stale_version", afterVer);
     }
     const live = listPublicationsForJob(publicId).some((p) => p.status === "PUBLISHED" && !p.dry_run);
     if (live || getJobByPublicId(publicId)?.status === "PUBLISHING") {
-      return keepCurrent("already_published");
+      return conflictNoMutate("already_published");
     }
 
     const mediaOrderJson = JSON.stringify(newFeedIds);
@@ -305,24 +405,29 @@ export async function reprocessControlBrand(publicId: string, expectedVersion?: 
         status: "AWAITING_APPROVAL",
         lastError: null,
         approvedVersion: null,
+        pendingInput: "",
         mediaOrderJson,
         format: newFeedIds.length >= 2 ? "CAROUSEL" : "SINGLE_IMAGE",
         publishMode: newFeedIds.length >= 2 ? "album" : getJobByPublicId(publicId)?.publishMode || "separate",
       },
     });
     if (!applied.ok) {
-      return keepCurrent(applied.error, applied.current);
+      return conflictNoMutate(applied.error, applied.current);
     }
     return {
       ok: true as const,
       width: widths[0] || 0,
       height: heights[0] || 0,
       feedIds: newFeedIds,
+      mediaOrderJson,
       invalidatedApproval: true as const,
       version: applied.version,
     };
   } catch {
-    updateJob(publicId, { status: "FAILED", lastError: "process_failed" });
+    if (!stillOwnsReprocess(publicId, claimToken)) {
+      return { ok: false as const, error: "conflict_during_regen" as const, cause: "claim_lost" as const };
+    }
+    updateJob(publicId, { status: "FAILED", lastError: "process_failed", pendingInput: "" });
     return { ok: false as const, error: "process_failed" as const };
   }
 }

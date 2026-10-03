@@ -61,6 +61,31 @@ export function isSimulatedOpenAiHeld() {
   return Boolean(openaiHold);
 }
 
+/** Deliberate pause during reprocessControlBrand (after claim, before/while branding). */
+let reprocessHold: { promise: Promise<void>; release: () => void } | null = null;
+
+export function holdSimulatedReprocess() {
+  if (reprocessHold) return;
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  reprocessHold = { promise, release };
+}
+
+export function releaseSimulatedReprocess() {
+  reprocessHold?.release();
+  reprocessHold = null;
+}
+
+export async function awaitSimulatedReprocessHold() {
+  if (reprocessHold) await reprocessHold.promise;
+}
+
+export function isSimulatedReprocessHeld() {
+  return Boolean(reprocessHold);
+}
+
 export function isControlIsolated() {
   return process.env.HOMESTEAD_CONTROL_ISOLATED === "true";
 }
