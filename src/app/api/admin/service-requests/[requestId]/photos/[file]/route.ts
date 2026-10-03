@@ -5,7 +5,7 @@ import { readStoredPhoto } from "@/lib/service-requests";
 
 type Params = { params: Promise<{ requestId: string; file: string }> };
 
-export async function GET(_: Request, { params }: Params) {
+export async function GET(request: Request, { params }: Params) {
   const gate = await requireAdminSession(request);
   if (!gate.ok) return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
   const { requestId, file } = await params;

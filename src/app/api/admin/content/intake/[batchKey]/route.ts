@@ -5,7 +5,7 @@ import { listControlIntake, recoverControlIntake } from "@/lib/control-intake";
 export const runtime = "nodejs";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ batchKey: string }> },
 ) {
   const gate = await requireAdminSession(request);

@@ -5,7 +5,7 @@ import { getControlJobDetail } from "@/lib/control-service";
 export const runtime = "nodejs";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ publicId: string }> },
 ) {
   const session = await requireAdminSession(request);
