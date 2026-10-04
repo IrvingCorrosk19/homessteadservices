@@ -31,7 +31,10 @@ export function resolvePrimaryFromMessage(text: string): PlaybookServiceId | "" 
   if (detected.includes("ac") && /\b(aire|aires|ac|split|minisplit|climatizaci)\b/.test(blob)) {
     return "ac";
   }
-  if (detected.includes("plumbing") && /\b(tuber|fuga|fregad|inodor|plomer)\b/.test(blob)) {
+  if (
+    detected.includes("plumbing") &&
+    /\b(tuber|fuga|fregad|lavamanos|lava\s*manos|lavabo|lavatorio|inodor|plomer|tapad[oa]|gote)\b/.test(blob)
+  ) {
     return "plumbing";
   }
   if (detected.includes("electrical") && /\b(el[eé]ctric|tomacorriente|interruptor|chispa)\b/.test(blob)) {

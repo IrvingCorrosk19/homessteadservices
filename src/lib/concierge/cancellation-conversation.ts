@@ -4,6 +4,7 @@
 import type { ConversationState } from "@/lib/concierge-store";
 import { bumpStateVersion } from "@/lib/concierge/turn-context-guards";
 import { clearServiceScopedState } from "@/lib/concierge/service-transition";
+import { serviceAfterNewRequestOperator } from "@/lib/concierge/existing-request-operation";
 import type { CancelServiceRequestResult } from "@/lib/service-request-cancellation";
 
 export function applyRequestCancelledConversationState(
@@ -125,6 +126,94 @@ export function ambiguousCancelTargetReply() {
 
 export function uncertainCancelReply() {
   return "¿Quieres cancelar la solicitud, o solo cambiar algo del servicio?";
+}
+
+export function confirmCancelRequestReply(input: {
+  serviceLabel: string;
+  publicId: string;
+  when?: string;
+}) {
+  const service = (input.serviceLabel || "servicio").toLowerCase();
+  const when = input.when?.trim() ? `, agendada para ${input.when.trim()}` : "";
+  return `¿Confirmas que quieres cancelar la solicitud de ${service} ${input.publicId}${when}?`;
+}
+
+export function confirmCancelAllReply(
+  rows: Array<{ publicId: string; serviceLabel: string; when?: string }>,
+) {
+  if (rows.length <= 1 && rows[0]) {
+    return confirmCancelRequestReply({
+      serviceLabel: rows[0].serviceLabel,
+      publicId: rows[0].publicId,
+      when: rows[0].when,
+    });
+  }
+  const summary = rows
+    .slice(0, 4)
+    .map((row) => {
+      const when = row.when?.trim() ? ` (${row.when.trim()})` : "";
+      return `${row.serviceLabel || "servicio"} ${row.publicId}${when}`;
+    })
+    .join("; ");
+  return `Tienes ${rows.length} solicitudes activas: ${summary}. ¿Confirmas que deseas cancelar todas, o solo alguna?`;
+}
+
+export function cancelConfirmationKeptReply() {
+  return "De acuerdo, mantengo tu solicitud activa.";
+}
+
+export function markPendingCancelConfirmation(
+  state: ConversationState,
+  requestIds: string[],
+  question: string,
+  mode: "ONE" | "ALL" | "CHOOSE" = "ONE",
+  sourceText = "",
+): ConversationState {
+  const extraService = sourceText ? serviceAfterNewRequestOperator(sourceText) : "";
+  return bumpStateVersion({
+    ...state,
+    facts: {
+      ...(state.facts || {}),
+      pendingAction: mode === "CHOOSE" ? "CLARIFY_CANCEL_WHICH" : "CONFIRM_CANCEL_REQUEST",
+      pendingCancelRequestIds: requestIds.filter(Boolean).join("|"),
+      pendingCancelMode: mode,
+      pendingCancelSourceText: sourceText.slice(0, 500),
+      pendingCancelNewService: extraService || "",
+      lastBotQuestion: question,
+      lastAskedField: "cancel_confirmation",
+    },
+  });
+}
+
+export function clearPendingCancelConfirmation(state: ConversationState): ConversationState {
+  return bumpStateVersion({
+    ...state,
+    facts: {
+      ...(state.facts || {}),
+      pendingAction: "",
+      pendingCancelRequestIds: "",
+      pendingCancelMode: "",
+      pendingCancelSourceText: "",
+      pendingCancelNewService: "",
+      lastAskedField: "",
+    },
+  });
+}
+
+export function deferredNeedAfterBookingReply(input: {
+  serviceLabel: string;
+  when: string;
+  deferredService: string;
+  deferredSummary?: string;
+}) {
+  const paintish = /pint/i.test(input.serviceLabel);
+  const visitLabel = paintish ? "pintura" : input.serviceLabel.toLowerCase() || "servicio";
+  const when = input.when || "el horario acordado";
+  if (input.deferredService === "plumbing" || /lavamanos|lava\s*manos|lavabo/i.test(input.deferredSummary || "")) {
+    return `Tu visita de ${visitLabel} quedó confirmada para ${when}. Sobre el lavamanos, ¿tiene una fuga, está tapado o presenta otro problema?`;
+  }
+  const other = input.deferredService === "ac" ? "el aire" : "eso nuevo";
+  return `Tu visita de ${visitLabel} quedó confirmada para ${when}. Sobre ${other}, ¿quieres agregarlo a la misma visita o prefieres abrir otra solicitud?`;
 }
 
 export function markCancelClarification(

@@ -31,6 +31,12 @@ export const CANCELLATION_REASON_CATEGORIES = [
   "CUSTOMER_CHANGED_MIND",
   "OTHER",
   "NOT_PROVIDED",
+  // Admin rejection (stored on CANCELLED disposition_kind=REJECT)
+  "SECURITY_RISK",
+  "OUT_OF_COVERAGE",
+  "SERVICE_NOT_OFFERED",
+  "REQUIREMENTS_NOT_MET",
+  "NO_AVAILABILITY",
 ] as const;
 
 export type CancellationReasonCategory = (typeof CANCELLATION_REASON_CATEGORIES)[number];
@@ -114,7 +120,7 @@ const END_CHAT_RE =
   /\b(gracias[,\s]+eso\s+es\s+todo|adios|adi[oó]s|cerrar\s+(el\s+)?chat|hasta\s+luego|eso\s+ser[ií]a\s+todo)\b/i;
 
 const CANCEL_REQUEST_RE =
-  /\b(cancela(r)?\s+(mi\s+)?(solicitud|pedido|trabajo|servicio)|cancela(r)?\s+(eso|la\s+solicitud|el\s+servicio)|ya\s+no\s+(kiero|quiero)\s+(el\s+)?servicio|ya\s+no\s+(nesesito|necesito)\s+que\s+vengan|ya\s+no\s+lo\s+(nesesito|necesito)|no\s+necesito\s+que\s+vengan|mejor\s+no\s+vengan|olvida\s+el\s+trabajo|olvidalo,?\s+ya\s+no|ya\s+lo\s+resolv|ya\s+resolvi|consegui\s+(a\s+)?otra\s+persona|consegu[ií]\s+quien|elimin(a|e|ar)\s+mi\s+solicitud|cansela\s+(la\s+)?(solicitud|eso|servicio)|ya\s+no\s+kiero)\b/i;
+  /\b(cancela(r)?\s+(mi\s+)?(solicitud|pedido|trabajo|servicio)|cancela(r)?\s+(eso|la\s+solicitud|el\s+servicio)|ya\s+no\s+(kiero|quiero)\s+(el\s+)?servicio|ya\s+no\s+(nesesito|necesito)\s+que\s+vengan|ya\s+no\s+lo\s+(nesesito|necesito)|no\s+necesito\s+que\s+vengan|mejor\s+no\s+vengan|olvida\s+el\s+trabajo|olvidalo,?\s+ya\s+no|ya\s+lo\s+resolv|ya\s+resolvi|consegui\s+(a\s+)?otra\s+persona|consegu[ií]\s+quien|elimin(a|e|ar)\s+(todas?\s+)?(mi|mis)\s+solicitud(es)?|borr(a|e|ar)\s+(todas?\s+)?(mi|mis)\s+solicitud(es)?|cansela\s+(la\s+)?(solicitud|eso|servicio)|ya\s+no\s+kiero)\b/i;
 
 const CANCEL_APPOINTMENT_RE =
   /\b(cancela(r)?\s+(la\s+)?(cita|visita|sita)|no\s+necesito\s+la\s+(cita|visita)|cancel(a|ar)\s+la\s+cita|ya\s+no\s+quiero\s+(la\s+)?cita)\b/i;
@@ -228,7 +234,10 @@ export function detectCustomerCancellationIntent(
 
   const appointmentOnly = CANCEL_APPOINTMENT_RE.test(blob) || /\bcancela\s+la\s+sita\b/.test(blob);
   const keepRequest = KEEP_REQUEST_RE.test(blob);
-  const requestCancel = CANCEL_REQUEST_RE.test(blob) || /\belimina(r)?\s+mi\s+solicitud\b/.test(blob);
+  const requestCancel =
+    CANCEL_REQUEST_RE.test(blob) ||
+    /\belimina(r)?\s+(todas?\s+)?(mi|mis)\s+solicitud(es)?\b/.test(blob) ||
+    /\bborr(a|ar)\s+(todas?\s+)?(mi|mis)\s+solicitud(es)?\b/.test(blob);
 
   if (appointmentOnly && keepRequest) {
     return { kind: "CANCEL_APPOINTMENT_ONLY", ...base, confidence: "high" };

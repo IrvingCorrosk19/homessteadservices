@@ -6,6 +6,11 @@ import { detectCustomerCancellationIntent } from "../src/lib/concierge/cancellat
 import { detectFullConversationReset } from "../src/lib/concierge/conversation-reset";
 import { classifyCancellationReason } from "../src/lib/concierge/cancellation-intent";
 import { detectConversationTransition } from "../src/lib/concierge/service-transition";
+import { detectServices } from "../src/lib/concierge/playbook-engine";
+import { resolvePrimaryFromMessage } from "../src/lib/concierge/service-intent";
+import { detectNewTransactionSignal } from "../src/lib/concierge-transaction";
+import { classifyExistingRequestOperation, serviceAfterNewRequestOperator } from "../src/lib/concierge/existing-request-operation";
+import { hasValidServiceIntent } from "../src/lib/concierge/service-request-lifecycle";
 
 function empty(): ConversationState {
   return {
@@ -59,6 +64,8 @@ function ok(name: string, value: boolean) {
 const booked = empty();
 const hsOnly = { ...empty(), appointmentId: "", funnelStage: "HANDOFF" };
 
+ok("LANG elimina mis solicitudes", detectCustomerCancellationIntent("elimina mis solicitudes", booked).kind === "CANCEL_REQUEST");
+ok("LANG elimina mi solicitud", detectCustomerCancellationIntent("elimina mi solicitud", booked).kind === "CANCEL_REQUEST");
 ok("LANG ya no quiero el servicio", detectCustomerCancellationIntent("Ya no quiero el servicio", booked).kind === "CANCEL_REQUEST");
 ok("LANG cancela mi solicitud", detectCustomerCancellationIntent("cancela mi solicitud", booked).kind === "CANCEL_REQUEST");
 ok("LANG cansela eso", detectCustomerCancellationIntent("cansela la solicitud", hsOnly).kind === "CANCEL_REQUEST");
@@ -86,6 +93,30 @@ ok("LANG reason resolved", classifyCancellationReason("Ya lo resolví por mi cue
 ok("LANG reason other provider", classifyCancellationReason("Ya conseguí quien lo arreglara, cancela la solicitud").category === "FOUND_OTHER_PROVIDER");
 ok("LANG switch not cancel current", detectConversationTransition({ ...booked, primaryService: "locksmith", service: "locksmith" }, "Olvidemos la cerradura, mejor necesito pintura").kind === "SWITCH_SERVICE");
 ok("LANG explicit HS extracted", detectCustomerCancellationIntent("Cancela HS-2026-000125", booked).explicitRequestId === "HS-2026-000125");
+ok("LANG explicit HS is CANCEL_REQUEST not ambiguous", detectCustomerCancellationIntent("cancela la HS-2026-000125 la otra dejala activa", booked).kind === "CANCEL_REQUEST");
+ok("LANG explicit HS keeps folio", detectCustomerCancellationIntent("cancela la HS-2026-000125 la otra dejala activa", booked).explicitRequestId === "HS-2026-000125");
+
+{
+  const human = "cancela la HS-2026-000114 la otra dejala activa";
+  ok("HUMAN activa is not AC alias", !detectServices(human).includes("ac"));
+  ok("HUMAN resolvePrimary not ac", resolvePrimaryFromMessage(human) !== "ac");
+  ok("HUMAN existing op cancel", classifyExistingRequestOperation(human).primaryAction === "CANCEL_REQUEST");
+  ok("HUMAN blocks create", classifyExistingRequestOperation(human).blocksRequestCreation);
+  ok("HUMAN blocks switch", classifyExistingRequestOperation(human).blocksServiceSwitch);
+  ok("HUMAN no new transaction", !detectNewTransactionSignal(booked, human, "ac"));
+  ok("HUMAN transition not switch", detectConversationTransition(booked, human).kind !== "SWITCH_SERVICE");
+  ok("HUMAN no valid create intent", !hasValidServiceIntent({ ...booked, activeLeadId: "" }, human));
+}
+
+{
+  const multi = "cancela la del aire y créame otra para pintura";
+  const op = classifyExistingRequestOperation(multi);
+  ok("MULTI cancel action", op.primaryAction === "CANCEL_REQUEST");
+  ok("MULTI new operator", op.hasExplicitNewRequestOperator);
+  ok("MULTI remainder painting", serviceAfterNewRequestOperator(multi) === "painting");
+  ok("MULTI no switch", detectConversationTransition(booked, multi).kind !== "SWITCH_SERVICE");
+  ok("MULTI no new tx before cancel", !detectNewTransactionSignal(booked, multi));
+}
 
 if (failed) {
   console.error(`\nCANCELLATION INTENT FAILED (${failed})`);

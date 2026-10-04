@@ -17,6 +17,7 @@ export type ServiceNeed = {
 };
 
 const LEAK_RE = /\b(fuga|gotea|goteo|filtraci[oó]n)\b/i;
+const SINK_RE = /\b(lavamanos|lava\s*manos|lavabo|lavatorio|fregad(?:or|ero)?)\b/i;
 const MAINT_RE = /\b(mantenimiento|servicio)\b.*\b(aires?|ac|equipos?)\b/i;
 const PAINT_PRICE_RE = /\b(cu[aá]nto|cuesta|precio|costo|cotiz)\b.*\bpint/i;
 
@@ -41,7 +42,7 @@ export function extractServiceNeeds(text: string): ServiceNeed[] {
     });
   }
 
-  if (LEAK_RE.test(text) || services.includes("plumbing")) {
+  if (LEAK_RE.test(text) || SINK_RE.test(text) || services.includes("plumbing")) {
     if (!needs.some((n) => n.serviceType === "plumbing")) {
       needs.push({
         id: needId("plumbing", needs.length),
@@ -50,7 +51,7 @@ export function extractServiceNeeds(text: string): ServiceNeed[] {
         status: "ACTIVE",
         priority: priority++,
         facts: {},
-        summary: "Plumbing leak or water issue",
+        summary: SINK_RE.test(text) ? "Lavamanos / sink issue" : "Plumbing leak or water issue",
       });
     }
   }

@@ -24,7 +24,7 @@ const PRICE =
 const BOOKING_PAUSE =
   /\b(no quiero agendar|no agendar|todav[ií]a no|despu[eé]s veo|quiero pensarlo|mejor no agendar|cancelar la cita|no estoy seguro)\b/i;
 const NEW_NEED =
-  /\b(otra cosa|algo m[aá]s|quiero otra|diferente|tambi[eé]n necesito|mejor primero|cambiar de|otra solicitud|necesito otra|olvidemos|olvidalo|dejemos eso|mejor ayudame|ya no quiero eso)\b/i;
+  /\b(otra cosa|algo m[aá]s|quiero otra|diferente|tambi[eé]n necesito|mejor primero|cambiar de|otra solicitud|necesito otra|olvidemos|olvidalo|dejemos eso|mejor ayudame|ya no quiero eso|tengo un probl|hay un probl|problema con|lava\s*manos|lavamanos)\b/i;
 const HUMAN = /persona|humano|asesor|hablar con alguien|un t[eé]cnico|alguien real/i;
 const SERVICE_Q =
   /\b(qu[eé] incluye|cu[aá]nto demora|cu[aá]nto tarda|garant[ií]a|c[oó]mo funciona|qu[eé] hacen|antes quiero saber)\b/i;
@@ -79,7 +79,11 @@ export function interpretTurnRoute(text: string, state: ConversationState): Turn
   const slotSelectionIntent =
     !dominated && areOfferedSlotsActive(state) && isExplicitSlotSelection(text, state.offeredSlots);
 
-  const isInterruption = dominated && areOfferedSlotsActive(state) && !slotSelectionIntent;
+  const bookingInFlight =
+    Boolean(state.pendingSlot?.date && state.pendingSlot?.time) || Boolean(state.appointmentId);
+  const isInterruption =
+    (dominated && areOfferedSlotsActive(state) && !slotSelectionIntent) ||
+    (newNeedIntent && bookingInFlight && !slotSelectionIntent);
 
   return {
     priceIntent,

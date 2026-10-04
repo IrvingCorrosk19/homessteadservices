@@ -33,7 +33,7 @@ export type ActiveSessionSnapshot = {
   requestCard: {
     publicId: string;
     serviceLabel: string;
-    status: "open" | "scheduled";
+    status: "open" | "scheduled" | "cancel_pending";
     when: string;
   } | null;
   awaitingSlotSelection: boolean;

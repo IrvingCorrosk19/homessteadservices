@@ -345,10 +345,15 @@ export function buildRequestCard(state: ConversationState, publicId: string) {
       : state.appointmentId && state.preferredDate && state.preferredTime
         ? `${state.preferredDate} ${state.preferredTime}`
         : "";
+  const pendingCancel = state.facts?.pendingAction === "CONFIRM_CANCEL_REQUEST";
   return {
     publicId,
     serviceLabel: playbook?.label || service || "",
-    status: state.appointmentId ? ("scheduled" as const) : ("open" as const),
+    status: pendingCancel
+      ? ("cancel_pending" as const)
+      : state.appointmentId
+        ? ("scheduled" as const)
+        : ("open" as const),
     when,
   };
 }

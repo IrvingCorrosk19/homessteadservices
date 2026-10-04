@@ -24,21 +24,32 @@ export function resolveShortReplyIntent(text: string, state: ConversationState):
   const trimmed = text.trim();
   if (!trimmed || trimmed.length > 48) return "UNKNOWN";
 
+  const lastQ = state.facts?.lastBotQuestion || "";
+  const field = state.facts?.lastAskedField || "";
+  const pendingCancel =
+    state.facts?.pendingAction === "CONFIRM_CANCEL_REQUEST" || field === "cancel_confirmation";
+
   if (isNegativeResponse(trimmed)) {
-    const lastQ = state.facts?.lastBotQuestion || "";
-    const field = state.facts?.lastAskedField || "";
-    if (/cancelar|anular|cambiar\s+la\s+cita/.test(lastQ)) return "PRESERVE_APPOINTMENT";
+    if (
+      pendingCancel ||
+      /cancelar|anular|cambiar\s+la\s+cita|confirmas que (quieres|deseas) cancelar/.test(lastQ)
+    ) {
+      return "PRESERVE_APPOINTMENT";
+    }
     if (field === "reference" || /referencia|otra referencia/.test(lastQ)) return "DECLINE_OPTIONAL";
     return "UNKNOWN";
   }
 
   if (!isAffirmativeResponse(trimmed)) return "UNKNOWN";
 
+  // Bound cancel confirmation outranks stale slot chips / availability prompts.
+  if (pendingCancel || /confirmas que (quieres|deseas) cancelar/.test(lastQ)) {
+    return "CONFIRM_CANCEL";
+  }
+
   if (state.facts?.pendingAction === PENDING_QUERY_AVAILABILITY) return "QUERY_AVAILABILITY";
   if (state.awaitingSlotSelection && state.offeredSlots?.length) return "SELECT_SLOT";
 
-  const lastQ = state.facts?.lastBotQuestion || "";
-  const field = state.facts?.lastAskedField || "";
   if (field === "units" || /cu[aá]ntos (aires|equipos)/i.test(lastQ)) return "CONFIRM_QUANTITY";
   if (/cancelar|anular/.test(lastQ)) return "CONFIRM_CANCEL";
   if (/revis(ar|o)\s+(la\s+)?disponib|horarios/.test(lastQ)) return "QUERY_AVAILABILITY";

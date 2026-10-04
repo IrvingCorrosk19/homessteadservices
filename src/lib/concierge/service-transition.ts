@@ -42,7 +42,7 @@ const SWITCH_TO_RE =
   /\b(mejor\s+(ayudame|ayuda|quiero|necesito|vamos|pint|plomer|aire|gypsum|repar)|ahora\s+(quiero|necesito|mejor)|vamos\s+con|quiero\s+otra\s+cosa|mejor\s+ayudame\s+con)\b/i;
 
 const ADD_RE =
-  /\b(tambi[eé]n\s+(?:necesito|quiero|ayudame|que\s+revisen)|adem[aá]s\s+(?:necesito|quiero)|y\s+tambi[eé]n)\b/i;
+  /\b(tambi[eé]n\s+(?:necesito|quiero|ayudame|que\s+revisen)|adem[aá]s\s+(?:necesito|quiero)|y\s+tambi[eé]n|tengo\s+un\s+probl|hay\s+un\s+probl|otro\s+problema)\b/i;
 
 const GENERIC_SERVICES = new Set(["repairs", "other", "unknown", "multiple", ""]);
 
@@ -152,6 +152,18 @@ export function detectConversationTransition(
   const otherTradeSwitchCue =
     Boolean(nextFromMessage && previousService && nextFromMessage !== previousService) &&
     /\b(mejor|primero|en vez|en lugar)\b/i.test(text);
+  const secondaryTradeNeed =
+    Boolean(nextFromMessage && previousService && nextFromMessage !== previousService) &&
+    !isRefinement(previousService, nextFromMessage) &&
+    isUnrelatedSwitch(previousService, nextFromMessage) &&
+    (turnIntent.createServiceRequest ||
+      turnIntent.primaryIntent === "PROBLEM_MENTION" ||
+      turnIntent.primaryIntent === "ACTIONABLE_SERVICE_REQUEST" ||
+      turnIntent.actionability === "ACTIONABLE" ||
+      turnIntent.actionability === "EXPLICIT" ||
+      turnIntent.actionability === "POSSIBLE");
+  const hasActiveBookingContext =
+    Boolean(state.appointmentId) || Boolean(state.pendingSlot?.date && state.pendingSlot?.time);
   if (
     !turnIntent.createServiceRequest &&
     (turnIntent.actionability === "POSSIBLE" ||
@@ -160,6 +172,7 @@ export function detectConversationTransition(
     !abandonSignal &&
     !switchPhrase &&
     !otherTradeSwitchCue &&
+    !secondaryTradeNeed &&
     !(nextFromMessage && isRefinement(previousService, nextFromMessage)) &&
     !existingOp.hasExplicitNewRequestOperator
   ) {
@@ -197,18 +210,15 @@ export function detectConversationTransition(
     };
   }
 
-  // ADD another service (keep current; do not cancel)
-  if (addSignal && nextFromMessage && previousService && nextFromMessage !== previousService) {
-    if (!turnIntent.createServiceRequest) {
-      return {
-        kind: "CONTINUE_CURRENT_SERVICE",
-        previousService,
-        nextService: previousService,
-        abandonSignal: false,
-        addSignal: false,
-        ack: "",
-      };
-    }
+  // ADD another service (keep current; do not cancel / switch silently)
+  if (
+    (addSignal || (secondaryTradeNeed && hasActiveBookingContext)) &&
+    nextFromMessage &&
+    previousService &&
+    nextFromMessage !== previousService &&
+    !abandonSignal &&
+    !switchPhrase
+  ) {
     return {
       kind: "ADD_ANOTHER_SERVICE",
       previousService,

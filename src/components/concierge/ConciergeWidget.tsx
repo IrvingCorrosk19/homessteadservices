@@ -33,7 +33,7 @@ type PendingPhoto = {
 type RequestCard = {
   publicId: string;
   serviceLabel: string;
-  status: "open" | "scheduled";
+  status: "open" | "scheduled" | "cancel_pending";
   when: string;
 };
 
@@ -154,14 +154,14 @@ export function ConciergeWidget() {
     setSlotGroups(Array.isArray(data.slotGroups) ? (data.slotGroups as SlotGroup[]) : []);
     setHistoricalChips(Array.isArray(data.historicalChips) ? (data.historicalChips as string[]) : []);
     setServiceContext(typeof data.serviceContext === "string" ? data.serviceContext : null);
-    const pending = Boolean(data.bookingPending);
-    setBookingPending(pending);
+    const pendingBooking = Boolean(data.bookingPending);
+    setBookingPending(pendingBooking);
     setShowResumeBooking(Boolean(data.showResumeBooking));
     setShowPhotoCta(Boolean(data.showPhotoCta));
     setPhotosRemaining(typeof data.photosRemaining === "number" ? data.photosRemaining : 4);
-    if (pending) setBookingExpanded(false);
+    if (pendingBooking) setBookingExpanded(false);
     else if (Array.isArray(data.chips) && data.chips.length) setBookingExpanded(true);
-    setWhatsapp(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
+    setWhatsapp(typeof data.whatsappUrl === "string" && data.whatsappUrl ? data.whatsappUrl : null);
     if (typeof data.conversationId === "string" && data.conversationId) {
       setConversationId(data.conversationId);
       conversationIdRef.current = data.conversationId;
@@ -170,10 +170,22 @@ export function ConciergeWidget() {
     const card = data.requestCard;
     if (card && typeof card === "object" && typeof (card as RequestCard).publicId === "string") {
       setRequestCard(card as RequestCard);
-    } else if (typeof data.leadId === "string" && data.leadId.startsWith("HS-")) {
+    } else if (data.requestCard === null || data.clearRequestCard === true) {
+      setRequestCard(null);
+    } else if (
+      !("requestCard" in data) &&
+      typeof data.leadId === "string" &&
+      data.leadId.startsWith("HS-")
+    ) {
       setRequestCard({ publicId: data.leadId, serviceLabel: "", status: "open", when: "" });
-    } else if (typeof data.leadBanner === "string" && data.leadBanner.startsWith("HS-")) {
+    } else if (
+      !("requestCard" in data) &&
+      typeof data.leadBanner === "string" &&
+      data.leadBanner.startsWith("HS-")
+    ) {
       setRequestCard({ publicId: data.leadBanner, serviceLabel: "", status: "open", when: "" });
+    } else if ("requestCard" in data && !card) {
+      setRequestCard(null);
     }
   }, []);
 
@@ -318,9 +330,25 @@ export function ConciergeWidget() {
   }, []);
 
   const applyTurnResponse = useCallback((data: Record<string, unknown>) => {
-    const reply = typeof data.reply === "string" ? data.reply : "Cuéntame un poco más del problema para orientarlo.";
-    setMessages((current) => [...current, { role: "assistant", body: reply }]);
+    if (data.ok === false && data.error === "busy") {
+      applySessionState(data);
+      return { queued: true as const };
+    }
+    if (data.queued === true || data.suppressAssistant === true) {
+      applySessionState(data);
+      return { queued: true as const };
+    }
+    const reply = typeof data.reply === "string" ? data.reply : "";
+    if (reply) {
+      setMessages((current) => [...current, { role: "assistant", body: reply }]);
+    } else if (data.ok !== false) {
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", body: "Cuéntame un poco más del problema para orientarlo." },
+      ]);
+    }
     applySessionState(data);
+    return { queued: false as const };
   }, [applySessionState]);
 
   const sendChatTurn = useCallback(async (message: string) => {
@@ -349,12 +377,23 @@ export function ConciergeWidget() {
       setConversationId(data.conversationId);
       conversationIdRef.current = data.conversationId;
     }
-    applyTurnResponse(data);
+    return applyTurnResponse(data);
   }, [applyTurnResponse]);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const outboundQueueRef = useRef<string[]>([]);
+  const drainingRef = useRef(false);
+
+  const sendMessage = useCallback(async (text: string, opts?: { alreadyShown?: boolean }) => {
     const message = text.trim();
-    if (!message || pendingRef.current || ended || !sessionReady) return;
+    if (!message || ended || !sessionReady) return;
+    if (pendingRef.current || drainingRef.current) {
+      outboundQueueRef.current.push(message);
+      setInput("");
+      if (!opts?.alreadyShown) {
+        setMessages((current) => [...current, { role: "user", body: message }]);
+      }
+      return;
+    }
     pendingRef.current = true;
     setPending(true);
     setSendError(false);
@@ -364,17 +403,43 @@ export function ConciergeWidget() {
     setSlotGroups([]);
     stick.current = true;
     setShowJumpToBottom(false);
-    setMessages((current) => [...current, { role: "user", body: message }]);
+    if (!opts?.alreadyShown) {
+      setMessages((current) => [...current, { role: "user", body: message }]);
+    }
     try {
-      await sendChatTurn(message);
+      let current = message;
+      drainingRef.current = true;
+      let attempts = 0;
+      while (current && attempts < 8) {
+        attempts += 1;
+        const result = await sendChatTurn(current);
+        if (result.queued) {
+          // Turn lock held — retry this same intent shortly (server also enqueued it).
+          await new Promise((resolve) => window.setTimeout(resolve, 450));
+          continue;
+        }
+        current = outboundQueueRef.current.shift() || "";
+        attempts = 0;
+      }
     } catch {
-      setMessages((current) => current.filter((item, index, list) => !(index === list.length - 1 && item.role === "user" && item.body === message)));
-      setInput(message);
+      if (!opts?.alreadyShown) {
+        setMessages((current) =>
+          current.filter(
+            (item, index, list) => !(index === list.length - 1 && item.role === "user" && item.body === message),
+          ),
+        );
+        setInput(message);
+      }
       setSendError(true);
     } finally {
+      drainingRef.current = false;
       pendingRef.current = false;
       setPending(false);
       window.setTimeout(() => inputRef.current?.focus(), 0);
+      const leftover = outboundQueueRef.current.shift();
+      if (leftover) {
+        void sendMessage(leftover, { alreadyShown: true });
+      }
     }
   }, [ended, sendChatTurn, sessionReady]);
 
@@ -1143,7 +1208,11 @@ export function ConciergeWidget() {
               {requestCard && (
                 <div className="border-t border-line bg-cream/50 px-4 py-2 text-xs text-charcoal" aria-live="polite">
                   <div className="font-medium text-navy">
-                    {requestCard.status === "scheduled" ? "Visita confirmada" : "Solicitud registrada"}
+                    {requestCard.status === "cancel_pending"
+                      ? "Cancelación pendiente de confirmación"
+                      : requestCard.status === "scheduled"
+                        ? "Visita confirmada"
+                        : "Solicitud registrada"}
                   </div>
                   <div className="mt-0.5 font-mono text-[0.72rem] tracking-wide">{requestCard.publicId}</div>
                   {requestCard.serviceLabel ? (

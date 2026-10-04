@@ -4,6 +4,7 @@ import { stripHallucinatedPrices, enforceAvailabilityIntegrity, enforceBookingIn
 import {
   addEvent,
   addMessage,
+  clearQueuedTurnMessage,
   createConversation,
   endTurn,
   getConversation,
@@ -138,6 +139,7 @@ import {
   consumePendingAvailabilityAction,
   decideCalendarExecution,
   formatAvailabilityResults,
+  isAffirmativeResponse,
   isAvailabilityOfferText,
   markCalendarQueryResult,
   setPendingAvailabilityAction,
@@ -169,6 +171,7 @@ import { detectCustomerCancellationIntent, formatMultiRequestClarification, reso
 import {
   classifyExistingRequestOperation,
   extractExplicitRequestIds,
+  newRequestClauseText,
   serviceAfterNewRequestOperator,
 } from "@/lib/concierge/existing-request-operation";
 import {
@@ -183,13 +186,21 @@ import {
   applyRequestCancelledConversationState,
   ambiguousCancelTargetReply,
   ambiguousTomorrowReply,
+  cancelConfirmationKeptReply,
+  clearPendingCancelConfirmation,
+  confirmCancelAllReply,
+  confirmCancelRequestReply,
+  deferredNeedAfterBookingReply,
   groundedAppointmentOnlyReply,
   groundedRequestCancelReply,
   markCancelClarification,
+  markPendingCancelConfirmation,
   privacyDataRequestReply,
   uncertainCancelReply,
 } from "@/lib/concierge/cancellation-conversation";
 import { cancelAppointmentOnly, cancelServiceRequest } from "@/lib/service-request-cancellation";
+import { getRequestByPublicId, listCancellableRequestsForCustomer } from "@/lib/service-requests";
+import { isNegativeResponse, resolveShortReplyIntent } from "@/lib/concierge/affirmative-context";
 import { logTurnStateTrace } from "@/lib/concierge/conversation-state-log";
 import {
   logIncompatibleResponse,
@@ -372,8 +383,9 @@ export async function conciergeTurn(input: {
   if (!tryBeginTurn(input.conversationId)) {
     return { ok: false as const, error: "busy" };
   }
+  clearQueuedTurnMessage(input.conversationId, input.message);
   try {
-    const text = input.message.trim().slice(0, 2000);
+    let text = input.message.trim().slice(0, 2000);
     if (!text && !input.skipUserMessage) {
       const session = buildSessionSnapshot(conversation.state);
       return {
@@ -506,8 +518,272 @@ export async function conciergeTurn(input: {
 
     const cancelIntent = detectCustomerCancellationIntent(text, state);
     const skipCancelMutation = isHypotheticalSpeech(text) || isQuotedThirdPartyCommand(text);
+    const pendingCancelIds = (state.facts?.pendingCancelRequestIds || "")
+      .split("|")
+      .map((id) => id.trim().toUpperCase())
+      .filter(Boolean);
+    const pendingCancelAction = state.facts?.pendingAction || "";
+    const shortCancelReply = resolveShortReplyIntent(text, state);
+    let cancelFlowHandled = false;
+
+    // Bound confirmation / decline for a pending cancel — never reuse an old "sí".
     if (
       !skipCancelMutation &&
+      pendingCancelAction === "CONFIRM_CANCEL_REQUEST" &&
+      pendingCancelIds.length &&
+      (shortCancelReply === "PRESERVE_APPOINTMENT" ||
+        shortCancelReply === "CONFIRM_CANCEL" ||
+        isNegativeResponse(text) ||
+        isAffirmativeResponse(text) ||
+        cancelIntent.kind === "CANCEL_REQUEST")
+    ) {
+      cancelFlowHandled = true;
+      let cancelReply = "";
+      let cancelLeadId: string | null = state.activeLeadId || conversation.leadPublicId || null;
+      if (shortCancelReply === "PRESERVE_APPOINTMENT" || isNegativeResponse(text)) {
+        state = clearPendingCancelConfirmation(state);
+        cancelReply = cancelConfirmationKeptReply();
+      } else if (
+        shortCancelReply === "CONFIRM_CANCEL" ||
+        (isAffirmativeResponse(text) &&
+          (cancelIntent.kind === "CANCEL_REQUEST" || pendingCancelAction === "CONFIRM_CANCEL_REQUEST"))
+      ) {
+        const results: string[] = [];
+        let anySuccess = false;
+        let anyFail = false;
+        const pendingNewService = state.facts?.pendingCancelNewService || "";
+        const pendingSourceText = state.facts?.pendingCancelSourceText || "";
+        for (const requestId of pendingCancelIds) {
+          const cancelAuth = authorizeConversationAction("CANCEL_REQUEST", {
+            text: pendingSourceText || text,
+            state,
+            conversationId: input.conversationId,
+            targetId: requestId,
+          });
+          if (!cancelAuth.allowed) {
+            anyFail = true;
+            results.push(`No pude cancelar ${requestId}: no autorizado.`);
+            continue;
+          }
+          const cancelled = cancelServiceRequest({
+            requestId,
+            actor: "CUSTOMER_AI",
+            source: "CUSTOMER_AI",
+            reason: cancelIntent.reason || pendingSourceText || "Confirmación del cliente",
+            reasonCategory:
+              cancelIntent.reasonCategory !== "NOT_PROVIDED"
+                ? cancelIntent.reasonCategory
+                : "CUSTOMER_CHANGED_MIND",
+            conversationId: input.conversationId,
+            idempotencyKey: `service_request.cancelled:${requestId}`,
+            notify: true,
+          });
+          if (cancelled.success) {
+            anySuccess = true;
+            state = applyRequestCancelledConversationState(state, requestId);
+            results.push(
+              groundedRequestCancelReply(cancelled, {
+                explainedAsDelete: /\belimin/.test(pendingSourceText || text),
+                hadReason: Boolean(cancelIntent.reason) && cancelIntent.reasonCategory !== "NOT_PROVIDED",
+              }),
+            );
+          } else {
+            anyFail = true;
+            results.push(groundedRequestCancelReply(cancelled, { hadReason: true }));
+          }
+        }
+        state = clearPendingCancelConfirmation(state);
+        if (anySuccess) {
+          cancelLeadId = null;
+          clearedLeadPublicId = "";
+        }
+        cancelReply =
+          results.length === 1
+            ? results[0]
+            : anyFail
+              ? results.join(" ")
+              : `Listo. Cancelé ${pendingCancelIds.length} solicitudes: ${pendingCancelIds.join(", ")}.`;
+        if (anySuccess && pendingNewService && !anyFail) {
+          cancelAckPrefix = cancelReply;
+          state = {
+            ...state,
+            activeLeadId: "",
+            appointmentId: "",
+            primaryService: pendingNewService,
+            service: pendingNewService,
+            detectedServices: [pendingNewService],
+            problem: pendingNewService,
+          };
+          const residual = newRequestClauseText(pendingSourceText).trim();
+          text =
+            residual && /\b(necesito|quiero|pint|plom|aire|cerradur|electric)/i.test(residual)
+              ? residual.startsWith("necesito") || residual.startsWith("quiero")
+                ? residual
+                : `necesito ${residual}`
+              : `necesito ${pendingNewService === "painting" ? "pintura" : pendingNewService}`;
+          cancelReply = "";
+        }
+      } else if (cancelIntent.kind === "CANCEL_REQUEST" && !isAffirmativeResponse(text)) {
+        // New cancel phrasing while pending — refresh confirmation for bound folios.
+        const rows = pendingCancelIds.map((id) => {
+          const row = getRequestByPublicId(id);
+          const playbook = getPlaybook(row?.service || state.primaryService || state.service);
+          const when =
+            state.preferredDate && state.preferredTime
+              ? formatPanamaSlot(state.preferredDate, state.preferredTime)
+              : "";
+          return {
+            publicId: id,
+            serviceLabel: playbook?.label || row?.service || "servicio",
+            when,
+          };
+        });
+        cancelReply =
+          rows.length > 1
+            ? confirmCancelAllReply(rows)
+            : confirmCancelRequestReply(rows[0] || { publicId: pendingCancelIds[0], serviceLabel: "servicio" });
+        state = markPendingCancelConfirmation(state, pendingCancelIds, cancelReply, rows.length > 1 ? "ALL" : "ONE");
+      } else {
+        cancelReply =
+          state.facts?.lastBotQuestion ||
+          "¿Confirmas que deseas cancelar la solicitud pendiente? Responde sí o no.";
+      }
+      if (cancelReply) {
+        addMessage(input.conversationId, "assistant", cancelReply);
+        touchConversation(input.conversationId, {
+          state,
+          leadPublicId: cancelLeadId || "",
+        });
+        const session = buildSessionSnapshot(state, Date.now(), cancelLeadId || "");
+        return {
+          ok: true as const,
+          reply: cancelReply,
+          chips: [],
+          historicalChips: session.historicalChips,
+          leadBanner: null,
+          requestCard: session.requestCard,
+          nextAction: "CONTINUE",
+          leadId: cancelLeadId,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: false,
+          bookingPending: false,
+          slotGroups: [],
+          serviceContext: session.serviceContext,
+          showResumeBooking: false,
+          showPhotoCta: false,
+          photosRemaining: session.photosRemaining,
+        };
+      }
+    }
+
+    if (
+      !skipCancelMutation &&
+      !cancelFlowHandled &&
+      pendingCancelAction === "CLARIFY_CANCEL_WHICH" &&
+      pendingCancelIds.length
+    ) {
+      cancelFlowHandled = true;
+      const all =
+        /\b(todas|todo|tod[oa]s\s+las|cancelar\s+todas)\b/i.test(text) ||
+        isAffirmativeResponse(text);
+      const target = resolveCancellationTarget(
+        { ...cancelIntent, kind: "CANCEL_REQUEST" },
+        state,
+        conversation.leadPublicId,
+        text,
+      );
+      let ids = pendingCancelIds;
+      let mode: "ONE" | "ALL" | "CHOOSE" = "CHOOSE";
+      if (all) {
+        ids = pendingCancelIds;
+        mode = "ALL";
+      } else if (target.ok) {
+        ids = [target.requestId];
+        mode = "ONE";
+      } else {
+        const clarify = formatMultiRequestClarification(
+          pendingCancelIds.map((id) => {
+            const row = getRequestByPublicId(id);
+            return { publicId: id, service: row?.service || "" };
+          }),
+        );
+        state = markPendingCancelConfirmation(state, pendingCancelIds, clarify, "CHOOSE");
+        addMessage(input.conversationId, "assistant", clarify);
+        touchConversation(input.conversationId, { state });
+        const session = buildSessionSnapshot(state);
+        return {
+          ok: true as const,
+          reply: clarify,
+          chips: [],
+          historicalChips: session.historicalChips,
+          leadBanner: null,
+          requestCard: session.requestCard,
+          nextAction: "CONTINUE",
+          leadId: state.activeLeadId || null,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: false,
+          bookingPending: false,
+          slotGroups: [],
+          serviceContext: session.serviceContext,
+          showResumeBooking: false,
+          showPhotoCta: false,
+          photosRemaining: session.photosRemaining,
+        };
+      }
+      const rows = ids.map((id) => {
+        const row = getRequestByPublicId(id);
+        const playbook = getPlaybook(row?.service || "");
+        const when =
+          state.activeLeadId === id && state.preferredDate && state.preferredTime
+            ? formatPanamaSlot(state.preferredDate, state.preferredTime)
+            : "";
+        return {
+          publicId: id,
+          serviceLabel: playbook?.label || row?.service || "servicio",
+          when,
+        };
+      });
+      const cancelReply =
+        mode === "ALL" ? confirmCancelAllReply(rows) : confirmCancelRequestReply(rows[0]);
+      state = markPendingCancelConfirmation(state, ids, cancelReply, mode);
+      addMessage(input.conversationId, "assistant", cancelReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state);
+      return {
+        ok: true as const,
+        reply: cancelReply,
+        chips: [],
+        historicalChips: session.historicalChips,
+        leadBanner: null,
+        requestCard: session.requestCard,
+        nextAction: "CONTINUE",
+        leadId: state.activeLeadId || null,
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: false,
+        bookingPending: false,
+        slotGroups: [],
+        serviceContext: session.serviceContext,
+        showResumeBooking: false,
+        showPhotoCta: false,
+        photosRemaining: session.photosRemaining,
+      };
+    }
+
+    if (
+      !skipCancelMutation &&
+      !cancelFlowHandled &&
       (cancelIntent.kind === "DELETE_DATA_REQUEST" ||
       cancelIntent.kind === "AMBIGUOUS_TOMORROW" ||
       cancelIntent.kind === "AMBIGUOUS_CANCEL_TARGET" ||
@@ -530,9 +806,36 @@ export async function conciergeTurn(input: {
           cancelReply = ambiguousCancelTargetReply();
         }
       } else if (cancelIntent.kind === "CANCEL_REQUEST") {
+        // Never execute cancel on the first utterance — ask explicit confirmation bound to folios.
+        const wantsAll = /\b(todas|todo|mis\s+solicitudes)\b/i.test(text);
+        const authorized =
+          state.contactStatus === "VALID" && state.phone
+            ? listCancellableRequestsForCustomer(state.phone)
+            : [];
         const target = resolveCancellationTarget(cancelIntent, state, conversation.leadPublicId, text);
         if (!target.ok && target.errorCode === "NEEDS_CLARIFICATION") {
-          cancelReply = formatMultiRequestClarification(target.options || []);
+          const options = target.options || [];
+          const ids = options.map((row) => row.publicId);
+          cancelReply =
+            wantsAll && ids.length > 1
+              ? confirmCancelAllReply(
+                  options.map((row) => {
+                    const playbook = getPlaybook(row.service);
+                    return {
+                      publicId: row.publicId,
+                      serviceLabel: playbook?.label || row.service,
+                      when: "",
+                    };
+                  }),
+                )
+              : formatMultiRequestClarification(options);
+          state = markPendingCancelConfirmation(
+            state,
+            ids,
+            cancelReply,
+            wantsAll && ids.length > 1 ? "ALL" : "CHOOSE",
+            text,
+          );
         } else if (!target.ok) {
           cancelReply = groundedRequestCancelReply({
             success: false,
@@ -568,46 +871,36 @@ export async function conciergeTurn(input: {
               reasonStored: "",
               reasonCategory: "NOT_PROVIDED",
             });
+          } else if (wantsAll && authorized.length > 1) {
+            const ids = authorized.map((row) => row.publicId);
+            cancelReply = confirmCancelAllReply(
+              authorized.map((row) => {
+                const playbook = getPlaybook(row.service);
+                const when =
+                  row.publicId === state.activeLeadId && state.preferredDate && state.preferredTime
+                    ? formatPanamaSlot(state.preferredDate, state.preferredTime)
+                    : "";
+                return {
+                  publicId: row.publicId,
+                  serviceLabel: playbook?.label || row.service,
+                  when,
+                };
+              }),
+            );
+            state = markPendingCancelConfirmation(state, ids, cancelReply, "ALL", text);
           } else {
-          const cancelled = cancelServiceRequest({
-            requestId: target.requestId,
-            actor: "CUSTOMER_AI",
-            source: "CUSTOMER_AI",
-            reason: cancelIntent.reason,
-            reasonCategory: cancelIntent.reasonCategory,
-            conversationId: input.conversationId,
-            idempotencyKey: `service_request.cancelled:${target.requestId}`,
-            notify: true,
-          });
-          if (cancelled.success && !cancelled.alreadyCancelled) {
-            state = applyRequestCancelledConversationState(state, target.requestId);
-            cancelLeadId = null;
-            clearedLeadPublicId = "";
-          }
-          cancelReply = groundedRequestCancelReply(cancelled, {
-            explainedAsDelete: cancelIntent.explainedAsDelete,
-            hadReason: Boolean(cancelIntent.reason) && cancelIntent.reasonCategory !== "NOT_PROVIDED",
-          });
-          const existingOp = classifyExistingRequestOperation(text);
-          if (
-            cancelled.success &&
-            existingOp.hasExplicitNewRequestOperator
-          ) {
-            const extraService = serviceAfterNewRequestOperator(text);
-            if (extraService) {
-              cancelAckPrefix = cancelReply;
-              state = {
-                ...state,
-                activeLeadId: "",
-                appointmentId: "",
-                primaryService: extraService,
-                service: extraService,
-                detectedServices: [extraService],
-                problem: extraService,
-              };
-              cancelReply = "";
-            }
-          }
+            const row = getRequestByPublicId(target.requestId);
+            const playbook = getPlaybook(row?.service || state.primaryService || state.service);
+            const when =
+              state.preferredDate && state.preferredTime
+                ? formatPanamaSlot(state.preferredDate, state.preferredTime)
+                : "";
+            cancelReply = confirmCancelRequestReply({
+              serviceLabel: playbook?.label || row?.service || "servicio",
+              publicId: target.requestId,
+              when,
+            });
+            state = markPendingCancelConfirmation(state, [target.requestId], cancelReply, "ONE", text);
           }
         }
       } else {
@@ -655,7 +948,7 @@ export async function conciergeTurn(input: {
         reply: cancelReply,
         chips: [],
         historicalChips: session.historicalChips,
-        leadBanner: session.leadBanner,
+        leadBanner: null,
         requestCard: session.requestCard,
         nextAction: "CONTINUE",
         leadId: cancelLeadId,
@@ -843,10 +1136,56 @@ export async function conciergeTurn(input: {
 
     if (transition.kind === "ADD_ANOTHER_SERVICE") {
       const addIntent = classifyActionableServiceIntent(text, state);
-      if (!addIntent.createServiceRequest) {
-        const clarify =
-          state.facts?.lastBotQuestion ||
-          "Claro. ¿Quieres agregar eso además del servicio actual, o dejamos el actual y seguimos solo con lo nuevo?";
+      const slotReadyToBook = isSlotConfirmed(state) && !state.appointmentId;
+      const alreadyBooked = Boolean(state.appointmentId);
+      state = {
+        ...state,
+        facts: {
+          ...(state.facts || {}),
+          deferredNeedService: transition.nextService || "",
+          deferredNeedSummary: text.trim().slice(0, 220),
+          pendingAddService: transition.nextService || state.facts?.pendingAddService || "",
+        },
+        secondaryServices: [
+          ...new Set([
+            ...(state.secondaryServices || []),
+            ...(transition.nextService ? [transition.nextService] : []),
+          ]),
+        ],
+      };
+
+      // Mid-confirm / already booked: keep pintura (or current) intact; clarify the new need.
+      if (slotReadyToBook) {
+        // Fall through so the pending paint visit can still persist, then acknowledge both.
+      } else if (alreadyBooked || !addIntent.createServiceRequest) {
+        const when =
+          state.preferredDate && state.preferredTime
+            ? formatPanamaSlot(state.preferredDate, state.preferredTime)
+            : "el horario acordado";
+        const bookedService = transition.previousService || state.primaryService || state.service;
+        const playbook = getPlaybook(bookedService);
+        // Keep the booked trade sticky — do not rename the visit to the deferred need.
+        if (bookedService) {
+          state = {
+            ...state,
+            primaryService: bookedService,
+            service: bookedService,
+          };
+        }
+        const clarify = deferredNeedAfterBookingReply({
+          serviceLabel: playbook?.label || "servicio",
+          when,
+          deferredService: transition.nextService || "",
+          deferredSummary: text,
+        });
+        state = {
+          ...state,
+          facts: {
+            ...(state.facts || {}),
+            lastBotQuestion: clarify,
+            lastAskedField: "deferred_need",
+          },
+        };
         addMessage(input.conversationId, "assistant", clarify);
         touchConversation(input.conversationId, { state });
         const session = buildSessionSnapshot(state);
@@ -855,7 +1194,8 @@ export async function conciergeTurn(input: {
           reply: clarify,
           chips: session.chips,
           historicalChips: session.historicalChips,
-          leadBanner: null,
+          leadBanner: session.leadBanner,
+          requestCard: session.requestCard,
           nextAction: "CONTINUE",
           leadId: state.activeLeadId || null,
           dryLead: false,
@@ -871,27 +1211,28 @@ export async function conciergeTurn(input: {
           showPhotoCta: session.showPhotoCta,
           photosRemaining: session.photosRemaining,
         };
+      } else {
+        const preserved = state.activeLeadId || "";
+        state = {
+          ...state,
+          activeLeadId: "",
+          appointmentId: "",
+          primaryService: transition.nextService || state.primaryService,
+          service: transition.nextService || state.service,
+          problem: text.trim().slice(0, 500),
+          preferredDate: "",
+          preferredTime: "",
+          offeredSlots: [],
+          pendingSlot: null,
+          awaitingSlotSelection: false,
+          facts: {
+            ...(state.facts || {}),
+            preservedRequestId: preserved,
+            pendingAddService: "",
+            lastAskedField: "",
+          },
+        };
       }
-      const preserved = state.activeLeadId || "";
-      state = {
-        ...state,
-        activeLeadId: "",
-        appointmentId: "",
-        primaryService: transition.nextService || state.primaryService,
-        service: transition.nextService || state.service,
-        problem: text.trim().slice(0, 500),
-        preferredDate: "",
-        preferredTime: "",
-        offeredSlots: [],
-        pendingSlot: null,
-        awaitingSlotSelection: false,
-        facts: {
-          ...(state.facts || {}),
-          preservedRequestId: preserved,
-          pendingAddService: "",
-          lastAskedField: "",
-        },
-      };
     }
 
     if (transition.kind === "CANCEL_CURRENT_SERVICE") {
@@ -2010,15 +2351,28 @@ export async function conciergeTurn(input: {
 
     const finalDecision = determineNextAction(state, {
       userText: text,
-      interruption: route.isInterruption && !route.slotSelectionIntent,
+      interruption:
+        route.isInterruption &&
+        !route.slotSelectionIntent &&
+        !(
+          isSlotConfirmed(state) &&
+          !state.appointmentId &&
+          Boolean(state.facts?.deferredNeedService || transition.kind === "ADD_ANOTHER_SERVICE")
+        ),
     });
 
     // Server-authoritative booking: when requirements are complete, do not wait for the LLM to invent more questions.
+    // A secondary need mid-confirm must not block persisting the already-selected visit.
+    const allowBookDespiteInterruption =
+      route.isInterruption &&
+      isSlotConfirmed(state) &&
+      !state.appointmentId &&
+      Boolean(state.facts?.deferredNeedService || transition.kind === "ADD_ANOTHER_SERVICE");
     if (
       finalDecision.action === "CONFIRM_OR_BOOK" &&
       !ctx.bookedThisTurn &&
       !state.appointmentId &&
-      !route.isInterruption
+      (!route.isInterruption || allowBookDespiteInterruption)
     ) {
       const slot =
         state.pendingSlot ||
@@ -2188,7 +2542,32 @@ export async function conciergeTurn(input: {
       const when = slot?.date && slot?.time ? formatPanamaSlot(slot.date, slot.time) : "el horario acordado";
       const hs = ctx.leadId || state.activeLeadId;
       const playbook = getPlaybook(state.primaryService || state.service);
-      if (hs) {
+      const deferredService = state.facts?.deferredNeedService || "";
+      if (deferredService) {
+        const bookedService = transition.previousService || state.primaryService || state.service;
+        const bookedPlaybook = getPlaybook(bookedService);
+        reply = deferredNeedAfterBookingReply({
+          serviceLabel: bookedPlaybook?.label || playbook?.label || "servicio",
+          when,
+          deferredService,
+          deferredSummary: state.facts?.deferredNeedSummary || text,
+        });
+        if (bookedService) {
+          state = {
+            ...state,
+            primaryService: bookedService,
+            service: bookedService,
+          };
+        }
+        state = {
+          ...state,
+          facts: {
+            ...(state.facts || {}),
+            lastBotQuestion: reply,
+            lastAskedField: "deferred_need",
+          },
+        };
+      } else if (hs) {
         reply = requestFolioBookingConfirm(hs, when, playbook?.label || "");
       } else if (!/\b(agendad|confirmad)\b/i.test(reply) || /estos horarios sí están libres/i.test(reply)) {
         reply = `Listo. La visita quedó agendada para ${when}. Ya está en nuestro calendario.`;
@@ -2299,7 +2678,10 @@ export async function conciergeTurn(input: {
     const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
 
     const wa =
-      knowledge.whatsappConfigured && leadBanner
+      knowledge.whatsappConfigured &&
+      leadBanner &&
+      state.facts?.pendingAction !== "CONFIRM_CANCEL_REQUEST" &&
+      state.facts?.pendingAction !== "CLARIFY_CANCEL_WHICH"
         ? whatsappHref(whatsappRequestMessage(leadBanner))
         : null;
 

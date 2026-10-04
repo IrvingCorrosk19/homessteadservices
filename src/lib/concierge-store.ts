@@ -237,3 +237,80 @@ export function tryBeginTurn(id: string) {
 export function endTurn(id: string) {
   getHomesteadDb().prepare("UPDATE concierge_conversations SET processing = 0 WHERE id = ?").run(id);
 }
+
+type QueuedTurn = { message: string; at: number; correlationId: string };
+
+export function enqueuePendingTurn(id: string, message: string) {
+  const conversation = getConversation(id);
+  if (!conversation) return "";
+  const correlationId = randomUUID();
+  let queue: QueuedTurn[] = [];
+  try {
+    queue = JSON.parse(conversation.state.facts?.pendingTurnQueue || "[]") as QueuedTurn[];
+  } catch {
+    queue = [];
+  }
+  if (!Array.isArray(queue)) queue = [];
+  const trimmed = message.trim().slice(0, 2000);
+  if (!trimmed) return "";
+  // Deduplicate rapid identical retries while one turn is still processing.
+  if (queue.some((item) => item.message === trimmed)) return correlationId;
+  queue.push({ message: trimmed, at: Date.now(), correlationId });
+  touchConversation(id, {
+    state: {
+      ...conversation.state,
+      facts: {
+        ...(conversation.state.facts || {}),
+        pendingTurnQueue: JSON.stringify(queue.slice(-6)),
+      },
+    },
+  });
+  return correlationId;
+}
+
+export function dequeuePendingTurn(id: string): { message: string; correlationId: string } | null {
+  const conversation = getConversation(id);
+  if (!conversation) return null;
+  let queue: QueuedTurn[] = [];
+  try {
+    queue = JSON.parse(conversation.state.facts?.pendingTurnQueue || "[]") as QueuedTurn[];
+  } catch {
+    queue = [];
+  }
+  if (!Array.isArray(queue) || !queue.length) return null;
+  const next = queue.shift()!;
+  touchConversation(id, {
+    state: {
+      ...conversation.state,
+      facts: {
+        ...(conversation.state.facts || {}),
+        pendingTurnQueue: queue.length ? JSON.stringify(queue) : "",
+      },
+    },
+  });
+  return { message: next.message, correlationId: next.correlationId };
+}
+
+export function clearQueuedTurnMessage(id: string, message: string) {
+  const conversation = getConversation(id);
+  if (!conversation) return;
+  let queue: QueuedTurn[] = [];
+  try {
+    queue = JSON.parse(conversation.state.facts?.pendingTurnQueue || "[]") as QueuedTurn[];
+  } catch {
+    queue = [];
+  }
+  if (!Array.isArray(queue) || !queue.length) return;
+  const trimmed = message.trim();
+  const next = queue.filter((item) => item.message !== trimmed);
+  if (next.length === queue.length) return;
+  touchConversation(id, {
+    state: {
+      ...conversation.state,
+      facts: {
+        ...(conversation.state.facts || {}),
+        pendingTurnQueue: next.length ? JSON.stringify(next) : "",
+      },
+    },
+  });
+}

@@ -8,6 +8,7 @@ import {
   addEvent,
   countRecentByIp,
   countRecentMessages,
+  enqueuePendingTurn,
   getConversation,
   hashIp,
   recentMessages,
@@ -261,6 +262,39 @@ export async function POST(request: Request) {
 
   try {
     const result = await conciergeTurn({ conversationId, message, utm: payload.utm });
+    if (!result.ok && "error" in result && result.error === "busy") {
+      enqueuePendingTurn(conversationId, message);
+      const conversation = getConversation(conversationId);
+      const session = conversation ? buildSessionSnapshot(conversation.state) : null;
+      const res = NextResponse.json({
+        ok: true,
+        queued: true,
+        suppressAssistant: true,
+        reply: null,
+        conversationId,
+        chips: session?.chips || [],
+        historicalChips: session?.historicalChips || [],
+        requestCard: session?.requestCard ?? null,
+        leadBanner: null,
+        whatsappUrl: null,
+        awaitingSlotSelection: session?.awaitingSlotSelection || false,
+        bookingPending: session?.bookingPending || false,
+        slotGroups: session?.slotGroups || [],
+        serviceContext: session?.serviceContext || null,
+        showResumeBooking: session?.showResumeBooking || false,
+        showPhotoCta: session?.showPhotoCta || false,
+        photosRemaining: session?.photosRemaining ?? 4,
+      });
+      res.cookies.set(COOKIE, conversationId, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
+        secure: process.env.NODE_ENV === "production",
+      });
+      return res;
+    }
+
     const res = NextResponse.json({ ...result, conversationId });
     res.cookies.set(COOKIE, conversationId, {
       httpOnly: true,

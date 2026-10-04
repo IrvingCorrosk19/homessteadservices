@@ -20,11 +20,11 @@ import {
 const HS_ID_RE = /HS-\d{4}-\d{6}/gi;
 
 const CANCEL_VERB_RE =
-  /\b(cancel[aeá]r?|anul[aeá]r?|cansela|canc[eé]lalo)\b/i;
+  /\b(cancel[aeá]r?|anul[aeá]r?|cansela|canc[eé]lalo|elimin[aeá]r?|borr[aeá]r?)\b/i;
 
 const APPOINTMENT_OBJECT_RE = /\b(cita|visita|sita|hora)\b/i;
 
-const REQUEST_OBJECT_RE = /\b(solicitud|pedido|trabajo|folio)\b/i;
+const REQUEST_OBJECT_RE = /\b(solicitud(?:es)?|pedido|trabajo|folio)\b/i;
 
 const PRESERVE_RE =
   /\b(dej(a|ala|e|emos|en)?l?a?\s+(activa|abierta|asi|as[ií]|como\s+est[aá])|no\s+la\s+cancel|mant[eé]n(la|er)?|sigue\s+activa|d[eé]jala\s+activa|la\s+otra\s+(s[ií]|sigue|queda|no)|no\s+me\s+crees?\s+otra|esa\s+d[eé]jala|solo\s+cancela|no\s+quiero\s+cambiar\s+la)\b/i;
@@ -34,6 +34,9 @@ const NEW_REQUEST_OPERATOR_RE =
 
 const STATUS_RE =
   /\b(cu[aá]ntas?\s+solicitudes|cu[aá]les?\s+(tengo\s+)?(activas|solicitudes)|mis\s+solicitudes|n[uú]meros?\s+de\s+(mis\s+)?solicitudes|list(a|ame|me)\s+mis\s+solicitudes|estado\s+de\s+(mi\s+)?solicitud|dame los n[uú]meros|cu[aá]l sigue activa|cu[aá]l (es|sigue|fue) la(\s+(del|de la|otra|primera|ultima|última|solicitud|activa)))\b/i;
+
+const DELETE_OR_CANCEL_REQUESTS_RE =
+  /\b(elimin[aeá]r?|borr[aeá]r?|cancel[aeá]r?)\s+(todas?\s+)?(mis\s+)?solicitud(es)?\b/i;
 
 const RESCHEDULE_RE =
   /\b(cambiar?\s+la\s+hora|reprogram|mover\s+la\s+cita|otro\s+horario)\b/i;
@@ -162,7 +165,8 @@ export function classifyExistingRequestOperation(text: string): ExistingRequestO
     (APPOINTMENT_OBJECT_RE.test(blob) && hasCancelVerb(trimmed) && !REQUEST_OBJECT_RE.test(blob)) ||
     (APPOINTMENT_OBJECT_RE.test(blob) && KEEP_REQUEST_RE.test(blob));
   const doNotCreate = /\bno\s+me\s+crees?\s+otra\b/.test(blob) && !newOp;
-  const statusOnly = STATUS_RE.test(blob) && !hasCancelVerb(trimmed);
+  const deleteRequests = DELETE_OR_CANCEL_REQUESTS_RE.test(blob);
+  const statusOnly = STATUS_RE.test(blob) && !hasCancelVerb(trimmed) && !deleteRequests;
   const contextReset = CONTEXT_RESET_RE.test(blob) && !REQUEST_OBJECT_RE.test(blob);
   const reschedule = RESCHEDULE_RE.test(blob) && !hasCancelVerb(trimmed);
 
@@ -172,11 +176,12 @@ export function classifyExistingRequestOperation(text: string): ExistingRequestO
   else if (reschedule) primaryAction = "RESCHEDULE_APPOINTMENT";
   else if (appointmentOnly) primaryAction = "CANCEL_APPOINTMENT_ONLY";
   else if (
-    hasCancelVerb(trimmed) &&
-    (REQUEST_OBJECT_RE.test(blob) ||
-      explicitRequestIds.length > 0 ||
-      hasSpecificRequestReferent(trimmed) ||
-      /\b(solicitud|pedido|trabajo|folio|servicio)\b/.test(blob))
+    deleteRequests ||
+    (hasCancelVerb(trimmed) &&
+      (REQUEST_OBJECT_RE.test(blob) ||
+        explicitRequestIds.length > 0 ||
+        hasSpecificRequestReferent(trimmed) ||
+        /\b(solicitud(?:es)?|pedido|trabajo|folio|servicio)\b/.test(blob)))
   ) {
     primaryAction = "CANCEL_REQUEST";
   }

@@ -28,6 +28,7 @@ const {
   getRequestByPublicId,
   updateRequestStatus,
   listCancellableRequestsForCustomer,
+  getHomesteadDb,
 } = await import("../src/lib/service-requests");
 const { ingestCanonicalLead, createAppointment, getAppointment } = await import("../src/lib/revenue-store");
 const { isOpenAppointmentSlot } = await import("../src/lib/appointment-slot");
@@ -90,7 +91,18 @@ async function seededTurn(hsPublicId: string, appointmentId: string, phone: stri
       bookingIntent: true,
     },
   });
-  return conciergeTurn({ conversationId, message });
+  return cancelWithConfirm(conversationId, message);
+}
+
+async function cancelWithConfirm(conversationId: string, message: string) {
+  const first = await conciergeTurn({ conversationId, message });
+  if (
+    first.ok &&
+    /confirmas que (quieres|deseas) cancelar|cancelar todas|cuál quieres cancelar/i.test(first.reply)
+  ) {
+    return conciergeTurn({ conversationId, message: "sí" });
+  }
+  return first;
 }
 
 // CANCEL-01 HS without HA
@@ -465,10 +477,7 @@ async function seededTurn(hsPublicId: string, appointmentId: string, phone: stri
       facts: { pendingAction: "ASK_LOCK_EDGE_PHOTO", pendingPhotoRequirement: "edge" },
     },
   });
-  const turn = await conciergeTurn({
-    conversationId,
-    message: "Ya no quiero instalarla, cancela la solicitud.",
-  });
+  const turn = await cancelWithConfirm(conversationId, "Ya no quiero instalarla, cancela la solicitud.");
   ok("CANCEL-17 photo override", turn.ok && getRequestByPublicId(hs.publicId)?.status === "CANCELLED");
   ok("CANCEL-17 no more photo", turn.ok && !/canto|pestillo|foto/i.test(turn.reply));
 }
@@ -497,9 +506,313 @@ async function seededTurn(hsPublicId: string, appointmentId: string, phone: stri
       ],
     },
   });
-  const turn = await conciergeTurn({ conversationId, message: "Mejor cancela el servicio." });
+  const turn = await cancelWithConfirm(conversationId, "Mejor cancela el servicio.");
   ok("CANCEL-18 expires offers", turn.ok && getRequestByPublicId(hs.publicId)?.status === "CANCELLED");
   ok("CANCEL-18 not slot pick", turn.ok && !turn.awaitingSlotSelection);
+}
+
+function countHs() {
+  return Number((getHomesteadDb().prepare("SELECT COUNT(*) as n FROM service_requests").get() as { n: number }).n);
+}
+
+async function twoOpenTurn(input: {
+  phone: string;
+  message: string | ((ids: { air: string; plumb: string }) => string);
+  listed?: boolean;
+  active?: "ac" | "plumbing";
+  extraState?: Record<string, string>;
+}) {
+  const air = seedHs({ name: "Air Cust", phone: input.phone, service: "ac", message: "aire no enfria" });
+  const plumb = seedHs({ name: "Air Cust", phone: input.phone, service: "plumbing", message: "fuga cocina" });
+  linkLead(air);
+  linkLead(plumb);
+  const day = String(Math.max(1, Number(input.phone.slice(-2)) % 28 || 1)).padStart(2, "0");
+  const slotDate = `2027-01-${day}`;
+  const haAir = createAppointment(air.publicId, slotDate, "15:00", "CONFIRMED", { source: "CHAT" }) || "";
+  const haPlumb = createAppointment(plumb.publicId, slotDate, "12:00", "CONFIRMED", { source: "CHAT" }) || "";
+  if (!haAir || !haPlumb) throw new Error(`missing HA for ${input.phone} on ${slotDate}`);
+  const active = (input.active || "plumbing") === "ac" ? air : plumb;
+  const conversationId = createConversation("127.0.0.1", {}, true);
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("no conversation");
+  if (input.listed) {
+    const { addMessage } = await import("../src/lib/concierge-store");
+    addMessage(
+      conversationId,
+      "assistant",
+      `1. Aire acondicionado: ${air.publicId}\n2. Plomería: ${plumb.publicId}`,
+    );
+  }
+  await touchConversation(conversationId, {
+    leadPublicId: active.publicId,
+    state: {
+      ...conv.state,
+      name: "Air Cust",
+      phone: input.phone,
+      contactStatus: "VALID",
+      primaryService: active.service,
+      service: active.service,
+      problem: active.service === "ac" ? "aire" : "fuga",
+      location: "San Francisco",
+      activeLeadId: active.publicId,
+      appointmentId: active.service === "ac" ? haAir : haPlumb,
+      funnelStage: "BOOKED",
+      bookingIntent: true,
+      facts: {
+        listedRequestIds: input.listed ? `${air.publicId}|${plumb.publicId}` : "",
+        ...(input.extraState || {}),
+      },
+    },
+  });
+  const before = countHs();
+  const message =
+    typeof input.message === "function"
+      ? input.message({ air: air.publicId, plumb: plumb.publicId })
+      : input.message;
+  const turn = await cancelWithConfirm(conversationId, message);
+  return {
+    turn,
+    air,
+    plumb,
+    haAir,
+    haPlumb,
+    before,
+    after: countHs(),
+    airAfter: getRequestByPublicId(air.publicId),
+    plumbAfter: getRequestByPublicId(plumb.publicId),
+  };
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880101",
+    listed: true,
+    message: ({ air }) => `cancela la ${air} la otra dejala activa`,
+  });
+  ok("CANCEL-REF-01 cancel target", r.airAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-01 preserve other", r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-01 no new HS", r.after === r.before);
+  ok("CANCEL-REF-01 plumbing HA stays", getAppointment(r.haPlumb)?.status === "CONFIRMED");
+  ok("CANCEL-REF-01 air HA gone", getAppointment(r.haAir)?.status === "CANCELLED");
+  ok("CANCEL-REF-01 reply not create", r.turn.ok && !/ya abrí tu solicitud/i.test(r.turn.reply));
+  ok("CANCEL-REF-01 no switch ack", r.turn.ok && !/dejamos lo de la plomería/i.test(r.turn.reply));
+}
+
+{
+  const r = await twoOpenTurn({ phone: "66880102", listed: true, active: "plumbing", message: "cancela la del aire" });
+  ok("CANCEL-REF-02 air cancelled", r.airAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-02 plumbing live", r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-02 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880103",
+    listed: true,
+    message: "ya no quiero lo del aire, pero lo de plomería sí",
+  });
+  ok("CANCEL-REF-03 air cancelled", r.airAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-03 plumbing preserved", r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-03 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({ phone: "66880104", listed: true, message: "cancela la primera" });
+  ok("CANCEL-REF-04 first cancelled", r.airAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-04 second live", r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-04 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({ phone: "66880105", listed: true, message: "cancela la última" });
+  ok("CANCEL-REF-05 last cancelled", r.plumbAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-05 first live", r.airAfter?.status === "NEW");
+  ok("CANCEL-REF-05 no new HS", r.after === r.before);
+}
+
+{
+  const air = seedHs({ name: "Short", phone: "66880106", service: "ac", message: "aire" });
+  const plumb = seedHs({ name: "Short", phone: "66880106", service: "plumbing", message: "fuga" });
+  linkLead(air);
+  linkLead(plumb);
+  const conversationId = createConversation("127.0.0.1", {}, true);
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("no conv");
+  await touchConversation(conversationId, {
+    leadPublicId: plumb.publicId,
+    state: {
+      ...conv.state,
+      name: "Short",
+      phone: "66880106",
+      contactStatus: "VALID",
+      primaryService: "plumbing",
+      service: "plumbing",
+      activeLeadId: plumb.publicId,
+      facts: { listedRequestIds: `${air.publicId}|${plumb.publicId}` },
+    },
+  });
+  const before = countHs();
+  const short = air.publicId.slice(-3);
+  await cancelWithConfirm(conversationId, `la ${short} ya no la quiero`);
+  ok("CANCEL-REF-06 short folio", getRequestByPublicId(air.publicId)?.status === "CANCELLED");
+  ok("CANCEL-REF-06 other live", getRequestByPublicId(plumb.publicId)?.status === "NEW");
+  ok("CANCEL-REF-06 no new HS", countHs() === before);
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880107",
+    listed: true,
+    active: "plumbing",
+    message: "cancela la cita del aire pero no la solicitud",
+  });
+  ok("CANCEL-REF-07 HS remains", r.airAfter?.status === "NEW" && r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-07 air HA cancelled", getAppointment(r.haAir)?.status === "CANCELLED");
+  ok("CANCEL-REF-07 plumbing HA stays", getAppointment(r.haPlumb)?.status === "CONFIRMED");
+  ok("CANCEL-REF-07 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880108",
+    listed: true,
+    active: "ac",
+    message: "quiero cambiar la hora de la del aire",
+  });
+  ok("CANCEL-REF-08 same HS", r.airAfter?.status === "NEW" && r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-08 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880109",
+    listed: true,
+    message: "olvida lo que hablamos del aire",
+  });
+  ok("CANCEL-REF-09 no cancel", r.airAfter?.status === "NEW" && r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-09 no new HS", r.after === r.before);
+}
+
+{
+  const r = await twoOpenTurn({
+    phone: "66880110",
+    listed: true,
+    message: "cancela la del aire y créame otra para pintura",
+  });
+  ok("CANCEL-REF-10 air cancelled", r.airAfter?.status === "CANCELLED");
+  ok("CANCEL-REF-10 plumbing live", r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-10 exactly one new HS", r.after === r.before + 1);
+  const newest = getHomesteadDb()
+    .prepare("SELECT public_id, service FROM service_requests ORDER BY id DESC LIMIT 1")
+    .get() as { public_id: string; service: string };
+  ok("CANCEL-REF-10 new is painting", newest.service === "painting" && newest.public_id !== r.air.publicId && newest.public_id !== r.plumb.publicId);
+}
+
+{
+  const r = await twoOpenTurn({ phone: "66880111", listed: true, message: "cancela esa" });
+  ok("CANCEL-REF-11 no mutate", r.airAfter?.status === "NEW" && r.plumbAfter?.status === "NEW");
+  ok("CANCEL-REF-11 no new HS", r.after === r.before);
+  ok("CANCEL-REF-11 asks", r.turn.ok && /cuál|cual|aire|plom/i.test(r.turn.reply));
+}
+
+{
+  const foreign = seedHs({ name: "Other", phone: "66880999", service: "ac", message: "foreign air" });
+  linkLead(foreign);
+  const own = seedHs({ name: "Mine", phone: "66880112", service: "plumbing", message: "own" });
+  linkLead(own);
+  const conversationId = createConversation("127.0.0.1", {}, true);
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("no conv");
+  await touchConversation(conversationId, {
+    leadPublicId: own.publicId,
+    state: {
+      ...conv.state,
+      name: "Mine",
+      phone: "66880112",
+      contactStatus: "VALID",
+      primaryService: "plumbing",
+      service: "plumbing",
+      activeLeadId: own.publicId,
+    },
+  });
+  const before = countHs();
+  const turn = await cancelWithConfirm(conversationId, `cancela ${foreign.publicId}`);
+  ok("CANCEL-REF-12 foreign untouched", getRequestByPublicId(foreign.publicId)?.status === "NEW");
+  ok("CANCEL-REF-12 own untouched", getRequestByPublicId(own.publicId)?.status === "NEW");
+  ok("CANCEL-REF-12 no new HS", countHs() === before);
+  ok("CANCEL-REF-12 no leak", turn.ok && !new RegExp(foreign.publicId, "i").test(turn.reply));
+}
+
+{
+  const air = seedHs({ name: "Human", phone: "66880114", service: "ac", message: "aire" });
+  const plumb = seedHs({ name: "Human", phone: "66880114", service: "plumbing", message: "fuga" });
+  linkLead(air);
+  linkLead(plumb);
+  const haAir = createAppointment(air.publicId, "2026-12-24", "15:00", "CONFIRMED", { source: "CHAT" }) || "";
+  const haPlumb = createAppointment(plumb.publicId, "2026-12-24", "12:00", "CONFIRMED", { source: "CHAT" }) || "";
+  const conversationId = createConversation("127.0.0.1", {}, true);
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("no conv");
+  const { addMessage } = await import("../src/lib/concierge-store");
+  addMessage(conversationId, "assistant", `1. Aire acondicionado: ${air.publicId}\n2. Plomería: ${plumb.publicId}`);
+  await touchConversation(conversationId, {
+    leadPublicId: plumb.publicId,
+    state: {
+      ...conv.state,
+      name: "Human",
+      phone: "66880114",
+      contactStatus: "VALID",
+      primaryService: "plumbing",
+      service: "plumbing",
+      problem: "fuga",
+      activeLeadId: plumb.publicId,
+      appointmentId: haPlumb,
+      funnelStage: "BOOKED",
+      facts: { listedRequestIds: `${air.publicId}|${plumb.publicId}` },
+    },
+  });
+  const before = countHs();
+  const turn = await cancelWithConfirm(
+    conversationId,
+    `cancela la ${air.publicId} la otra dejala activa`,
+  );
+  ok("HUMAN-PROD-TURN air cancelled", getRequestByPublicId(air.publicId)?.status === "CANCELLED");
+  ok("HUMAN-PROD-TURN plumbing live", getRequestByPublicId(plumb.publicId)?.status === "NEW");
+  ok("HUMAN-PROD-TURN no HS-create", countHs() === before);
+  ok("HUMAN-PROD-TURN no folio intro", turn.ok && !/ya abrí tu solicitud/i.test(turn.reply));
+  ok("HUMAN-PROD-TURN no switch ack", turn.ok && !/dejamos lo de la plomería/i.test(turn.reply));
+  void haAir;
+}
+
+{
+  const air = seedHs({ name: "Idem", phone: "66880116", service: "ac", message: "aire" });
+  const plumb = seedHs({ name: "Idem", phone: "66880116", service: "plumbing", message: "fuga" });
+  linkLead(air);
+  linkLead(plumb);
+  const conversationId = createConversation("127.0.0.1", {}, true);
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("no conv");
+  await touchConversation(conversationId, {
+    leadPublicId: plumb.publicId,
+    state: {
+      ...conv.state,
+      name: "Idem",
+      phone: "66880116",
+      contactStatus: "VALID",
+      primaryService: "plumbing",
+      service: "plumbing",
+      activeLeadId: plumb.publicId,
+      facts: { listedRequestIds: `${air.publicId}|${plumb.publicId}` },
+    },
+  });
+  const msg = `cancela ${air.publicId}`;
+  await cancelWithConfirm(conversationId, msg);
+  const before = countHs();
+  const second = await cancelWithConfirm(conversationId, msg);
+  ok("double cancel still cancelled", getRequestByPublicId(air.publicId)?.status === "CANCELLED");
+  ok("double cancel plumbing live", getRequestByPublicId(plumb.publicId)?.status === "NEW");
+  ok("double cancel no extra HS", countHs() === before);
+  ok("double cancel no create speech", second.ok && !/ya abrí tu solicitud/i.test(second.reply));
 }
 
 {
