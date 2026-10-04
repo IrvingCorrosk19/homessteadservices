@@ -598,6 +598,12 @@ function migrateServiceRequestCancellation(database: Database.Database) {
   add("reopen_count", "reopen_count INTEGER NOT NULL DEFAULT 0");
   add("last_reopened_at", "last_reopened_at TEXT");
   add("last_reopened_by", "last_reopened_by TEXT NOT NULL DEFAULT ''");
+  add("client_submission_id", "client_submission_id TEXT NOT NULL DEFAULT ''");
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sr_client_submission
+      ON service_requests (client_submission_id)
+      WHERE client_submission_id != '';
+  `);
   database.exec(`
     CREATE TABLE IF NOT EXISTS service_request_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1192,8 +1198,14 @@ export function saveServiceRequest(input: {
   utmJson?: string;
   hsRef?: string;
   isTest?: boolean;
+  clientSubmissionId?: string;
 }): SavedServiceRequest {
   const database = getDb();
+  const clientSubmissionId = String(input.clientSubmissionId || "").trim();
+  if (clientSubmissionId) {
+    const existing = findRequestByClientSubmissionId(clientSubmissionId);
+    if (existing) return existing;
+  }
   const created = new Date();
   const year = Number(
     new Intl.DateTimeFormat("en-US", {
@@ -1204,6 +1216,10 @@ export function saveServiceRequest(input: {
   const createdAt = created.toISOString();
 
   const saved = database.transaction(() => {
+    if (clientSubmissionId) {
+      const raced = findRequestByClientSubmissionId(clientSubmissionId);
+      if (raced) return raced;
+    }
     const publicId = nextPublicId(database, year);
     const photoDir = join(dataDir(), "photos", publicId);
     mkdirSync(photoDir, { recursive: true });
@@ -1227,8 +1243,8 @@ export function saveServiceRequest(input: {
     const info = database
       .prepare(
         `INSERT INTO service_requests
-          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, facts_json, campaign_public_id, piece_public_id, utm_json, hs_ref, is_test)
-         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (public_id, created_at, updated_at, status, name, phone, email, property, service, message, photos_json, facts_json, campaign_public_id, piece_public_id, utm_json, hs_ref, is_test, client_submission_id)
+         VALUES (?, ?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         publicId,
@@ -1247,6 +1263,7 @@ export function saveServiceRequest(input: {
         utmJson,
         hsRef,
         isTest,
+        clientSubmissionId,
       );
     const saved: SavedServiceRequest = {
       id: Number(info.lastInsertRowid),
@@ -1418,6 +1435,15 @@ export function getRequestByPublicId(publicId: string) {
   const row = getDb()
     .prepare(`SELECT ${REQUEST_SELECT} FROM service_requests WHERE public_id = ?`)
     .get(publicId) as DbRequestRow | undefined;
+  return row ? mapRequest(row) : null;
+}
+
+export function findRequestByClientSubmissionId(clientSubmissionId: string): SavedServiceRequest | null {
+  const id = String(clientSubmissionId || "").trim();
+  if (!id) return null;
+  const row = getDb()
+    .prepare(`SELECT ${REQUEST_SELECT} FROM service_requests WHERE client_submission_id = ?`)
+    .get(id) as DbRequestRow | undefined;
   return row ? mapRequest(row) : null;
 }
 

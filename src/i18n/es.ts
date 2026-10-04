@@ -19,6 +19,7 @@ export type Dictionary = {
     request: string;
     whatsapp: string;
     consultWhatsApp: string;
+    writeWhatsApp: string;
     call: string;
     representativeNote: string;
     comingSoon: string;
@@ -90,15 +91,30 @@ export type Dictionary = {
     service: string;
     message: string;
     messagePlaceholder: string;
+    messageHelp: string;
+    messageExampleLabel: string;
+    messageMinHint: string;
+    messageRemaining: string;
     upload: string;
+    uploadRequired: string;
     uploadHint: string;
+    uploadOptionalHint: string;
     removePhoto: string;
     locksmithIntent: string;
     reviewingPhotos: string;
+    uploadingPhotos: string;
     submit: string;
     sending: string;
+    slowSubmit: string;
+    uncertainSubmit: string;
+    formErrorBanner: string;
     successTitle: string;
     successBody: string;
+    successFolio: string;
+    successCopyFolio: string;
+    successCopied: string;
+    successSummary: string;
+    successNextStep: string;
     successAnother: string;
     errorTitle: string;
     errorBody: string;
@@ -111,9 +127,11 @@ export type Dictionary = {
       property: string;
       service: string;
       message: string;
+      messageQuality: string;
       files: string;
       intent: string;
       digitalLockPhotos: string;
+      digitalLockMissing: string;
     };
   };
   whatsapp: {
@@ -158,23 +176,24 @@ export const es: Dictionary = {
   },
   common: {
     request: "Solicitar servicio",
-    whatsapp: "Escríbenos por WhatsApp",
-    consultWhatsApp: "Consultar por WhatsApp",
+    whatsapp: "WhatsApp",
+    consultWhatsApp: "Escribir por WhatsApp",
+    writeWhatsApp: "Escribir por WhatsApp",
     call: "Llamar",
     representativeNote: "Imagen representativa del servicio",
     comingSoon: "Por confirmar",
   },
   hero: {
-    title: "Tu espacio en buenas manos.",
+    title: "Tu hogar en buenas manos.",
     subtitle:
-      "Mantenimiento, reparaciones y mejoras para tu hogar, apartamento, oficina o negocio.",
+      "Instalamos, reparamos y damos mantenimiento a tu hogar o negocio: aire acondicionado, plomería, pintura, electricidad, cerrajería y remodelación.",
     chips:
-      "Aire acondicionado • Plomería • Pintura • Electricidad • Cerrajería • Reparaciones",
+      "Aire acondicionado • Plomería • Pintura • Electricidad • Cerrajería • Remodelación",
   },
   services: {
-    title: "¿Qué necesitas resolver?",
+    title: "Servicios para tu espacio",
     intro:
-      "Cuéntanos el problema. Te ayudamos a coordinar el siguiente paso con claridad y cuidado por tu espacio.",
+      "Instalación, reparación, mantenimiento y pequeñas mejoras. Elige lo que necesitas y te ayudamos a coordinar el siguiente paso.",
     items: {
       ac: {
         title: "Aire acondicionado",
@@ -304,10 +323,10 @@ export const es: Dictionary = {
     ],
   },
   cta: {
-    title: "¿Qué necesitas reparar?",
-    body: "Cuéntanos el problema. Nosotros te ayudamos con el siguiente paso.",
+    title: "Cuéntanos qué necesita tu espacio",
+    body: "Puedes solicitar el servicio o escribirnos por WhatsApp. Coordinamos instalación, reparación o mantenimiento.",
     request: "Solicitar servicio",
-    whatsapp: "Hablar por WhatsApp",
+    whatsapp: "Escribir por WhatsApp",
   },
   contact: {
     title: "Estamos para ayudarte",
@@ -321,26 +340,42 @@ export const es: Dictionary = {
   },
   form: {
     title: "Solicitar servicio",
-    body: "Describe lo que necesitas. Si puedes, agrega fotografías del espacio o del problema.",
+    body: "Describe lo que necesitas. Agrega fotografías cuando el servicio lo requiera o cuando ayuden a entender el problema.",
     name: "Nombre",
     phone: "Teléfono",
     email: "Email",
     property: "Tipo de propiedad",
     service: "Servicio",
     message: "¿Qué necesitas?",
-    messagePlaceholder: "Cuéntanos el problema, el espacio y cualquier detalle útil.",
-    upload: "Agregar fotografías",
-    uploadHint: "Hasta 6 imágenes, 5 MB cada una.",
+    messagePlaceholder: "Describe el problema, el lugar y desde cuándo.",
+    messageHelp: "Cuéntanos qué ocurre, en qué parte de la propiedad y desde cuándo.",
+    messageExampleLabel: "Ejemplo",
+    messageMinHint: "Mínimo 8 caracteres.",
+    messageRemaining: "Faltan {n} caracteres.",
+    upload: "Fotografías (opcional)",
+    uploadRequired: "Fotografías requeridas",
+    uploadHint: "JPEG, PNG o WEBP. Hasta 6 imágenes, máximo 5 MB cada una.",
+    uploadOptionalHint: "Las fotos son opcionales para este servicio. JPEG, PNG o WEBP · hasta 6 · máx. 5 MB c/u.",
     removePhoto: "Quitar",
-    locksmithIntent: "¿Qué necesitas?",
+    locksmithIntent: "¿Qué necesitas en cerrajería?",
     reviewingPhotos: "Estamos revisando tus fotos de la puerta…",
+    uploadingPhotos: "Subiendo fotos…",
     submit: "Solicitar servicio",
-    sending: "Enviando",
-    successTitle: "Solicitud recibida",
-    successBody: "Gracias. Hemos recibido la información de tu servicio.",
+    sending: "Enviando solicitud…",
+    slowSubmit: "Está tardando más de lo habitual. Estamos comprobando el envío.",
+    uncertainSubmit:
+      "No confirmamos la respuesta del servidor. Si reintentas, no se duplicará la solicitud.",
+    formErrorBanner: "Revisa los campos señalados para enviar tu solicitud.",
+    successTitle: "Tu solicitud quedó registrada",
+    successBody: "Guardamos tu solicitud correctamente.",
+    successFolio: "Folio",
+    successCopyFolio: "Copiar folio",
+    successCopied: "Folio copiado",
+    successSummary: "Servicio",
+    successNextStep: "Nuestro equipo revisará tu solicitud y te contactará para coordinar el siguiente paso.",
     successAnother: "Enviar otra solicitud",
     errorTitle: "No se pudo enviar",
-    errorBody: "Inténtalo de nuevo en un momento. Si el problema continúa, habla con Homestead desde el chat o el formulario.",
+    errorBody: "Inténtalo de nuevo. Tus datos permanecen en el formulario.",
     propertyOptions: {
       house: "Casa",
       apartment: "Apartamento",
@@ -367,9 +402,12 @@ export const es: Dictionary = {
       property: "Selecciona el tipo de propiedad.",
       service: "Selecciona un servicio.",
       message: "Cuéntanos un poco más sobre lo que necesitas.",
-      files: "Usa imágenes de hasta 5 MB. Máximo 6 fotografías.",
+      messageQuality:
+        "Necesitamos un poco más de información para ayudarte. Describe qué problema presenta y dónde ocurre.",
+      files: "Usa imágenes JPEG, PNG o WEBP de hasta 5 MB. Máximo 6 fotografías.",
       intent: "Indica qué necesitas en cerrajería.",
       digitalLockPhotos: "Necesitamos las tres vistas de tu puerta para continuar.",
+      digitalLockMissing: "Falta la foto de {slot}.",
     },
   },
   whatsapp: {

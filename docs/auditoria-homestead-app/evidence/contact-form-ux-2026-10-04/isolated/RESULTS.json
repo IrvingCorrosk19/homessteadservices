@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-04T12:38:29.208Z",
+  "form": {
+    "guidedHelp": true,
+    "minLength": 8,
+    "lowQualityRejectsRepeat": true,
+    "folioConfirmation": true
+  },
+  "persistence": {
+    "folio": "HS-2026-000065",
+    "idempotentReplay": true,
+    "clientSubmissionId": "csub_iso_75838e3ada974e0abb2b239b"
+  },
+  "push": {
+    "folio": "HS-2026-000066",
+    "outboxEvents": 1,
+    "idempotencyKey": "control.push.new_request:HS-2026-000066:op:2",
+    "note": "Outbox event verified in isolated DB; FCM accept ≠ physical A06 delivery. Probe scrubbed."
+  }
+}

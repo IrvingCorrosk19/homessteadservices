@@ -66,6 +66,7 @@ export function Button({
   disabled,
   loading,
   onClick,
+  "aria-label": ariaLabel,
 }: Common & {
   type?: "button" | "submit";
   disabled?: boolean;
@@ -77,6 +78,8 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       onClick={onClick}
+      aria-label={ariaLabel}
+      aria-busy={loading || undefined}
       className={`${base} ${variants[variant]} ${className} disabled:cursor-not-allowed disabled:opacity-60`}
     >
       {children}

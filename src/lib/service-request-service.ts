@@ -18,6 +18,7 @@ export type ServiceRequestInput = {
   utmJson?: string;
   hsRef?: string;
   isTest?: boolean;
+  clientSubmissionId?: string;
 };
 
 export async function persistServiceRequest(input: ServiceRequestInput): Promise<SavedServiceRequest> {
