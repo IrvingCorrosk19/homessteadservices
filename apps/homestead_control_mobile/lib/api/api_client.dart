@@ -129,6 +129,21 @@ class HomesteadApi {
     }
   }
 
+  Future<Map<String, dynamic>> _delete(String path, Map<String, dynamic> body) async {
+    try {
+      final request = http.Request("DELETE", _u(path));
+      request.headers.addAll(await _headers(mutating: true));
+      request.body = jsonEncode(body);
+      final streamed = await _client.send(request).timeout(const Duration(seconds: 45));
+      final response = await http.Response.fromStream(streamed);
+      return _decode(response);
+    } on SocketException {
+      throw ApiException("Sin conexión. Esta acción necesita internet.", code: "offline");
+    } on TimeoutException {
+      throw ApiException("Tiempo de espera agotado. No se repitió la operación.", code: "timeout");
+    }
+  }
+
   Future<({String session, String csrf})> login(String password) async {
     final body = await _post("/api/admin/login", {"password": password}, mutating: false);
     final session = "${body["session"] ?? ""}";
@@ -357,6 +372,22 @@ class HomesteadApi {
     if (list is! List) return const [];
     return list.whereType<Map>().map((e) => CustomerItem(Map<String, dynamic>.from(e))).toList();
   }
+
+  Future<Map<String, dynamic>> registerPushDevice({
+    required String token,
+    String platform = "android",
+  }) {
+    return _post("/api/admin/control/push/device", {
+      "token": token,
+      "platform": platform,
+    });
+  }
+
+  Future<Map<String, dynamic>> unregisterPushDevice({required String token}) {
+    return _delete("/api/admin/control/push/device", {"token": token});
+  }
+
+  Future<Map<String, dynamic>> pushStatus() => _get("/api/admin/control/push/device");
 
   void close() => _client.close();
 }

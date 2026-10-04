@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminCookieName, adminCsrfCookieName } from "@/lib/admin-auth";
+import { adminCookieName, adminCsrfCookieName, parseAdminSessionNonce } from "@/lib/admin-auth";
 import { revokeAdminSession } from "@/lib/admin-session-store";
 
 function sessionFromRequest(request: Request) {
@@ -18,6 +18,15 @@ function sessionFromRequest(request: Request) {
 
 export async function POST(request: Request) {
   const token = decodeURIComponent(sessionFromRequest(request));
+  const nonce = parseAdminSessionNonce(token)?.nonce || "";
+  if (nonce) {
+    try {
+      const { revokeControlPushSession } = await import("@/lib/control-push");
+      revokeControlPushSession(nonce);
+    } catch {
+      /* push optional at logout */
+    }
+  }
   revokeAdminSession(token);
   const response = NextResponse.json({ ok: true });
   response.cookies.set(adminCookieName(), "", {

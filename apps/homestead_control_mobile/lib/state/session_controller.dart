@@ -5,6 +5,7 @@ import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "../api/api_client.dart";
 import "../api/models.dart";
 import "../config.dart";
+import "../push/push_service.dart";
 
 class SessionController extends ChangeNotifier {
   SessionController({
@@ -21,6 +22,7 @@ class SessionController extends ChangeNotifier {
             await clearLocal();
           },
         );
+    PushService.instance.attachApi(_api);
   }
 
   final FlutterSecureStorage _storage;
@@ -60,6 +62,9 @@ class SessionController extends ChangeNotifier {
       } catch (e) {
         lastError = "$e";
       }
+      if (isAuthenticated) {
+        await PushService.instance.registerAfterAuth();
+      }
     }
     booting = false;
     notifyListeners();
@@ -73,6 +78,7 @@ class SessionController extends ChangeNotifier {
       csrf = result.csrf;
       await _storage.write(key: _kSession, value: session);
       await _storage.write(key: _kCsrf, value: csrf);
+      await PushService.instance.registerAfterAuth();
       notifyListeners();
       return true;
     } on ApiException catch (e) {
@@ -84,6 +90,7 @@ class SessionController extends ChangeNotifier {
 
   Future<void> logout() async {
     try {
+      await PushService.instance.unregisterOnLogout();
       await _api.logout();
     } finally {
       await clearLocal();

@@ -12,6 +12,8 @@
     "control:dev": "node scripts/run-control-dev.mjs",
     "control:seed": "npx tsx scripts/seed-control-dev.mjs",
     "control:test": "npx tsx scripts/test-homestead-control.mjs",
+    "control:test:push": "npx tsx scripts/control-push-behavior.mjs",
+    "control:test:carousel": "npx tsx scripts/control-carousel-disposition-behavior.mjs",
     "control:test:http": "npx tsx scripts/test-homestead-control-http.mjs",
     "control:icons": "node scripts/generate-control-pwa-icons.mjs",
     "control:wipe": "node scripts/wipe-control-dev.mjs",

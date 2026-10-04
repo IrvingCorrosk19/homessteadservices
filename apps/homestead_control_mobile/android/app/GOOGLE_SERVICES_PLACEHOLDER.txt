@@ -1,0 +1,8 @@
+PLACEHOLDER — NOT PRODUCTION
+
+android/app/google-services.json currently uses project_id "homestead-control-pending"
+so the Google Services Gradle plugin can resolve the file during builds.
+
+Replace google-services.json with the real Firebase console download for
+package name lat.homestead.control before shipping push notifications.
+See google-services.json.example for the expected fields.

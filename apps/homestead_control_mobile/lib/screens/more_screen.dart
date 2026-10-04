@@ -2,18 +2,39 @@ import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
 import "../config.dart";
+import "../push/push_service.dart";
 import "../state/session_controller.dart";
 import "batches_screen.dart";
 import "campaigns_screen.dart";
 import "customers_screen.dart";
 import "errors_screen.dart";
 
-class MoreScreen extends StatelessWidget {
+class MoreScreen extends StatefulWidget {
   const MoreScreen({super.key});
+
+  @override
+  State<MoreScreen> createState() => _MoreScreenState();
+}
+
+class _MoreScreenState extends State<MoreScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<PushService>().refreshServerStatus();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
+    final push = context.watch<PushService>();
+    final server = push.serverPush;
+    final serverEnabled = server == null ? "—" : (server["enabled"] == true ? "sí" : "no");
+    final serverEnv = server == null ? "—" : "${server["env"] ?? "—"}";
+    final webhook = server == null ? "—" : (server["webhookConfigured"] == true ? "sí" : "no");
+
     return Scaffold(
       appBar: AppBar(title: const Text("Más")),
       body: ListView(
@@ -40,6 +61,18 @@ class MoreScreen extends StatelessWidget {
           ),
           const Divider(),
           ListTile(
+            leading: const Icon(Icons.notifications_outlined),
+            title: const Text("Notificaciones"),
+            subtitle: Text(
+              "Permiso: ${push.permissionLabel}\n"
+              "Cliente: ${push.enabled ? "activo" : "inactivo"} · ${push.status}\n"
+              "Servidor: enabled=$serverEnabled · env=$serverEnv · webhook=$webhook",
+            ),
+            isThreeLine: true,
+            onTap: () => push.refreshServerStatus(),
+          ),
+          const Divider(),
+          ListTile(
             title: const Text("Servidor"),
             subtitle: Text(session.baseUrl),
           ),
@@ -47,9 +80,9 @@ class MoreScreen extends StatelessWidget {
             title: const Text("Zona horaria"),
             subtitle: const Text(kTimeZoneLabel),
           ),
-          ListTile(
-            title: const Text("Versión app"),
-            subtitle: const Text("1.0.0+1"),
+          const ListTile(
+            title: Text("Versión app"),
+            subtitle: Text(kAppVersion),
           ),
           const Divider(),
           ListTile(

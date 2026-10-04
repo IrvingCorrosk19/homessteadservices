@@ -1,0 +1,185 @@
+{
+  "name": "HOMESTEAD — Control Push FCM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "homestead-control-push",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "cp-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 360],
+      "webhookId": "homestead-control-push"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-homestead-webhook-secret'] }}",
+              "operation": "equal",
+              "value2": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}"
+            },
+            {
+              "value1": "={{ $vars.HOMESTEAD_WEBHOOK_SECRET }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "cp-if-auth",
+      "name": "¿Webhook autorizado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [420, 360]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"ok\": false, \"error\": \"unauthorized\" }",
+        "options": { "responseCode": 401 }
+      },
+      "id": "cp-respond-401",
+      "name": "Responder 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst source = item.body && typeof item.body === 'object' && item.body.event ? item.body : item;\nconst timestamp = String(headers['x-homestead-timestamp'] || '');\nconst now = Math.floor(Date.now() / 1000);\nconst ts = Number(timestamp);\nif (!timestamp || !Number.isFinite(ts) || Math.abs(now - ts) > 300) {\n  return [{ json: { httpStatus: 401, send: false, response: { ok: false, error: 'unauthorized' } } }];\n}\nconst eventName = String(source.event || '');\nif (eventName !== 'control.push.send') {\n  return [{ json: { httpStatus: 400, send: false, response: { ok: false, error: 'invalid_event' } } }];\n}\nconst idempotencyKey = String(source.idempotencyKey || headers['x-homestead-idempotency-key'] || '');\nif (!idempotencyKey) {\n  return [{ json: { httpStatus: 400, send: false, response: { ok: false, error: 'missing_idempotency' } } }];\n}\nconst staticData = $getWorkflowStaticData('global');\nstaticData.seen = staticData.seen || {};\nconst cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;\nfor (const key of Object.keys(staticData.seen)) {\n  if (staticData.seen[key] < cutoff) delete staticData.seen[key];\n}\nif (staticData.seen[idempotencyKey]) {\n  return [{ json: { duplicate: true, httpStatus: 200, send: false, response: { ok: true, duplicate: true, idempotencyKey } } }];\n}\nstaticData.seen[idempotencyKey] = Date.now();\nconst tokens = Array.isArray(source.fcmTokens) ? source.fcmTokens.map(String).filter(Boolean) : [];\nif (!tokens.length) {\n  return [{ json: { httpStatus: 200, send: false, response: { ok: true, accepted: 0, reason: 'no_tokens' } } }];\n}\nconst android = source.android || {};\nconst notification = android.notification || {};\nconst data = source.data || {};\nconst dataStrings = {};\nfor (const [k, v] of Object.entries(data)) dataStrings[String(k)] = String(v == null ? '' : v);\nreturn [{ json: {\n  duplicate: false,\n  httpStatus: 200,\n  send: true,\n  idempotencyKey,\n  projectId: String($vars.FCM_PROJECT_ID || ''),\n  tokens,\n  title: String(notification.title || 'Homestead'),\n  body: String(notification.body || ''),\n  channelId: String(notification.channelId || 'homestead_control_alerts'),\n  data: dataStrings,\n  response: { ok: true, accepted: tokens.length, idempotencyKey }\n} }];"
+      },
+      "id": "cp-validate",
+      "name": "Validar e idempotencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.send }}", "value2": true }]
+        }
+      },
+      "id": "cp-if-send",
+      "name": "¿Enviar FCM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [920, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": { "responseCode": "={{ $json.httpStatus || 200 }}" }
+      },
+      "id": "cp-respond-skip",
+      "name": "Responder sin envío",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1160, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\nconst tokens = row.tokens || [];\nconst projectId = String(row.projectId || '').trim();\nif (!projectId) {\n  return [{ json: { ...row, sendFcm: false, httpStatus: 500, response: { ok: false, error: 'fcm_project_missing' } } }];\n}\nconst messages = tokens.map((token) => ({\n  message: {\n    token,\n    notification: { title: row.title, body: row.body },\n    data: row.data || {},\n    android: {\n      priority: 'HIGH',\n      notification: {\n        channelId: row.channelId,\n        sound: 'default',\n        defaultSound: true\n      }\n    }\n  }\n}));\nreturn messages.map((message, index) => ({\n  json: {\n    projectId,\n    message,\n    tokenIndex: index,\n    idempotencyKey: row.idempotencyKey,\n    total: messages.length\n  }\n}));"
+      },
+      "id": "cp-split",
+      "name": "Preparar mensajes FCM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://fcm.googleapis.com/v1/projects/{{ $json.projectId }}/messages:send",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.message }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "cp-fcm-send",
+      "name": "FCM HTTP v1 send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 160],
+      "continueOnFail": true,
+      "credentials": {
+        "googleApi": {
+          "id": "REPLACE_WITH_FCM_GOOGLE_CREDENTIAL_ID",
+          "name": "Homestead FCM Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet accepted = 0;\nconst invalidTokenHashes = [];\nconst failures = [];\nfor (const item of items) {\n  const status = Number(item.json.statusCode || item.json.status || 0);\n  const err = item.json.error || item.json.message || null;\n  if (item.json.name || (status >= 200 && status < 300) || item.json.message?.name) {\n    accepted += 1;\n    continue;\n  }\n  const code = String(item.json.error?.code || item.json.error?.status || err || 'unknown');\n  if (/UNREGISTERED|INVALID_ARGUMENT|NOT_FOUND/i.test(JSON.stringify(item.json))) {\n    failures.push(code);\n  } else {\n    failures.push(code);\n  }\n}\nreturn [{ json: {\n  httpStatus: 200,\n  response: {\n    ok: true,\n    fcmAccepted: accepted,\n    attempted: items.length,\n    failures: failures.slice(0, 20),\n    note: 'fcm_accept_is_not_phone_delivery'\n  }\n} }];"
+      },
+      "id": "cp-aggregate",
+      "name": "Agregar resultados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "cp-respond-ok",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1880, 160]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "¿Webhook autorizado?", "type": "main", "index": 0 }]]
+    },
+    "¿Webhook autorizado?": {
+      "main": [
+        [{ "node": "Validar e idempotencia", "type": "main", "index": 0 }],
+        [{ "node": "Responder 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validar e idempotencia": {
+      "main": [[{ "node": "¿Enviar FCM?", "type": "main", "index": 0 }]]
+    },
+    "¿Enviar FCM?": {
+      "main": [
+        [{ "node": "Preparar mensajes FCM", "type": "main", "index": 0 }],
+        [{ "node": "Responder sin envío", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preparar mensajes FCM": {
+      "main": [[{ "node": "FCM HTTP v1 send", "type": "main", "index": 0 }]]
+    },
+    "FCM HTTP v1 send": {
+      "main": [[{ "node": "Agregar resultados", "type": "main", "index": 0 }]]
+    },
+    "Agregar resultados": {
+      "main": [[{ "node": "Responder OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "homesteadNotes": [
+      "Requires n8n vars: HOMESTEAD_WEBHOOK_SECRET, FCM_PROJECT_ID",
+      "Requires Google service account credential with Firebase Cloud Messaging API",
+      "Set N8N_CONTROL_PUSH_WEBHOOK_URL on Homestead to this webhook URL",
+      "Never commit service-account JSON to git"
+    ]
+  }
+}

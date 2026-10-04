@@ -7,6 +7,7 @@ const String kApiBase = String.fromEnvironment(
 const String kMobileClientHeader = "control-mobile";
 const String kAppName = "Homestead Control";
 const String kTimeZoneLabel = "America/Panama";
+const String kAppVersion = "1.2.0+15";
 const int kMaxContentPhotos = 8;
 
 bool get kIsProductionApi =>

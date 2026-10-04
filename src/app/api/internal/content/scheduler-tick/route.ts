@@ -95,7 +95,18 @@ export async function POST(request: Request) {
         cause: error instanceof Error ? error.name : "unknown",
       });
     }
-    return NextResponse.json({ ...result, reminders, appointments, retention: true });
+    let controlPush: Record<string, unknown> = { ok: false };
+    try {
+      const push = await import("@/lib/control-push");
+      const due = await push.processDuePushReminders();
+      const drained = await push.drainControlPushOutbox(16);
+      controlPush = { ok: true, reminders: due, outbox: drained };
+    } catch (error) {
+      logError("ControlPushSchedulerFailed", {
+        cause: error instanceof Error ? error.name : "unknown",
+      });
+    }
+    return NextResponse.json({ ...result, reminders, appointments, controlPush, retention: true });
   } catch (error) {
     logError("SchedulerTickFailed", {
       cause: error instanceof Error ? error.name : "unknown",

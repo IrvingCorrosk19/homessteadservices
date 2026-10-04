@@ -433,6 +433,10 @@ function migrateContentStudio(database: Database.Database) {
   addPubCol("permalink", "permalink TEXT NOT NULL DEFAULT ''");
   addPubCol("container_id", "container_id TEXT NOT NULL DEFAULT ''");
   addPubCol("version", "version INTEGER NOT NULL DEFAULT 0");
+  const versionCols = columnNames(database, "content_versions");
+  if (!versionCols.includes("media_order_json")) {
+    database.exec("ALTER TABLE content_versions ADD COLUMN media_order_json TEXT NOT NULL DEFAULT ''");
+  }
   const settings = database.prepare("SELECT id FROM content_settings WHERE id = 1").get();
   if (!settings) {
     database
@@ -627,6 +631,16 @@ function migrateServiceRequestCancellation(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_sr_notify_pending
       ON service_request_notify_outbox (status, id);
   `);
+  const notifyCols = columnNames(database, "service_request_notify_outbox");
+  if (!notifyCols.includes("claim_token")) {
+    database.exec("ALTER TABLE service_request_notify_outbox ADD COLUMN claim_token TEXT NOT NULL DEFAULT ''");
+  }
+  if (!notifyCols.includes("lease_until")) {
+    database.exec("ALTER TABLE service_request_notify_outbox ADD COLUMN lease_until TEXT NOT NULL DEFAULT ''");
+  }
+  if (!notifyCols.includes("send_attempted")) {
+    database.exec("ALTER TABLE service_request_notify_outbox ADD COLUMN send_attempted INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function migrateRevenueEngine(database: Database.Database) {
@@ -791,6 +805,12 @@ function migrateRevenueEngine(database: Database.Database) {
   migrateCustomerIdentityWaveFTable(database);
   migrateCopilotWaveGTable(database);
   migrateAutonomousOperationsTable(database);
+  migrateControlPushTable(database);
+}
+
+function migrateControlPushTable(database: Database.Database) {
+  const { migrateControlPush } = require("@/lib/control-push") as typeof import("@/lib/control-push");
+  migrateControlPush(database);
 }
 
 function migrateAutonomousOperationsTable(database: Database.Database) {
@@ -1269,6 +1289,14 @@ export function saveServiceRequest(input: {
     }
     return saved;
   })();
+  if (!saved.isTest) {
+    void import("@/lib/control-push")
+      .then((mod) => {
+        mod.enqueueNewRequestPush(saved.publicId, { isTest: Boolean(saved.isTest) });
+        return mod.drainControlPushOutbox(4);
+      })
+      .catch(() => undefined);
+  }
   void import("@/lib/revenue-ingest").then((mod) => mod.ingestSavedRequest(saved)).catch(() => undefined);
   return saved;
 }

@@ -3,6 +3,7 @@ import { requireAdminMutation, requireAdminSession } from "@/lib/control-auth";
 import { APPOINTMENT_ID_PATTERN } from "@/lib/appointment-time";
 import { getAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/revenue-store";
 import { notifyAppointmentEvent } from "@/lib/revenue-telegram";
+import { assertSecurityReviewAllowsBooking } from "@/lib/service-request-disposition";
 import { logInfo } from "@/lib/log";
 
 type Params = { params: Promise<{ appointmentId: string }> };
@@ -44,19 +45,33 @@ export async function PATCH(request: Request, { params }: Params) {
     date?: string;
     time?: string;
     version?: number;
+    assignedTo?: string;
   } | null;
   const action = String(body?.action || "");
   const current = getAppointment(appointmentId);
   if (!current) return NextResponse.json({ ok: false, reason: "not_found" }, { status: 404 });
 
+  if (action === "confirm" || action === "reschedule") {
+    const security = assertSecurityReviewAllowsBooking(current.leadId);
+    if (!security.ok) {
+      return NextResponse.json(
+        { ok: false, error: "security_review_required", reason: "security_review_required" },
+        { status: 409 },
+      );
+    }
+  }
+
   if (action === "confirm") {
     setAppointmentStatus(appointmentId, "CONFIRMED");
     await notifyAppointmentEvent(appointmentId, "CONFIRMED");
+    void import("@/lib/control-push").then((m) => m.syncAppointmentPushReminder(appointmentId));
   } else if (action === "cancel") {
     setAppointmentStatus(appointmentId, "CANCELLED");
     await notifyAppointmentEvent(appointmentId, "CANCELLED");
+    void import("@/lib/control-push").then((m) => m.cancelAppointmentPushReminders(appointmentId, "cancelled"));
   } else if (action === "complete") {
     setAppointmentStatus(appointmentId, "COMPLETED");
+    void import("@/lib/control-push").then((m) => m.cancelAppointmentPushReminders(appointmentId, "completed"));
   } else if (action === "reschedule") {
     const date = String(body?.date || "");
     const time = String(body?.time || "");
@@ -78,6 +93,14 @@ export async function PATCH(request: Request, { params }: Params) {
         previousDate: moved.previousDate,
         previousTime: moved.previousTime,
       });
+    }
+    void import("@/lib/control-push").then((m) => m.syncAppointmentPushReminder(appointmentId));
+  } else if (action === "assign") {
+    const assignedTo = String((body as { assignedTo?: string })?.assignedTo || "");
+    const { setAppointmentAssignee } = await import("@/lib/control-push");
+    const assigned = setAppointmentAssignee(appointmentId, assignedTo);
+    if (!assigned.ok) {
+      return NextResponse.json({ ok: false, reason: assigned.reason }, { status: 409 });
     }
   } else {
     return NextResponse.json({ ok: false }, { status: 400 });

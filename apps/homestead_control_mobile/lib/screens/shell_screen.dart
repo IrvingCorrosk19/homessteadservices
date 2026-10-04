@@ -14,11 +14,13 @@ class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
   @override
-  State<ShellScreen> createState() => _ShellScreenState();
+  State<ShellScreen> createState() => ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
+class ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   int _index = 0;
+  String? _agendaFocusAppointmentId;
+  int _agendaFocusToken = 0;
   late final Stream<List<ConnectivityResult>> _connectivity;
 
   @override
@@ -34,6 +36,16 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// No dedicated appointment detail screen — open Agenda and focus the day / id.
+  void openAgendaForAppointment(String appointmentId) {
+    if (!mounted) return;
+    setState(() {
+      _index = 3;
+      _agendaFocusAppointmentId = appointmentId;
+      _agendaFocusToken++;
+    });
   }
 
   @override
@@ -56,7 +68,10 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       const HomeScreen(),
       const ContentQueueScreen(),
       const RequestsScreen(),
-      const AppointmentsScreen(),
+      AppointmentsScreen(
+        focusAppointmentId: _agendaFocusAppointmentId,
+        focusToken: _agendaFocusToken,
+      ),
       const MoreScreen(),
     ];
     return Scaffold(

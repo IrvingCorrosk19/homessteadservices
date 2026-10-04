@@ -32,6 +32,13 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Firebase client config (real file never in git; use .example)
+**/google-services.json
+!**/google-services.json.example
+**/GoogleService-Info.plist
+**/firebase-adminsdk*.json
+*serviceAccount*.json
+
 # local request database
 /data/
 *.sqlite
