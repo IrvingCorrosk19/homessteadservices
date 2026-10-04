@@ -2,47 +2,28 @@
 
 
 
-Fecha: 2026-10-03 America/Panama (cierre etapa aislada + A06).
-
-
+Fecha: 2026-10-03 America/Panama (actualizado: Control Push FCM vía n8n — APK 1.2.0+15 / backend `8169e5d`).
 
 ## Entrega
 
-
-
 | Ítem | Valor |
-
 | --- | --- |
-
 | Carpeta | `apps/homestead_control_mobile` |
-
 | applicationId | `lat.homestead.control` |
-
-| versionName / versionCode | `1.1.0` / `2` |
-
+| Fuente `pubspec` | `1.2.0+15` |
+| **Instalado ahora en A06** | `1.2.0` / versionCode `15` (install -r, datos de sesión conservados) |
 | Android mínimo | API 24 |
-
 | targetSdk | 36 |
-
-| APK **producción** (instalado ahora en A06) | `apps/homestead_control_mobile/dist/homestead-control-1.1.0+2-debug.apk` |
-
-| SHA-256 prod | `D677093C8E182E4968B0AF9DA1E70F7C925CB0A1DCE167081352C6CD33BED013` |
-
-| API_BASE prod | `https://homestead.lat` |
-
-| APK **aislado** (solo pruebas) | `…/homestead-control-1.1.0+2-isolated-debug.apk` |
-
-| SHA-256 aislado | `8D92C37BB0D3A275180A58403A0FACF34B1D677B77F2AF46DB738DA59ECFFA1E` |
-
 | API_BASE aislado | `http://127.0.0.1:3000` (+ `adb reverse`) |
-
+| API_BASE prod efectiva | `https://homestead.lat` (confirmado en Más → Servidor) |
+| Backend prod | commit `8169e5dd14af5326127500f74bcd4ab7066ef46e` |
 | Firma | Debug keystore. **No** es firma de release Play |
+| Detalle solicitud A06 | **PASS** — lista→detalle→back→otra; evidencia `evidence/a06-detail-notif-fix-2026-10-03/` |
+| Notificaciones APK | **ACTIVADO en A06** — FCM HTTP v1 vía n8n (`op:2`). Recepción física FG/BG/killed + tap verificada 2026-10-03. Webhook interno `N8N_CONTROL_PUSH_WEBHOOK_URL` (TLS público n8n vencido). Evidencia: `evidence/control-push-2026-10-03/` |
 
 | Teléfono | Samsung Galaxy A06 (`SM-A065M`, `R8YYA17KR3V`, Android 15) |
 
-
-
-**Estado del teléfono al cerrar esta etapa:** APK de producción reinstado, `adb reverse` eliminado, login **sin** banner `ENTORNO DE PRUEBA` (evidencia `evidence/a06-isolated/99-restored-prod-login.png`).
+**Estado del teléfono (2026-10-03 noche):** APK prod **1.2.0+15** → `https://homestead.lat`; permiso de notificaciones concedido; registro FCM falla por API key placeholder; detalle y agenda OK; sin Meta ni cambios de cola.
 
 
 

@@ -1,4 +1,7 @@
-# Homestead Control Push — informe 2026-10-03
+# Homestead Control Push — informe (actualizado 2026-10-03 / cierre verificación)
+
+> Este informe **no** debe leerse como “push bloqueado”. La activación FCM quedó documentada en  
+> `ACTIVACION-FCM-2026-10-03.md`. Aquí queda la matriz de cierre.
 
 ## Destinatario
 
@@ -6,63 +9,46 @@
 | --- | --- |
 | `CONTROL_PUSH_SUBJECT_ID` | `op:2` |
 | Origen | `telegram_operators` id=2 role=ADMIN display_name=`Irving CORRO` |
-| No usado | OWNER id=1 `Owner` (primer admin — excluido a propósito) |
 | Aliases assignee | `Irving CORRO`, `Irvin`, `op:2` |
-| Anticipación | `30m` |
+| Anticipación | `30m` (sin cambiar en producción; E2E fuerza `fire_at`) |
 | Zona | `America/Panama` |
 
-## Commit / versiones
+## Estado operativo (actual)
 
 | Ítem | Valor |
 | --- | --- |
-| Commit | `32a36a2f8cfa83810430357fb3c4cf7f3256f05e` |
-| Hotfix webhook URL | follow-up en árbol (no reutilizar webhook Telegram) |
-| Backend desplegado | `32a36a2` · image `sha256:cd5d05c8…5124c` · `DEPLOY_OK` |
-| Backup | `/opt/backups/homestead-pre-control-20261003-193144` |
-| Rollback image | `homestead-homestead_web:pre-control-20261003-193144` |
-| APK instalado A06 | `1.2.0` / versionCode `15` |
-| APK SHA-256 | `CFDB9F1A6B616107697524F88A2C69C6C806CF1A85C37662407E81C4A7DC1382` |
-| Certificado SHA-256 | `f6fcdc3e0ffb4980be253d9c110fdd2c207c40370ec117f09abef2b4838220c5` (Android Debug) |
-| URL efectiva | `https://homestead.lat` |
+| FCM | **ACTIVADO** — proyecto `homestead-control-a413c` |
+| Webhook | `http://n8n:5678/webhook/homestead-control-push` (red Docker `n8n_net`) |
+| Workflow n8n | `nUmjwWOtfUOb4d6h` activo |
+| Credential | `hsfcmdbc4693c2964` googleApi (SA fuera del repo: `C:\Homestead-Secrets\…`) |
+| APK A06 | `1.2.1` / versionCode `16` · `lat.homestead.control` · URL `https://homestead.lat` |
+| Device token | activo `op:2` · hash prefijo `db721756c0e3` |
+| TLS `n8n.autonomousflow.lat` | renovado (válido hasta ~2027-01-02); `certbot.timer` activo; Homestead no depende del URL público |
 
-## Eventos implementados
+## Eventos
 
-1. **Nueva solicitud** (`!is_test`) → outbox `control.push.new_request` → n8n FCM.
-2. **Recordatorio cita** asignada al sujeto, 30 min antes (o inmediato si queda <30m y aún no empieza); invalida al reprogramar/cambiar responsable/cancelar/completar.
+1. **Nueva solicitud** (`!is_test`) → outbox → n8n → FCM.
+2. **Recordatorio cita** asignada al sujeto, 30 min antes; cancel/reprogramar invalida pending previo.
 
-Textos sin PII en pantalla bloqueada.
+## Matriz de cierre
 
-## Matriz
-
-| Caso | Resultado |
-| --- | --- |
-| Pruebas aisladas `control:test:push` | **PASS** |
-| Dedup outbox / claim recordatorio | **PASS** |
-| Permiso Android (diálogo → concedido) | **PASS** |
-| Más muestra estado permiso/servidor/versión | **PASS** |
-| Regresión lista→detalle→agenda | **PASS** |
-| Push primer plano | **NO PROBADO** (Firebase placeholder) |
-| Push segundo plano | **NO PROBADO** |
-| Push cerrada | **NO PROBADO** |
-| Deep link post-login | **NO PROBADO** (requiere FCM real) |
-| Meta / cola / Telegram clientes | **sin cambios** |
-
-## Bloqueo externo indispensable
-
-Falta proyecto Firebase real para `lat.homestead.control`:
-
-1. `google-services.json` real (reemplazar placeholder).
-2. Service account FCM en n8n + var `FCM_PROJECT_ID`.
-3. Importar/activar workflow `n8n/homestead-n8n-control-push.json`.
-4. Set `N8N_CONTROL_PUSH_WEBHOOK_URL` en VPS (URL del webhook; **no** el de Telegram).
-
-Evidencia del bloqueo en dispositivo:  
-`register_failed: Please set a valid API key` (placeholder google-services).
+| Caso | Resultado | Evidencia |
+| --- | --- | --- |
+| Push FG / BG / cerrada (aviso técnico) | **PASS** | `ACTIVACION-FCM` + `phone/06-*` |
+| Abrir desde aviso → solicitud real `HS-2026-000123` | **PASS** | `phone/07-deeplink-HS-2026-000123.png`, `08-deeplink-detail-HS123.png` (sin `invalid_id`) |
+| Recordatorio E2E calendario→scheduler→outbox→n8n→FCM | **PASS** | `ControlPushN8nAccepted` + outbox `n8n_accepted` · citas `HA-PUSH-E2E-*` |
+| Cancel / reprogramar invalida aviso anterior | **PASS** | E2E: `pendingAfterCancel=0`, `cancelledAfterCancel=1`, un solo outbox DELIVERED post-reschedule |
+| Tocar recordatorio → Agenda destino | **PASS** | snackbar `Cita HA-PUSH-E2E-*` · `phone/12-reminder-open-*.png` (app en segundo plano) |
+| Tocar recordatorio con proceso muerto (`force-stop`) | **NO PROBADO** | FCM accept sí; bandeja Homestead no estable tras `force-stop` en esta sesión |
+| Meta / WhatsApp clientes | **sin uso** | — |
+| Exclusión fixtures desactivada globalmente | **no** | E2E con `dry_run=1` lead + cleanup |
 
 ## Archivos clave
 
 - `src/lib/control-push.ts`
-- `src/app/api/admin/control/push/device/route.ts`
 - `n8n/homestead-n8n-control-push.json`
 - `apps/homestead_control_mobile/lib/push/push_service.dart`
 - `scripts/control-push-behavior.mjs`
+- `scripts/control-push-reminder-e2e.mjs`
+- `deploy/vps/docker-compose.yml` (`CONTROL_PUSH_*`, `N8N_CONTROL_PUSH_WEBHOOK_URL`, `n8n_net`)
+- `ROLLBACK-PUSH.md` · `ACTIVACION-FCM-2026-10-03.md`

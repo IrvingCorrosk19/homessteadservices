@@ -137,91 +137,85 @@ assert.equal(assigneeMatchesPushSubject(""), false);
 
 // --- Appointment reminder schedule / reschedule / cancel / assignee ---
 {
-  const lead = saveServiceRequest({
-    name: "Cita Fixture",
-    phone: "+50760002222",
-    email: "cita-fixture@example.invalid",
-    property: "house",
-    service: "locksmith",
-    message: "fixture cita push",
-    photos: [],
-    isTest: false,
-  });
-  // Mark security/booking eligibility via ingest if needed
-  try {
-    const { ingestSavedRequest } = await import("../src/lib/revenue-ingest.ts");
-    await ingestSavedRequest(lead);
-  } catch {
-    /* optional */
-  }
+  // Minimal lead+appointment rows (bypass booking eligibility / security gates).
+  // Isolated only — does not touch production or notify customers.
+  const db = getHomesteadDb();
+  const leadId = `LEAD-PUSH-${Date.now()}`;
+  const appointmentId = `HA-PUSH-${Date.now().toString(36)}`;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO revenue_customers (name, phone, email, created_at, do_not_contact)
+     VALUES (?, ?, ?, ?, 0)`,
+  ).run("Cita Fixture", "+50760002222", "cita-fixture@example.invalid", now);
+  const customerId = Number(db.prepare("SELECT last_insert_rowid() AS id").get().id);
+  db.prepare(
+    `INSERT INTO revenue_leads (
+      lead_id, customer_id, created_at, updated_at, source, service_category, is_test, dry_run
+    ) VALUES (?, ?, ?, ?, 'ADMIN', 'locksmith', 0, 1)`,
+  ).run(leadId, customerId, now, now);
 
-  // Create appointment far enough in future for 30m reminder
-  const panama = new Date(Date.now() - 5 * 3600_000 + 2 * 3600_000);
-  const y = panama.getUTCFullYear();
-  const m = String(panama.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(panama.getUTCDate()).padStart(2, "0");
-  const date = `${y}-${m}-${d}`;
-  const hour = String((panama.getUTCHours() + 2) % 24).padStart(2, "0");
-  const time = `${hour}:00`;
+  // Far enough in the future (America/Panama) so the 30m reminder is schedulable.
+  const date = "2026-10-10";
+  const time = "15:00";
 
-  let appointmentId = revenue.createAppointment(lead.publicId, date, time, "CONFIRMED", {
-    source: "ADMIN",
-    notes: "push-test",
-  });
-  if (!appointmentId) {
-    // Lead may need ingest — create minimal lead row if create failed
-    console.log("SKIP_APPOINTMENT_CREATE — createAppointment returned null (eligibility)");
-  } else {
-    revenue.setAppointmentStatus(appointmentId, "CONFIRMED");
-    // Unassigned → no reminder
-    let sync = syncAppointmentPushReminder(appointmentId);
-    assert.equal(sync.scheduled, false);
+  db.prepare(
+    `INSERT INTO revenue_appointments (
+      appointment_id, lead_id, customer_id, date, start_time, service, status,
+      assigned_to, created_at, notes, source, version
+    ) VALUES (?, ?, ?, ?, ?, 'locksmith', 'CONFIRMED', '', ?, 'push-test', 'ADMIN', 1)`,
+  ).run(appointmentId, leadId, customerId, date, time, now);
 
-    const assigned = setAppointmentAssignee(appointmentId, "Irvin");
-    assert.equal(assigned.ok, true);
-    sync = syncAppointmentPushReminder(appointmentId);
-    assert.equal(sync.scheduled, true);
-    assert.ok(countReminders("PENDING") >= 1);
+  // Unassigned → no reminder
+  let sync = syncAppointmentPushReminder(appointmentId);
+  assert.equal(sync.scheduled, false);
 
-    // Reschedule invalidates prior pending
-    const laterHour = String((panama.getUTCHours() + 4) % 24).padStart(2, "0");
-    revenue.rescheduleAppointment(appointmentId, date, `${laterHour}:00`, { actor: "admin" });
-    syncAppointmentPushReminder(appointmentId);
-    const pending = getHomesteadDb()
-      .prepare(
-        `SELECT COUNT(*) AS n FROM control_push_reminders
-         WHERE appointment_id = ? AND status = 'PENDING'`,
-      )
-      .get(appointmentId).n;
-    assert.equal(pending, 1);
+  const assigned = setAppointmentAssignee(appointmentId, "Irvin");
+  assert.equal(assigned.ok, true, assigned.reason || "assignee");
+  sync = syncAppointmentPushReminder(appointmentId);
+  assert.equal(sync.scheduled, true, sync.reason || "scheduled");
+  assert.ok(countReminders("PENDING") >= 1);
 
-    // Force fire_at into the past for due processing without waiting
-    getHomesteadDb()
-      .prepare(
-        `UPDATE control_push_reminders SET fire_at = ? WHERE appointment_id = ? AND status = 'PENDING'`,
-      )
-      .run(new Date(Date.now() - 1000).toISOString(), appointmentId);
+  // Reschedule invalidates prior pending
+  db.prepare(
+    `UPDATE revenue_appointments
+     SET start_time = ?, version = version + 1, status = 'RESCHEDULED'
+     WHERE appointment_id = ?`,
+  ).run("17:00", appointmentId);
+  syncAppointmentPushReminder(appointmentId);
+  const pending = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM control_push_reminders
+       WHERE appointment_id = ? AND status = 'PENDING'`,
+    )
+    .get(appointmentId).n;
+  assert.equal(pending, 1);
 
-    const before = countOutbox("PENDING") + countOutbox("DELIVERED");
-    const due = await processDuePushReminders(Date.now());
-    assert.ok(due.enqueued >= 1);
-    const after = countOutbox("PENDING") + countOutbox("DELIVERED");
-    assert.ok(after > before);
+  // Force fire_at into the past for due processing without waiting
+  db.prepare(
+    `UPDATE control_push_reminders SET fire_at = ? WHERE appointment_id = ? AND status = 'PENDING'`,
+  ).run(new Date(Date.now() - 1000).toISOString(), appointmentId);
 
-    // Concurrent process should not enqueue duplicate for same notice
-    const due2 = await processDuePushReminders(Date.now());
-    assert.equal(due2.enqueued, 0);
+  const before = countOutbox("PENDING") + countOutbox("DELIVERED");
+  const due = await processDuePushReminders(Date.now());
+  assert.ok(due.enqueued >= 1);
+  const after = countOutbox("PENDING") + countOutbox("DELIVERED");
+  assert.ok(after > before);
 
-    cancelAppointmentPushReminders(appointmentId, "cancelled");
-    revenue.setAppointmentStatus(appointmentId, "CANCELLED");
-    const stillPending = getHomesteadDb()
-      .prepare(
-        `SELECT COUNT(*) AS n FROM control_push_reminders
-         WHERE appointment_id = ? AND status IN ('PENDING','CLAIMED')`,
-      )
-      .get(appointmentId).n;
-    assert.equal(stillPending, 0);
-  }
+  // Concurrent process should not enqueue duplicate for same notice
+  const due2 = await processDuePushReminders(Date.now());
+  assert.equal(due2.enqueued, 0);
+
+  cancelAppointmentPushReminders(appointmentId, "cancelled");
+  db.prepare(`UPDATE revenue_appointments SET status = 'CANCELLED' WHERE appointment_id = ?`).run(
+    appointmentId,
+  );
+  const stillPending = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM control_push_reminders
+       WHERE appointment_id = ? AND status IN ('PENDING','CLAIMED')`,
+    )
+    .get(appointmentId).n;
+  assert.equal(stillPending, 0);
 }
 
 console.log(

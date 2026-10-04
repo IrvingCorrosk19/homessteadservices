@@ -65,6 +65,13 @@ class PushService extends ChangeNotifier {
   String get permissionLabel => _permissionLabel;
   Map<String, dynamic>? get serverPush => _serverPush;
   String? get token => _token;
+  /// Safe short fingerprint for settings UI / evidence (never the full token).
+  String get tokenFingerprint {
+    final t = _token;
+    if (t == null || t.isEmpty) return "ninguno";
+    final tail = t.length <= 6 ? t : t.substring(t.length - 6);
+    return "${t.length}c···$tail";
+  }
   PushDeepLink? get pendingNavigation => _pendingNav;
 
   Future<void> init() async {

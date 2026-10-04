@@ -17,6 +17,23 @@
 4. Credencial Google (FCM) en n8n + `FCM_PROJECT_ID`
 5. `google-services.json` real en el APK (nunca en Git)
 
-## Rollback de despliegue
+## Rollback de despliegue (caso normal)
 
-Usar la imagen taggeada en el backup previo (`ROLLBACK_IMAGE` del script deploy-control-vps.sh) y el directorio `BACKUP_DIR` de SQLite. Los datos de push nuevos no se pierden si se restaura el volumen `data/` completo.
+**Solo revertir código/imagen.** Conservar la base SQLite viva actual.
+
+1. Volver a la imagen taggeada previa (`ROLLBACK_IMAGE` del script `deploy-control-vps.sh`) o al commit anterior.
+2. Recrear `homestead_web` apuntando al mismo volumen `/opt/apps/homestead/data`.
+3. Si el código anterior no conoce tablas `control_push_*`, dejarlas en la DB (aditivas) y mantener `CONTROL_PUSH_ENABLED=false` hasta alinear.
+4. **No** restaurar un backup de SQLite como paso de rollback de código.
+
+## Qué NO hacer
+
+- **Prohibido como rollback normal:** restaurar `BACKUP_DIR` / un backup pre-deploy **encima** de la DB de producción. Eso puede borrar solicitudes, citas, piezas, publicaciones y registros push creados **después** del stamp del backup.
+- Los datos de push nuevos viven en el volumen `data/` actual; restaurar un backup antiguo los pierde junto con el resto de la operación posterior.
+
+## Recuperación con backup (solo incidente de corrupción)
+
+1. Decisión explícita de ops: corrupción o pérdida estructural demostrada.
+2. Restaurar el backup a una ruta **paralela** (nunca cortar tráfico primero sobre la viva).
+3. Inventariar filas creadas después del stamp del backup y fusionarlas / reinyectarlas antes de cortar tráfico.
+4. Solo entonces considerar cutover.

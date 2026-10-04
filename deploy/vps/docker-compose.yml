@@ -34,6 +34,12 @@ services:
       DATA_DIR: /app/data
       N8N_HOMESTEAD_WEBHOOK_URL: ${N8N_HOMESTEAD_WEBHOOK_URL:-}
       N8N_HOMESTEAD_WEBHOOK_SECRET: ${N8N_HOMESTEAD_WEBHOOK_SECRET:-}
+      # Homestead Control push (FCM via dedicated n8n webhook — never reuse Telegram URL)
+      CONTROL_PUSH_ENABLED: ${CONTROL_PUSH_ENABLED:-true}
+      CONTROL_PUSH_SUBJECT_ID: ${CONTROL_PUSH_SUBJECT_ID:-}
+      CONTROL_PUSH_ASSIGNEE_ALIASES: ${CONTROL_PUSH_ASSIGNEE_ALIASES:-}
+      CONTROL_PUSH_REMINDER_OFFSET: ${CONTROL_PUSH_REMINDER_OFFSET:-30m}
+      N8N_CONTROL_PUSH_WEBHOOK_URL: ${N8N_CONTROL_PUSH_WEBHOOK_URL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -99,9 +105,19 @@ services:
       HOMESTEAD_REVIEW_REMINDER_HOURS: ${HOMESTEAD_REVIEW_REMINDER_HOURS:-0}
     volumes:
       - /opt/apps/homestead/data:/app/data
+    # Reach n8n over the private Docker network (public TLS for n8n.autonomousflow.lat
+    # may be expired; Control Push must use N8N_CONTROL_PUSH_WEBHOOK_URL=http://n8n:5678/webhook/...).
+    networks:
+      - default
+      - n8n_net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 40s
+
+networks:
+  n8n_net:
+    external: true
+    name: n8n_net
