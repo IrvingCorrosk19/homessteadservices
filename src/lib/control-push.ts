@@ -563,11 +563,8 @@ function markInvalidToken(tokenHash: string) {
 }
 
 export function controlPushWebhookUrl() {
-  return (
-    process.env.N8N_CONTROL_PUSH_WEBHOOK_URL?.trim() ||
-    process.env.N8N_HOMESTEAD_WEBHOOK_URL?.trim() ||
-    ""
-  );
+  // Dedicated push webhook only — never fall back to the Telegram service-request URL.
+  return process.env.N8N_CONTROL_PUSH_WEBHOOK_URL?.trim() || "";
 }
 
 async function deliverPushEnvelope(envelope: {
@@ -791,8 +788,6 @@ export function controlPushStatusPublic() {
     reminderOffset: controlPushReminderOffsetLabel(),
     timezone: businessTimezone(),
     env: controlPushEnv(),
-    webhookConfigured: Boolean(
-      process.env.N8N_CONTROL_PUSH_WEBHOOK_URL?.trim() || process.env.N8N_HOMESTEAD_WEBHOOK_URL?.trim(),
-    ),
+    webhookConfigured: Boolean(process.env.N8N_CONTROL_PUSH_WEBHOOK_URL?.trim()),
   };
 }
