@@ -13,10 +13,11 @@ export default function ControlNuevoPage() {
           <ControlIntakeForm />
         </div>
         <section className="mt-6 rounded-2xl border border-navy/10 bg-white p-5 text-sm text-charcoal/75">
-          <h2 className="font-display text-2xl text-navy">Pendiente: video y carrusel</h2>
+          <h2 className="font-display text-2xl text-navy">Modos de publicación</h2>
           <p className="mt-3">
-            No hay simulación de soporte. Falta almacenamiento de video, transcodificación, publicación de Reels/carrusel
-            en Meta y un publicador que envíe más de una imagen por pieza.
+            Con 2 o más fotos puedes crear un álbum: un carrusel oficial en Instagram y una multi-foto en Facebook, con
+            el mismo texto y el orden elegido. También puedes crear una pieza independiente por foto. Video/Reels aún no
+            están soportados.
           </p>
         </section>
       </main>

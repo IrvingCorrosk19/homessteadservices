@@ -84,6 +84,14 @@ function humanCause(cause: string) {
     meta_token_unconfigured:
       { text: "No hay token de Página de Meta.", action: "Pega META_PAGE_ACCESS_TOKEN en el .env del VPS (no en el chat)." },
     image_missing: { text: "No encontré la imagen aprobada.", action: "Vuelve a generar la pieza y aprueba la versión nueva." },
+    carousel_min_2: {
+      text: "El álbum necesita al menos 2 fotos válidas.",
+      action: "Añade otra foto o publica en modo individual.",
+    },
+    carousel_max_8: {
+      text: "El álbum supera el máximo de fotos admitidas.",
+      action: "Quita fotos hasta el máximo permitido e intenta de nuevo.",
+    },
     carousel_invalid: {
       text: "El carrusel no cumple límites o validación de imágenes (2–10 fotos JPEG válidas).",
       action: "Reordena o cambia las fotos y vuelve a aprobar la versión.",
@@ -110,7 +118,15 @@ function humanCause(cause: string) {
       action: "Revisa la Page. Si no salió, confirma EN VIVO otra vez (puede duplicar si ya estaba publicado).",
     },
   };
-  return map[cause] || { text: cause.slice(0, 160), action: "Revisa el Centro de Operaciones o reintenta esta pieza." };
+  const base = cause.includes(":") ? cause.slice(0, cause.indexOf(":")) : cause;
+  const assetHint = cause.includes(":") ? cause.slice(cause.indexOf(":") + 1) : "";
+  const hit = map[cause] || map[base];
+  if (!hit) return { text: cause.slice(0, 160), action: "Revisa el Centro de Operaciones o reintenta esta pieza." };
+  if (!assetHint || !/^\d+$/.test(assetHint)) return hit;
+  return {
+    text: `${hit.text} (foto asset ${assetHint}).`,
+    action: hit.action,
+  };
 }
 
 async function waitInstagramContainer(containerId: string, transport: GraphTransport) {
@@ -449,7 +465,6 @@ export async function publishJob(
   if (campaignJobPaused(publicId)) {
     return { ok: false as const, cause: "campaign_paused" };
   }
-  const isCarousel = (job.format || "").toUpperCase() === "CAROUSEL" || job.publishMode === "album";
   if (settings.mode === "MANUAL" && source === "scheduler") {
     return { ok: false as const, cause: "manual_mode" };
   }
@@ -492,6 +507,11 @@ export async function publishJob(
     updateJob(publicId, { status: "PUBLISHING" });
     recordContentEvent(publicId, "CONTENT_PUBLISHING", `${source}:${live ? "live" : "dry"}`);
     const feeds = versionNumber ? brandedFeeds(publicId, versionNumber, job.mediaOrderJson) : [];
+    // Album path must use ALL ordered feeds. Never silently publish only the first slide.
+    const isCarousel =
+      (job.format || "").toUpperCase() === "CAROUSEL" ||
+      job.publishMode === "album" ||
+      feeds.length >= 2;
     const feed = feeds[0];
     const bytes = feed ? readAssetBytes(feed) : null;
     const results: PlatformPublishResult[] = [];
@@ -617,6 +637,24 @@ export async function publishJob(
           }
         }
       }
+    } else if (isCarousel) {
+      // Dry-run must not report success if the album is incomplete or invalid.
+      const structure = validateCarouselAssets(feeds);
+      if (!feeds.length || !structure.ok) {
+        const cause = !feeds.length ? "image_missing" : structure.errors[0] || "carousel_invalid";
+        for (const platform of platforms) {
+          recordPublication({
+            publicId,
+            platform,
+            dryRun: true,
+            status: "FAILED",
+            caption,
+            error: cause,
+            version: versionNumber,
+          });
+          results.push({ platform, outcome: "failed", cause });
+        }
+      }
     }
 
     for (const platform of platforms) {
@@ -641,6 +679,7 @@ export async function publishJob(
           caption,
           externalPostId: `dry-${publicId}-${platform}`,
           version: versionNumber,
+          error: isCarousel ? `album:${feeds.length}` : "",
         });
         results.push({ platform, outcome: "simulated" });
         continue;

@@ -92,14 +92,14 @@ export function validateLivePublishImages(assets: ContentAsset[]): {
 } {
   for (const asset of assets) {
     const bytes = readAssetBytes(asset);
-    if (!bytes) return { ok: false, cause: "image_missing" };
+    if (!bytes) return { ok: false, cause: `image_missing:${asset.id}` };
     const check = validatePublishImage({
       bytes,
       mime: asset.mimeType,
       width: asset.width,
       height: asset.height,
     });
-    if (!check.ok) return { ok: false, cause: check.cause };
+    if (!check.ok) return { ok: false, cause: `${check.cause}:${asset.id}` };
   }
   return { ok: true };
 }

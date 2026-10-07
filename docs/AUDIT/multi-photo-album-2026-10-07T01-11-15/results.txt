@@ -1,0 +1,37 @@
+PASS [simulacion] isolated
+PASS [simulacion] 1foto ingest · HC-2026-000001
+PASS [simulacion] 1foto publish · ["published","published"]
+PASS [simulacion] 1foto no carousel parent · 6
+PASS [simulacion] 5foto album ingest · HC-2026-000002
+PASS [simulacion] 5foto all items ok · 5
+PASS [simulacion] 5foto same publicId
+PASS [simulacion] 5foto format CAROUSEL
+PASS [simulacion] 5foto mediaOrder length · [6,7,8,9,10]
+PASS [simulacion] 5foto branded feeds
+PASS [simulacion] 5foto detail mediaItems · 5
+PASS [simulacion] 5foto preview/order match
+PASS [simulacion] 5foto publish ok · {"ok":true,"dryRun":false,"results":[{"platform":"instagram","outcome":"published","id":"sim-1791335478533","permalink":"https://example.invalid/sim"},{"platform":"facebook","outcome":"published","id":"sim-feed-1791335478536","permalink":"https://example.invalid/sim"}]}
+PASS [simulacion] 5foto IG children=5 · 5
+PASS [simulacion] 5foto IG parent carousel · 1
+PASS [simulacion] 5foto FB multiphoto signals · feedAttached=5 photos=5
+PASS [simulacion] 5foto both platforms published · instagram:PUBLISHED,facebook:PUBLISHED
+PASS [simulacion] reorder+remove applied · 2
+PASS [simulacion] reorder persisted 4 · 17,16,15,14
+PASS [simulacion] approval cleared
+PASS [simulacion] removed not in order
+PASS [simulacion] invalid album rejected · album_photo_not_ready
+PASS [simulacion] invalid names which failed · good.jpg:ok|bad.bin:invalid_image|good2.jpg:ok
+PASS [simulacion] partial IG published or failed-known · PUBLISHED
+PASS [simulacion] partial first not full success · [{"platform":"instagram","outcome":"published","id":"sim-1791335482933","permalink":"https://example.invalid/sim"},{"platform":"facebook","outcome":"failed","cause":"simulated_facebook_denied"}]
+PASS [simulacion] retry keeps IG · sim-1791335482933
+PASS [simulacion] retry FB pending ok · PUBLISHED
+PASS [simulacion] retry did not recreate IG carousel · 0
+PASS [simulacion] double-click one succeeds · [true,false,null,"locked"]
+PASS [simulacion] double-click other locked or already
+PASS [simulacion] second pass already published · [{"platform":"instagram","outcome":"already","id":"sim-1791335485246","permalink":"https://example.invalid/sim"},{"platform":"facebook","outcome":"already","id":"sim-feed-1791335485249","permalink":"https://example.invalid/sim"}]
+PASS [simulacion] reopen album still 5 · 5
+PASS [simulacion] reopen order stable
+PASS [simulacion] reopen assets on disk · 5
+PASS [simulacion] omit mode = separate N jobs · HC-2026-000007,HC-2026-000008,HC-2026-000009,HC-2026-000010,HC-2026-000011 mode=separate items=omit-sep-0.jpg:HC-2026-000007:false|omit-sep-1.jpg:HC-2026-000008:false|omit-sep-2.jpg:HC-2026-000009:false|omit-sep-3.jpg:HC-2026-000010:false|omit-sep-4.jpg:HC-2026-000011:false
+
+failed=0

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AdminTopBar } from "@/components/admin/AdminTopBar";
 import { ControlDisplayPill } from "@/components/admin/control/ControlDisplayPill";
 import { ControlJobActions } from "@/components/admin/control/ControlJobActions";
+import { ControlMediaEditor } from "@/components/admin/control/ControlMediaEditor";
 import { ControlSubnav } from "@/components/admin/control/ControlSubnav";
 import { getControlJobDetail } from "@/lib/control-service";
 
@@ -20,6 +21,11 @@ export default async function ControlJobPage({
   const job = getControlJobDetail(publicId);
   if (!job) notFound();
   const back = query.from?.startsWith("/admin/contenido") ? query.from : "/admin/contenido";
+  const mediaEditable =
+    job.actions.approve ||
+    job.actions.approveAndSchedule ||
+    job.displayState === "pending_approval" ||
+    job.displayState === "needs_review";
 
   return (
     <>
@@ -36,21 +42,20 @@ export default async function ControlJobPage({
           <h1 className="font-display text-4xl text-navy">Pieza</h1>
           <ControlDisplayPill state={job.displayState} />
         </div>
-        <p className="mt-2 text-sm text-mist">Versión {job.version || "—"} · persistido {job.status}</p>
-        {job.previewAssetId ? (
-          <div className="relative mt-6 aspect-[4/5] max-h-[520px] overflow-hidden rounded-[28px] bg-cream-deep">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/admin/content/media?asset=${job.previewAssetId}`}
-              alt={`Vista de ${job.publicId}`}
-              className="h-full w-full object-cover"
-            />
-          </div>
-        ) : (
-          <p className="mt-6 rounded-2xl border border-navy/10 bg-white px-4 py-6 text-sm text-mist">
-            Esta pieza no tiene imagen almacenada.
-          </p>
-        )}
+        <p className="mt-2 text-sm text-mist">
+          Versión {job.version || "—"} · persistido {job.status}
+          {job.publishMode === "album" || job.format === "CAROUSEL"
+            ? ` · álbum (${job.mediaItems.length} fotos)`
+            : ""}
+        </p>
+        <ControlMediaEditor
+          publicId={job.publicId}
+          version={job.version}
+          publishMode={job.publishMode}
+          format={job.format}
+          mediaItems={job.mediaItems}
+          editable={mediaEditable}
+        />
         <section className="mt-6 rounded-2xl border border-navy/8 bg-white p-5">
           <h2 className="font-display text-2xl text-navy">Texto</h2>
           <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-charcoal/80">
