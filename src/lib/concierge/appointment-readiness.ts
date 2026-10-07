@@ -170,6 +170,31 @@ export function readinessPromptHint(readiness: AppointmentReadiness) {
   return `APPOINTMENT_READINESS: ready=false. Falta SOLO: ${readiness.missingFields.map((f) => labels[f]).join("; ")}. PROHIBIDO preguntar campos que no estén en esa lista. PROHIBIDO pedir "referencia adicional", "dirección precisa" o "algún otro detalle" si no aparecen arriba. NO llames create_appointment. NO digas que la visita ya quedó agendada. Pregunta UNA cosa que falte.`;
 }
 
+/** Short customer-facing ask when a slot is selected but readiness is incomplete. */
+export function readinessCustomerAsk(readiness: AppointmentReadiness): string {
+  const first = readiness.missingFields[0];
+  switch (first) {
+    case "customer_name":
+      return "Anoté el horario. ¿Me confirmas tu nombre completo?";
+    case "contact":
+      return "Anoté el horario. ¿Me dejas un teléfono válido para confirmarte la visita?";
+    case "location":
+      return "Anoté el horario. ¿En qué zona queda la propiedad?";
+    case "building":
+      return "Anoté el horario. ¿Cuál es el nombre del PH o edificio?";
+    case "unit":
+      return "Anoté el horario. ¿Cuál es el apartamento o unidad?";
+    case "property_type":
+      return "Anoté el horario. ¿Es casa, apartamento, PH u oficina?";
+    case "service":
+      return "Anoté el horario. ¿Qué servicio necesitas exactamente?";
+    case "slot":
+      return "¿Qué día y hora te quedan mejor?";
+    default:
+      return "Anoté el horario. Me falta un dato para confirmar la visita.";
+  }
+}
+
 const SLOT_QUESTIONS = [
   "¿Qué día y hora te quedan mejor?",
   "Si tienes un día y hora en mente, dímelo y reviso qué hay disponible en el calendario.",
