@@ -1,0 +1,33 @@
+{
+  "scenario": "fictitious door-open + ask homestead number",
+  "customerPhoneUsedInTest": "+50761112222",
+  "businessPhoneConfigured": "+507 6000-1111",
+  "turns": [
+    {
+      "user": "necesito me puedan abrir la puerta de mi casa",
+      "note": "lockout intent"
+    },
+    {
+      "user": "Ana Prueba",
+      "note": "name"
+    },
+    {
+      "user": "+50761112222",
+      "note": "customer phone — never business"
+    },
+    {
+      "user": "san mi guelito frente al colegio republica de colombia",
+      "note": "location typos ok"
+    },
+    {
+      "user": "cuál es el número",
+      "note": "must answer business contact only"
+    }
+  ],
+  "expected": {
+    "lockout": true,
+    "noInteriorPhotosRequired": true,
+    "businessContactNotCustomer": true,
+    "continueRegistration": true
+  }
+}

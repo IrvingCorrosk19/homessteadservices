@@ -12,6 +12,7 @@ import {
   isHypotheticalSpeech,
   isQuotedThirdPartyCommand,
 } from "@/lib/concierge/speech-act-safety";
+import { detectLockoutIntent } from "@/lib/service-requirements";
 
 export type ActionablePrimaryIntent =
   | "SERVICE_CATALOG_QUESTION"
@@ -165,9 +166,18 @@ export function classifyActionableServiceIntent(
   const visit = VISIT_REQUEST.test(blob) && !/\bantes de (agendar|la cita|confirmar|cotiz)/.test(blob);
   const wantTradePro = WANT_TRADE_PRO.test(blob);
   const customerInfinitive = CUSTOMER_WORK_INFINITIVE.test(blob);
+  // Door-open / locked-out is a concrete Homestead job even without a trade noun.
+  const lockoutAsk = detectLockoutIntent(workText);
   const rawNeed = NEED_OPERATOR.test(blob);
   const genericNeedOnly =
-    rawNeed && genericService && trades.length === 0 && !problem && !workAsk && !customerInfinitive && !wantTradePro;
+    rawNeed &&
+    genericService &&
+    trades.length === 0 &&
+    !problem &&
+    !workAsk &&
+    !customerInfinitive &&
+    !wantTradePro &&
+    !lockoutAsk;
   const underspecifiedNeed =
     rawNeed &&
     trades.length === 0 &&
@@ -175,8 +185,10 @@ export function classifyActionableServiceIntent(
     !workAsk &&
     !visit &&
     !wantTradePro &&
-    !customerInfinitive;
-  const need = (rawNeed && !genericNeedOnly && !underspecifiedNeed) || wantTradePro || customerInfinitive;
+    !customerInfinitive &&
+    !lockoutAsk;
+  const need =
+    (rawNeed && !genericNeedOnly && !underspecifiedNeed) || wantTradePro || customerInfinitive || lockoutAsk;
   const wantGenericCatalog =
     (/\b(quiero|ocupo|busco)\b/.test(blob) || genericNeedOnly) &&
     genericService &&
@@ -194,9 +206,14 @@ export function classifyActionableServiceIntent(
 
   const authorizedNewJob =
     existingOp.hasExplicitNewRequestOperator && trades.length > 0 && !capabilityAsk && !catalogFrame && !priceBrowse && !coverageAsk;
-  const hasConcreteNeed = Boolean(need || workAsk || visit || wantTradePro || customerInfinitive || authorizedNewJob);
+  const hasConcreteNeed = Boolean(
+    need || workAsk || visit || wantTradePro || customerInfinitive || authorizedNewJob || lockoutAsk,
+  );
   const wantsHomesteadAction = hasConcreteNeed;
-  const problemMention = Boolean(problem || (trades.length > 0 && !capabilityAsk && !catalogFrame && !priceBrowse && !coverageAsk));
+  if (lockoutAsk) reasons.push("lockout_door_open");
+  const problemMention = Boolean(
+    problem || lockoutAsk || (trades.length > 0 && !capabilityAsk && !catalogFrame && !priceBrowse && !coverageAsk),
+  );
   const diagnosticAsk = (interrogative || inquiry) && problemMention && !wantsHomesteadAction;
 
   /** A trade word in a statement is a problem/category mention, not a service order. */

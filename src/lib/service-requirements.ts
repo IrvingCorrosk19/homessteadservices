@@ -63,7 +63,7 @@ const DIGITAL_SLOTS: PhotoSlotSpec[] = [
 ];
 
 const LOCKOUT_RE =
-  /\b(qued[eé]\s+afuera|me\s+qued[eé]|no\s+puedo\s+entrar|estoy\s+afuera|afuera\s+de\s+(mi\s+)?(casa|apto|apartamento|oficina|local)|sin\s+llave|no\s+puedo\s+abrir|perd[ií]\s+la\s+llave|llave\s+adentro)\b/i;
+  /\b(qued[eé]\s+afuera|me\s+qued[eé]|no\s+puedo\s+entrar|estoy\s+afuera|afuera\s+de\s+(mi\s+)?(casa|apto|apartamento|oficina|local)|sin\s+llave|no\s+puedo\s+abrir|perd[ií]\s+la\s+llave|llave\s+adentro|me\s+(puedan|pueden|puedes)\s+abr[ií]r(?:\s+la)?\s+puerta|abr[ií]r(?:\s+la)?\s+puerta\s+de\s+mi\s+(casa|apto|apartamento|oficina)|necesito\s+.{0,40}abr[ií]r(?:\s+la)?\s+puerta|apertura\s+de\s+puerta|me\s+abran\s+la\s+puerta)\b/i;
 
 const KEY_DUP_RE = /\b(copia\s+de\s+llave|duplicar\s+llave|sacar\s+copia|llave\s+extra)\b/i;
 const REPAIR_RE = /\b(reparar|arregl|no\s+gira|se\s+trab[oó]|fallando|descompuest)\w*.{0,20}(cerradura|chapa|llav[ií]n)?|(cerradura|chapa).{0,20}(reparar|arregl)/i;

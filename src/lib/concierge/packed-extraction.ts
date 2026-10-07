@@ -168,6 +168,7 @@ const KNOWN_ZONES: Array<{ re: RegExp; label: string }> = [
   { re: /\bpanam[aá]\s+centro\b/i, label: "Panamá Centro" },
   { re: /\bbella\s+vista\b/i, label: "Bella Vista" },
   { re: /\bbetania\b/i, label: "Betania" },
+  { re: /\bsan\s+mi\s*guelito\b/i, label: "San Miguelito" },
   { re: /\bsan\s+miguelito\b/i, label: "San Miguelito" },
   { re: /\btocumen\b/i, label: "Tocumen" },
   { re: /\bjuan\s+d[ií]az\b/i, label: "Juan Díaz" },
@@ -233,6 +234,15 @@ function extractLocation(text: string, state?: ConversationState) {
   );
   if (leading?.[1] && !isGreetingLocationCandidate(leading[1])) return titleCasePhrase(leading[1]);
 
+  // Never treat ops/contact questions or name/phone intros as a location bare-reply.
+  if (
+    /\b(cu[aá]l\s+es|qu[eé]\s+es|c[oó]mo|cu[aá]nto|whats?app|tel[eé]fono|n[uú]mero\s+de\s+homestead|a\s+d[oó]nde\s+llamo|me\s+llamo|mi\s+nombre\s+es|mi\s+n[uú]mero|perd[oó]n\s+mi\s+n[uú]mero)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return "";
+  }
+
   const awaitingLocation =
     state?.facts?.lastAskedField === "location" ||
     /zona|ubicaci[oó]n|d[oó]nde ser[ií]a/i.test(state?.facts?.lastBotQuestion || "");
@@ -244,7 +254,8 @@ function extractLocation(text: string, state?: ConversationState) {
     !detectServices(trimmed).length &&
     !looksLikePhoneAttempt(trimmed) &&
     !/^\d+$/.test(trimmed) &&
-    !/^(si|sí|no|ok|hola|gracias)$/i.test(trimmed)
+    !/^(si|sí|no|ok|hola|gracias)$/i.test(trimmed) &&
+    !/[¿?]/i.test(trimmed)
   ) {
     return titleCasePhrase(trimmed);
   }
@@ -269,11 +280,23 @@ function extractBareUnitReply(text: string, state: ConversationState) {
   const awaiting =
     state.facts?.lastAskedField === "unit" ||
     /apartamento|unidad|n[uú]mero de apartamento|qu[eé] apartamento/i.test(state.facts?.lastBotQuestion || "");
-  const correcting = /\b(perd[oó]n|disculp|mejor dicho|en realidad)\b/i.test(text);
+  // Phone corrections / price questions / bare phone digits must not become unit codes.
+  if (
+    (/\b(n[uú]mero|tel[eé]fono|whats?app)\b/i.test(text) && !/\b(apartamento|apto|unidad)\b/i.test(text)) ||
+    /\b(cu[aá]nto\s+cuesta|precio|tarifa|cotiz)\b/i.test(text) ||
+    looksLikePhoneAttempt(text)
+  ) {
+    return "";
+  }
+  const correcting =
+    /\b(perd[oó]n|disculp|mejor dicho|en realidad)\b/i.test(text) &&
+    /\b(apartamento|apto|unidad)\b/i.test(text);
   if (!awaiting && !correcting) return "";
   const trimmed = text.trim().replace(/\s+/g, "");
-  if (/^(\d+[a-zA-Z]|[a-zA-Z]\d+|\d+)$/i.test(trimmed)) return trimmed.toUpperCase();
-  const embedded = text.match(/\b(?:es\s+)?(\d+\s*[a-zA-Z]|[a-zA-Z]\s*\d+)\b/i);
+  // Reject national phone-length digit strings (7–8) as apartment codes.
+  if (/^\d{7,}$/.test(trimmed)) return "";
+  if (/^(\d+[a-zA-Z]|[a-zA-Z]\d+|\d{1,4})$/i.test(trimmed)) return trimmed.toUpperCase();
+  const embedded = text.match(/\b(?:apto|apartamento|unidad|apt\.?)\s*(?:es\s+)?(\d+\s*[a-zA-Z]?|[a-zA-Z]\s*\d+)\b/i);
   if (embedded?.[1] && (awaiting || correcting)) return embedded[1].replace(/\s+/g, "").toUpperCase();
   return "";
 }
@@ -483,9 +506,17 @@ export function applyPackedExtraction(state: ConversationState, text: string): C
       ? rawLoc
       : "";
   const hasConfirmedLocation = Boolean(state.location || state.facts?.location);
+  const looksLikeQuestion =
+    /[¿?]/.test(text) ||
+    /\b(cu[aá]l\s+es|qu[eé]\s+es|c[oó]mo\s+(los|le|me)|cu[aá]nto|a\s+d[oó]nde)\b/i.test(text);
+  const phoneOrNameCorrection =
+    /\b(n[uú]mero|tel[eé]fono|whats?app|me\s+llamo|mi\s+nombre)\b/i.test(text) &&
+    /\b(perd[oó]n|disculp|correcto|equivoqu|mejor dicho)\b/i.test(text);
   const shouldUpdateLocation =
     Boolean(locCandidate) &&
     !isScheduleOrTimeOnlyMessage(text) &&
+    !looksLikeQuestion &&
+    !phoneOrNameCorrection &&
     (!hasConfirmedLocation || isLocationExplicitCorrection(text));
 
   if (shouldUpdateLocation && locCandidate) {

@@ -24,7 +24,11 @@ export function buildConversationSummary(
 ): ConversationSummary {
   const confirmedFacts: string[] = [];
   if (isPresent(state.name)) confirmedFacts.push(`name:${state.name}`);
-  if (isPresent(state.phone) && state.contactStatus === "VALID") confirmedFacts.push(`phone:${state.phone}`);
+  // Status only — never embed customer E.164 (leaks into LLM as fake business contact).
+  if (isPresent(state.phone) && state.contactStatus === "VALID") confirmedFacts.push("phone:VALID");
+  else if (state.contactStatus && state.contactStatus !== "UNKNOWN") {
+    confirmedFacts.push(`phone:${state.contactStatus}`);
+  }
   if (isPresent(state.location)) confirmedFacts.push(`location:${state.location}`);
   if (isPresent(state.primaryService || state.service)) {
     confirmedFacts.push(`service:${state.primaryService || state.service}`);

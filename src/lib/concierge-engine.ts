@@ -57,6 +57,7 @@ import {
   answerAppointmentTimeQuestion,
   repairSummaryAppointmentTime,
 } from "@/lib/concierge/appointment-authority";
+import { isBusinessContactQuestion } from "@/lib/concierge/business-contact";
 import { answerBookingNudge, answerOperationsQuestion } from "@/lib/concierge/operations-qa";
 import { resolveCancelReferent } from "@/lib/concierge/referential-resolver";
 import {
@@ -263,6 +264,24 @@ function fallbackReply(message: string, state?: ConversationState, lastAssistant
   if (playbook?.bookingStrategy === "PHOTO_REVIEW_FIRST") {
     if (state?.facts?.digitalLockAbandoned === "1" || (service && service !== "locksmith")) {
       return "Perfecto, seguimos con lo que necesitas ahora. Cuéntame un poco más para coordinar.";
+    }
+    const lockout =
+      state?.facts?.serviceIntent === "lockout" || state?.facts?.lockedOut === "1";
+    if (lockout) {
+      const wantsTeamContact =
+        /\b(equipo\s+(me\s+)?contacte|me\s+contacten|que\s+me\s+llamen|prefiero\s+que\s+(me\s+)?contacten|coordinar\s+sin\s+prometer)\b/i.test(
+          message,
+        );
+      if (hasPhone && hasLocation && wantsTeamContact) {
+        return "Queda registrada la apertura para coordinación manual del equipo. No es una visita confirmada ni llegada inmediata; te contactan con lo que ya anotamos. No necesito fotos del interior si estás afuera.";
+      }
+      if (hasPhone && hasLocation) {
+        return "Queda anotada la apertura. ¿Qué día y hora te conviene, o prefieres que el equipo te contacte para coordinar sin prometer llegada inmediata?";
+      }
+      if (hasPhone) {
+        return "Para la apertura me ayuda la zona aproximada (barrio o referencia). Con eso sigo el registro; no necesito fotos del interior si estás afuera.";
+      }
+      return "Para registrar la apertura necesito un teléfono de contacto y la zona. No te pido fotos del interior si no puedes entrar.";
     }
     return "Sigo contigo. Si puedes, envíame una foto de la puerta y la cerradura; con eso avanzamos más rápido.";
   }
@@ -1373,6 +1392,12 @@ export async function conciergeTurn(input: {
       }
       state = {
         ...state,
+        primaryService: state.primaryService || "locksmith",
+        service: state.service || "locksmith",
+        problem:
+          state.problem ||
+          (lockoutNow ? text.slice(0, 240) : state.problem) ||
+          "Apertura / quedé afuera",
         facts: {
           ...(state.facts || {}),
           serviceIntent: "lockout",
@@ -1967,6 +1992,35 @@ export async function conciergeTurn(input: {
     const apptTime = answerAppointmentTimeQuestion(text, repairSummaryAppointmentTime(state));
     const opsQa = answerOperationsQuestion(text);
     const bookingNudge = answerBookingNudge(text, state);
+    // Business contact must never go through the LLM (customer.phone contamination).
+    if (opsQa.handled && isBusinessContactQuestion(text)) {
+      const opsReply = resumeAfterInterruption(opsQa.reply, state);
+      addMessage(input.conversationId, "assistant", opsReply);
+      touchConversation(input.conversationId, { state });
+      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || conversation.leadPublicId || "");
+      return {
+        ok: true as const,
+        reply: opsReply,
+        chips: session.chips,
+        historicalChips: session.historicalChips,
+        leadBanner: session.leadBanner,
+        requestCard: session.requestCard,
+        leadId: state.activeLeadId || conversation.leadPublicId || null,
+        nextAction: "CONTINUE",
+        dryLead: false,
+        whatsappUrl: null,
+        contactUrl: "/contact",
+        ended: false,
+        requiresHuman: false,
+        awaitingSlotSelection: session.awaitingSlotSelection,
+        bookingPending: session.bookingPending,
+        slotGroups: session.slotGroups,
+        serviceContext: session.serviceContext,
+        showResumeBooking: session.showResumeBooking,
+        showPhotoCta: session.showPhotoCta,
+        photosRemaining: session.photosRemaining,
+      };
+    }
     if (/\bcancel/i.test(text)) {
       const cancelRef = resolveCancelReferent(text, {
         appointmentId: state.appointmentId,

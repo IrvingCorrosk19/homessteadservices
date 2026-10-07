@@ -92,28 +92,45 @@ export function applyFactPatch(facts: Record<string, string>, patch: Record<stri
   return next;
 }
 
+function looksLikeNonLocationCorrection(text: string, candidate: string) {
+  if (/\b(n[uú]mero|tel[eé]fono|whats?app|correo|email|nombre)\b/i.test(text)) return true;
+  if (/\d{6,}/.test(candidate)) return true;
+  if (/^(mi|el|la|un|una)\s+(n[uú]mero|tel)/i.test(candidate)) return true;
+  return false;
+}
+
 export function applyLocationCorrection(text: string, current: string) {
   if (isScheduleOrTimeOnlyMessage(text)) return current;
+  // Phone/name corrections must never rewrite location ("perdón mi número es…").
+  if (/\b(n[uú]mero|tel[eé]fono|whats?app)\b/i.test(text) && /\b(perd[oó]n|disculp|correcto|equivoqu)/i.test(text)) {
+    return current;
+  }
   const moved = text.match(
     /\b(?:ya no vivo(?:\s+all[ií])?|ahora (?:estoy|vivo) en)\s*,?\s*([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );
   if (moved?.[1]) {
     const candidate = moved[1].trim();
-    if (!looksLikeScheduleLocationCandidate(candidate)) return candidate;
+    if (!looksLikeScheduleLocationCandidate(candidate) && !looksLikeNonLocationCorrection(text, candidate)) {
+      return candidate;
+    }
   }
   const notIs = text.match(
     /\bno\s+es\s+[^,;.]+,?\s*es\s+([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );
   if (notIs?.[1]) {
     const candidate = notIs[1].trim();
-    if (!looksLikeScheduleLocationCandidate(candidate)) return candidate;
+    if (!looksLikeScheduleLocationCandidate(candidate) && !looksLikeNonLocationCorrection(text, candidate)) {
+      return candidate;
+    }
   }
   const match = text.match(
     /(?:perd[oó]n[,.]?|mejor dicho|me equivoqu[eé][,.]?|no[,.]?\s*estoy en|no[,.]?\s*es|disculpa[,.]?)\s*(?:es\s+|estoy en\s+)?([A-Za-zÁÉÍÓÚáéíóúñÑ][\wÁÉÍÓÚáéíóúñÑ\s]{2,40})/i,
   );
   if (match) {
     const candidate = match[1].trim();
-    if (looksLikeScheduleLocationCandidate(candidate)) return current;
+    if (looksLikeScheduleLocationCandidate(candidate) || looksLikeNonLocationCorrection(text, candidate)) {
+      return current;
+    }
     return candidate;
   }
   return current;
@@ -187,7 +204,17 @@ export function shouldOfferAvailability(playbook: ServicePlaybook, state: Conver
       return false;
     }
   }
-  if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1) return false;
+  // Lockout / apertura: photos are optional — do not block calendar or abandon to a call.
+  const lockout =
+    state.facts?.serviceIntent === "lockout" ||
+    state.facts?.lockedOut === "1";
+  if (
+    playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" &&
+    (state.photoCount || 0) < 1 &&
+    !lockout
+  ) {
+    return false;
+  }
   if (playbook.bookingStrategy === "TECH_REVIEW_FIRST" && state.urgency === "safety") return false;
   if (state.facts?.digitalLockFlow === "1") {
     // already handled above — keep incomplete from offering slots
@@ -207,20 +234,39 @@ export function countQuestions(reply: string) {
   return (reply.match(/¿/g) || []).length || (reply.match(/\?/g) || []).length;
 }
 
+function sanitizeFactsForPrompt(facts: Record<string, string> | undefined) {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(facts || {})) {
+    if (k === "phone" || /phone/i.test(k)) {
+      out[k] = v ? "[customer_phone_on_file]" : "";
+      continue;
+    }
+    if (k === "_conversationSummary" && v) {
+      out[k] = v.replace(/phone:\+?\d[\d\s-]*/gi, "phone:VALID").replace(/\+507\d{7,}/g, "[redacted]");
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
 export function playbookPromptBlock(playbook: ServicePlaybook, state: ConversationState, missing: string[]) {
+  const lockout =
+    state.facts?.serviceIntent === "lockout" || state.facts?.lockedOut === "1";
   return `PLAYBOOK ACTIVO: ${playbook.label} (${playbook.serviceId})
 Objetivo: ${playbook.objective}
-Estrategia de cierre: ${playbook.bookingStrategy}
+Estrategia de cierre: ${lockout ? "SCHEDULE_OR_HANDOFF (lockout: fotos NO obligatorias)" : playbook.bookingStrategy}
 Urgencia actual: ${state.urgency || "normal"}
+Lockout/apertura: ${lockout ? "sí — no exigir fotos interiores/canto; no abandonar a llamada" : "no"}
 Fotos recibidas: ${state.photoCount || 0}
-Hechos: ${JSON.stringify(state.facts || {})}
+Hechos: ${JSON.stringify(sanitizeFactsForPrompt(state.facts))}
 Falta (útil, no interrogatorio): ${missing.join(", ") || "nada crítico"}
-Guía de fotos: ${playbook.photoGuidance}
+Guía de fotos: ${lockout ? "Opcional. Cliente afuera: no pedir frente/interior/canto. Revisar humano si hace falta." : playbook.photoGuidance}
 Por qué las fotos: ${playbook.photoWhy}
 Seguridad: ${playbook.safetyRules}
 ${playbook.unknownCatalog ? "Servicio posiblemente fuera de catálogo: captura oportunidad, NO afirmes que sí ni que no." : ""}
 NO preguntes campos NOT_NEEDED. NO bloquees por USEFUL. Contacto REQUIRED solo para crear HS o cita.
-Si PHOTO_REVIEW_FIRST y aún no hay fotos, invita a enviarlas con naturalidad. No prometas cita hasta que el cliente la pida y haya disponibilidad real.
+${lockout ? "Lockout: NO invites fotos interiores/canto; continúa registro o revisión humana." : "Si PHOTO_REVIEW_FIRST y aún no hay fotos, invita a enviarlas con naturalidad."} No prometas cita hasta que el cliente la pida y haya disponibilidad real.
 Si ya hay suficiente contexto, haz micro-cierre: propone el siguiente paso en vez de otra pregunta.`;
 }
 

@@ -2,6 +2,7 @@
  * Natural-style guard — strip robotic repetition, do not rotate canned openers.
  */
 import type { ConversationState } from "@/lib/concierge-store";
+import { scrubCustomerPhoneLeak } from "@/lib/concierge/business-contact";
 import { isPresent } from "@/lib/concierge/canonical-state";
 
 const ROBOTIC_OPENERS = [
@@ -105,6 +106,12 @@ export function applyNaturalStyleGuard(
   if (detectKnownFactEcho(text, state, Boolean(opts.bookedThisTurn))) {
     text = compressKnownFactEcho(text, state);
     flags.push("known_fact_echo_compressed");
+  }
+  // Hard stop: never present the customer's phone as Homestead's business contact.
+  const scrubbed = scrubCustomerPhoneLeak(text, state.phone);
+  if (scrubbed.scrubbed) {
+    text = scrubbed.reply;
+    flags.push("customer_phone_business_leak_scrubbed");
   }
   return { reply: text, styleFlags: flags };
 }

@@ -64,8 +64,10 @@ export function buildWhatsAppUrl(message?: string) {
 }
 
 export function phoneHref() {
-  if (!contact.phone.isConfigured) return null;
-  return `tel:${contact.phone.value.replace(/[^\d+]/g, "")}`;
+  const live = (process.env.NEXT_PUBLIC_PHONE || "").trim();
+  const value = live || (contact.phone.isConfigured ? contact.phone.value : "");
+  if (!value) return null;
+  return `tel:${value.replace(/[^\d+]/g, "")}`;
 }
 
 export function emailHref() {

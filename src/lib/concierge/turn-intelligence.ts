@@ -185,7 +185,11 @@ export function hasSufficientContext(state: ConversationState, playbook: Service
     return meta?.need === "REQUIRED";
   });
   if (critical.length) return false;
-  if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1) return false;
+  const lockout =
+    state.facts?.serviceIntent === "lockout" || state.facts?.lockedOut === "1";
+  if (playbook.bookingStrategy === "PHOTO_REVIEW_FIRST" && (state.photoCount || 0) < 1 && !lockout) {
+    return false;
+  }
   if (state.contactStatus !== "VALID") return false;
   return Boolean(state.problem || state.service || state.facts?.symptom || state.facts?.need);
 }

@@ -1,9 +1,17 @@
 /**
- * Deterministic answers for general operations questions (hours, coverage, pricing).
+ * Deterministic answers for general operations questions (hours, coverage, pricing, business contact).
  */
 import type { ConversationState } from "@/lib/concierge-store";
+import {
+  formatBusinessContactReply,
+  isBusinessContactQuestion,
+} from "@/lib/concierge/business-contact";
 
 export function answerOperationsQuestion(text: string): { handled: boolean; reply: string } {
+  if (isBusinessContactQuestion(text)) {
+    const contact = formatBusinessContactReply();
+    return { handled: true, reply: contact.reply };
+  }
   if (/\b(cu[aá]nto cuesta|precio|vale|tarifa|cotiz|costo)\b/i.test(text)) {
     return {
       handled: true,

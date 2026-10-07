@@ -1,0 +1,29 @@
+PASS [simulacion] lockout phrase is actionable
+PASS [simulacion] start · 029c483f-9bc8-4818-9dea-224abeab3f74
+PASS [simulacion] homestead number reply has no customer digits · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.
+PASS [simulacion] homestead number uses official or published business · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.
+PASS [simulacion] no auto-abandon to call-only
+PASS [simulacion] customer phone retained on state · +50761112222
+PASS [simulacion] location retained · San Miguelito
+PASS [simulacion] lockout intent · "lockout"
+PASS [simulacion] locksmith service set · locksmith
+PASS [simulacion] phone correction kept (last wins) · +50762223333
+PASS [simulacion] location survived phone correction · San Miguelito
+PASS [simulacion] unit not polluted by phone digits · (none)
+PASS [simulacion] price answer no invent invents · El costo depende del diagnóstico en sitio; no hay una tarifa publicada. El técnico te confirma el alcance antes de traba
+PASS [simulacion] price reply no customer phone as biz
+PASS [simulacion] continues after price · Todavía no confirmé esa visita en el calendario. Si te parece, reviso horarios reales y te los ofrezco para que elijas.
+PASS [simulacion] no interior photo demand while outside
+PASS [simulacion] HS folio persisted · HS-2026-000001
+PASS [simulacion] folio visible in reply or card
+PASS [simulacion] service_requests row exists · HS-2026-000001
+PASS [simulacion] HS phone is corrected customer · +50762223333
+PASS [simulacion] HS not using business phone as customer
+PASS [simulacion] control.push.new_request enqueued · [{"event_id":"35bdcc56-279d-4abb-b401-afe2c9785882","event_type":"control.push.new_request","status":"DELIVERED","correlation_id":"HS-2026-000001"}]
+PASS [simulacion] absent business contact admits unavailable · En este momento no tengo un teléfono o WhatsApp comercial verificado para compartir aquí. Seguimos atendiendo tu caso en
+PASS [simulacion] absent business does not echo customer
+PASS [simulacion] session2 business whatsapp official · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [simulacion] session2 no customer A phone
+PASS [simulacion] session2 customer B phone not A · +50763334444
+PASS [simulacion] session1 still has customer A corrected phone
+failed=0

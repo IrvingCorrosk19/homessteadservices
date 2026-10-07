@@ -1,0 +1,197 @@
+{
+  "cid": "029c483f-9bc8-4818-9dea-224abeab3f74",
+  "folio": "HS-2026-000001",
+  "turns": [
+    {
+      "user": "necesito me puedan abrir la puerta de mi casa",
+      "reply": "Quedó registrada HS-2026-000001 de cerrajería. Seguimos con lo que haga falta.\n\nPara registrar la apertura necesito un teléfono de contacto y la zona. No te pido fotos del interior si no puedes entrar.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "me llamo Ana Prueba",
+      "reply": "Para registrar la apertura necesito un teléfono de contacto y la zona. No te pido fotos del interior si no puedes entrar.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "61112222",
+      "reply": "Para la apertura me ayuda la zona aproximada (barrio o referencia). Con eso sigo el registro; no necesito fotos del interior si estás afuera.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "san mi guelito frente al colegio republica de colombia",
+      "reply": "Queda anotada la apertura. ¿Qué día y hora te conviene, o prefieres que el equipo te contacte para coordinar sin prometer llegada inmediata?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "cuál es el número",
+      "reply": "WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "perdón mi número correcto es 62223333",
+      "reply": "Queda anotada la apertura. ¿Qué día y hora te conviene, o prefieres que el equipo te contacte para coordinar sin prometer llegada inmediata?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "y cuánto cuesta?",
+      "reply": "El costo depende del diagnóstico en sitio; no hay una tarifa publicada. El técnico te confirma el alcance antes de trabajar. Seguimos con lo que ya veníamos coordinando.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    },
+    {
+      "user": "ok sigamos con la apertura; prefiero que el equipo me contacte",
+      "reply": "Todavía no confirmé esa visita en el calendario. Si te parece, reviso horarios reales y te los ofrezco para que elijas.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Cerrajería",
+        "status": "open",
+        "when": ""
+      },
+      "ok": true
+    }
+  ],
+  "state": {
+    "service": "locksmith",
+    "problem": "necesito me puedan abrir la puerta de mi casa",
+    "location": "San Miguelito",
+    "name": "número correcto es",
+    "phone": "+50762223333",
+    "email": "",
+    "propertyType": "house",
+    "preferredTime": "",
+    "preferredDate": "",
+    "intent": "",
+    "funnelStage": "HANDOFF",
+    "leadTemperature": "COLD",
+    "photoCount": 0,
+    "contactStatus": "VALID",
+    "offeredSlots": [],
+    "pendingSlot": null,
+    "appointmentId": "",
+    "awaitingSlotSelection": false,
+    "slotOfferToken": "",
+    "activeLeadId": "HS-2026-000001",
+    "historicalSlotLabels": [],
+    "humanRequested": false,
+    "lastAvailabilityAt": "",
+    "detectedServices": [],
+    "primaryService": "locksmith",
+    "secondaryServices": [],
+    "facts": {
+      "propertyType": "house",
+      "stateVersion": "8",
+      "serviceIntent": "lockout",
+      "lockedOut": "1",
+      "_conversationObjective": "{\"primaryGoal\":\"CONTINUE\",\"secondaryGoals\":[],\"currentTopic\":\"CONTINUE\",\"interruptedGoal\":\"\",\"pendingBusinessAction\":\"QUERY_AVAILABILITY\",\"customerQuestion\":\"\",\"conversationPhase\":\"DISCOVERY\"}",
+      "_conversationSummary": "{\"customerGoal\":\"CONTINUE\",\"confirmedFacts\":[\"name:número correcto es\",\"phone:VALID\",\"location:San Miguelito\",\"service:locksmith\"],\"unresolvedQuestions\":[\"slot\"],\"activeRequests\":[\"HS-2026-000001\"],\"appointments\":[],\"serviceContexts\":[],\"declinedFields\":[],\"importantCorrections\":[],\"commitmentsMade\":[],\"updatedAt\":\"2026-10-07T02:02:13.166Z\"}",
+      "_plannerGoal": "CONTINUE",
+      "activeRequestCleared": "",
+      "lastActiveRequestId": "HS-2026-000001",
+      "serviceFactSource": "BUSINESS_DB",
+      "requestFolioShown": "1",
+      "lastAskedField": "slot",
+      "lastBotQuestion": "Queda registrada la apertura para coordinación manual del equipo. No es una visita confirmada ni llegada inmediata; te contactan con lo que ya anotamos. No necesito fotos del interior si estás afuera.",
+      "askCount_location": "2",
+      "_recentOpenings": "[\"para\",\"queda\",\"queda\",\"todavia\"]",
+      "askCount_slot": "1",
+      "location": "San Miguelito",
+      "retrievedCustomerContext": "{\"customerId\":3,\"priorRequests\":[{\"publicId\":\"HS-2026-000001\",\"service\":\"locksmith\",\"status\":\"NEW\",\"createdAt\":\"2026-10-07T02:02:13.057Z\"}],\"generalLocation\":\"San Miguelito\"}",
+      "historicalRequestIds": "",
+      "catalogInquiry": "1",
+      "pendingAction": "QUERY_AVAILABILITY",
+      "calendarActionState": "PENDING_CONFIRMATION"
+    },
+    "urgency": "normal",
+    "bookingIntent": true,
+    "bookingStrategy": "PHOTO_REVIEW_FIRST",
+    "bookingSuspended": true,
+    "questionsAsked": 2,
+    "humanHandoffRequested": false,
+    "needsReview": false,
+    "factConfidence": {
+      "name": "EXPLICIT",
+      "phone": "EXPLICIT",
+      "location": "EXPLICIT"
+    },
+    "corrections": []
+  },
+  "hsRow": {
+    "public_id": "HS-2026-000001",
+    "phone": "+50762223333",
+    "name": "número correcto es",
+    "service": "locksmith",
+    "message": "[Asistente web Homestead]\nCerrajería\nZona: San Miguelito\nnecesito me puedan abrir la puerta de mi casa\nZona: San Miguelito. Tipo: house. ",
+    "facts_json": "{\"service\":\"locksmith\",\"facts\":{\"propertyType\":\"house\",\"stateVersion\":\"8\",\"serviceIntent\":\"lockout\",\"lockedOut\":\"1\",\"_conversationObjective\":\"{\\\"primaryGoal\\\":\\\"CONTINUE\\\",\\\"secondaryGoals\\\":[],\\\"currentTopic\\\":\\\"CONTINUE\\\",\\\"interruptedGoal\\\":\\\"\\\",\\\"pendingBusinessAction\\\":\\\"QUERY_AVAILABILITY\\\",\\\"customerQuestion\\\":\\\"\\\",\\\"conversationPhase\\\":\\\"DISCOVERY\\\"}\",\"_conversationSummary\":\"{\\\"customerGoal\\\":\\\"CONTINUE\\\",\\\"confirmedFacts\\\":[\\\"name:número correcto es\\\",\\\"phone:VALID\\\",\\\"location:San Miguelito\\\",\\\"service:locksmith\\\"],\\\"unresolvedQuestions\\\":[\\\"slot\\\"],\\\"activeRequests\\\":[\\\"HS-2026-000001\\\"],\\\"appointments\\\":[],\\\"serviceContexts\\\":[],\\\"declinedFields\\\":[],\\\"importantCorrections\\\":[],\\\"commitmentsMade\\\":[],\\\"updatedAt\\\":\\\"2026-10-07T02:02:13.166Z\\\"}\",\"_plannerGoal\":\"CONTINUE\",\"activeRequestCleared\":\"\",\"lastActiveRequestId\":\"HS-2026-000001\",\"serviceFactSource\":\"BUSINESS_DB\",\"requestFolioShown\":\"1\",\"lastAskedField\":\"slot\",\"lastBotQuestion\":\"Queda anotada la apertura. ¿Qué día y hora te conviene, o prefieres que el equipo te contacte para coordinar sin prometer llegada inmediata?\",\"askCount_location\":\"2\",\"_recentOpenings\":\"[\\\"para\\\",\\\"para\\\",\\\"queda\\\",\\\"queda\\\"]\",\"askCount_slot\":\"1\",\"location\":\"San Miguelito\",\"retrievedCustomerContext\":\"{\\\"customerId\\\":3,\\\"priorRequests\\\":[{\\\"publicId\\\":\\\"HS-2026-000001\\\",\\\"service\\\":\\\"locksmith\\\",\\\"status\\\":\\\"NEW\\\",\\\"createdAt\\\":\\\"2026-10-07T02:02:13.057Z\\\"}],\\\"generalLocation\\\":\\\"San Miguelito\\\"}\",\"historicalRequestIds\":\"\",\"catalogInquiry\":\"1\"},\"photoCount\":0,\"urgency\":\"normal\",\"bookingStrategy\":\"PHOTO_REVIEW_FIRST\",\"needsReview\":false,\"location\":\"San Miguelito\",\"preferredDate\":\"\",\"preferredTime\":\"\",\"lifecycle\":\"COLLECTING_DETAILS\"}"
+  },
+  "pushRows": [
+    {
+      "event_id": "35bdcc56-279d-4abb-b401-afe2c9785882",
+      "event_type": "control.push.new_request",
+      "status": "DELIVERED",
+      "correlation_id": "HS-2026-000001"
+    }
+  ],
+  "businessChannels": {
+    "brand": "HOMESTEAD SERVICES",
+    "phone": "+507 6000-1111",
+    "phoneHref": "tel:+50760001111",
+    "whatsappDisplay": "+507 6661-6580",
+    "whatsappUrl": "https://wa.me/50766616580",
+    "email": null,
+    "anyVerified": true
+  },
+  "session2": {
+    "cid2": "10cf113e-479a-4540-a9f5-3c95dc6b0eac",
+    "reply": "WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.",
+    "phone": "+50763334444"
+  }
+}

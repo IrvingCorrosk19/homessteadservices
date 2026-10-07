@@ -344,12 +344,31 @@ export function authorizeConversationAction(
       const problem = String(ctx.state?.problem || ctx.state?.facts?.need || "").trim();
       const hasService = Boolean(service && service !== "unknown" && service !== "other");
       const hasProblem = problem.length >= 8;
+      const lockout =
+        ctx.state?.facts?.serviceIntent === "lockout" || ctx.state?.facts?.lockedOut === "1";
+      const hasContact = ctx.state?.contactStatus === "VALID";
+      const hasLocation = Boolean(ctx.state?.location?.trim());
       const scheduling =
         Boolean(ctx.state?.bookingIntent) ||
         Boolean(ctx.state?.pendingSlot?.date) ||
         /\b(me\s+sirve|esa\s+hora|ese\s+horario|opci[oó]n|mañana|\d{1,2}:\d{2}|a\.?\s*m\.?|p\.?\s*m\.?)\b/i.test(
           ctx.text || "",
         );
+      const teamContact =
+        /\b(equipo\s+(me\s+)?contacte|me\s+contacten|que\s+me\s+llamen|coordinar\s+sin\s+prometer|prefiero\s+que\s+(me\s+)?contacten)\b/i.test(
+          ctx.text || "",
+        );
+      // Lockout with phone+location: open HS without forcing photos or a confirmed visit.
+      if (
+        !ctx.state?.activeLeadId &&
+        lockout &&
+        hasContact &&
+        hasLocation &&
+        (hasService || hasProblem) &&
+        (scheduling || teamContact || hasLocation)
+      ) {
+        return allow("lockout_ready_create");
+      }
       if (!ctx.state?.activeLeadId && (hasService || hasProblem) && scheduling) {
         return allow("continue_pending_service_create");
       }

@@ -159,6 +159,14 @@ export function serializeFactGraph(graph: Record<string, CognitiveFact>): string
   const slim: Record<string, { v: string | null; s: FactStatus }> = {};
   for (const [k, f] of Object.entries(graph)) {
     if (f.status === "SUPERSEDED") continue;
+    // Never inject raw customer phone digits into the model prompt (business-contact confusion).
+    if (k === "phone" || k.startsWith("phone")) {
+      slim[k] = {
+        v: f.value ? "[customer_phone_on_file]" : null,
+        s: f.status,
+      };
+      continue;
+    }
     slim[k] = { v: f.value, s: f.status };
   }
   return JSON.stringify(slim);

@@ -78,12 +78,20 @@ export function applyContradictionResolution(state: ConversationState, text: str
     graphChanged = true;
   }
 
-  const unitCorr = text.match(
-    /\b(?:perd[oó]n|disculp|mejor dicho|en realidad)[^.]{0,24}?(?:es\s+)?(\d+\s*[a-zA-Z]|[a-zA-Z]\s*\d+)\b/i,
-  );
+  // Only treat as apartment/unit correction when the message is about apto/unidad —
+  // never "perdón mi número es 6222…" (phone) which previously matched as S6222….
+  const unitCorr =
+    /\b(apartamento|apto|unidad|apt\.?)\b/i.test(text) &&
+    !/\b(n[uú]mero|tel[eé]fono|whats?app)\b/i.test(text)
+      ? text.match(
+          /\b(?:perd[oó]n|disculp|mejor dicho|en realidad)[^.]{0,40}?(?:apartamento|apto|unidad|apt\.?)[^.]{0,12}?(?:es\s+)?(\d+\s*[a-zA-Z]?|[a-zA-Z]\s*\d{1,4})\b/i,
+        )
+      : null;
   if (unitCorr?.[1]) {
     const unit = unitCorr[1].replace(/\s+/g, "").toUpperCase();
-    if (unit !== (next.facts.unit || next.facts.apartment || "")) {
+    if (/^\d{7,}$/.test(unit)) {
+      // phone-length digit string — ignore
+    } else if (unit !== (next.facts.unit || next.facts.apartment || "")) {
       next.facts.unit = unit;
       next.facts.apartment = unit;
       supersedeFact(graph, "unit", unit, { source: "USER_EXPLICIT" });

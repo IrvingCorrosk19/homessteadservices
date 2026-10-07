@@ -1,0 +1,29 @@
+PASS [simulacion] build marker · v3.2-nc-bizsep
+PASS [simulacion] business phone from config · +507 6000-1111
+PASS [simulacion] business whatsapp official · +507 6661-6580
+PASS [simulacion] business never equals customer A
+PASS [simulacion] q: cuál es el número
+PASS [simulacion] q: teléfono de ustedes
+PASS [simulacion] q: whatsapp homestead
+PASS [simulacion] not q: te paso mi número
+PASS [simulacion] not q: mi teléfono es
+PASS [simulacion] ops handled
+PASS [simulacion] ops uses business not customer · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [simulacion] ops mentions homestead or whatsapp · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [simulacion] scrub replaces customer-as-business · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.
+PASS [simulacion] fact graph masks phone digits · {"name":{"v":"Ana Prueba","s":"CONFIRMED"},"phone":{"v":"[customer_phone_on_file]","s":"CONFIRMED"},"location":{"v":"San Miguelito","s":"KNOWN"},"primaryService":{"v":"locksmith","s":"KNOWN"},"diagnosis":{"v":null,"s":"UNKNOWN"}}
+PASS [simulacion] summary no raw phone · name:Ana Prueba|phone:VALID|location:San Miguelito|service:locksmith
+PASS [simulacion] lockout: me puedan abrir la puerta
+PASS [simulacion] lockout: quedé afuera
+PASS [simulacion] lockout no required photos · lockout
+PASS [simulacion] lockout can offer availability without photos
+PASS [simulacion] leak detected
+PASS [simulacion] style guard scrubs · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [simulacion] prompt has business separation
+PASS [simulacion] prompt has verified contact lines
+PASS [simulacion] prompt never contains customer A
+PASS [simulacion] session A masked
+PASS [simulacion] session B masked
+PASS [simulacion] business reply identical across sessions
+PASS [simulacion] business reply has no A or B digits · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seg
+failed=0
