@@ -1,0 +1,107 @@
+{
+  "cid": "",
+  "results": [
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    }
+  ],
+  "transcript": [
+    {
+      "role": "user",
+      "text": "tengo goteras en mi casa"
+    },
+    {
+      "role": "assistant",
+      "text": "null"
+    },
+    {
+      "role": "user",
+      "text": "cuando llueve cae agua arriba de la cocina"
+    },
+    {
+      "role": "assistant",
+      "text": "null"
+    },
+    {
+      "role": "user",
+      "text": "me llamo Ana Perez, telefono 60001122"
+    },
+    {
+      "role": "assistant",
+      "text": "null"
+    },
+    {
+      "role": "user",
+      "text": "vivo en Costa del Este, PH Marbella, apto 12B"
+    },
+    {
+      "role": "assistant",
+      "text": "null"
+    },
+    {
+      "role": "user",
+      "text": "mañana a las 12 y media"
+    },
+    {
+      "role": "assistant",
+      "text": "null"
+    },
+    {
+      "role": "user",
+      "text": "tengo goteras en mi casa"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "cuando llueve cae agua arriba de la cocina"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "Ana Ruiz, 60001133"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "Costa del Este, casa, cerca del mall"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "mañana a las 12:30"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    }
+  ]
+}

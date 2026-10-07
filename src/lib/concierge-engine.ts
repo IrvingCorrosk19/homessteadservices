@@ -45,7 +45,7 @@ import {
   questionEconomyBlock,
   shouldFlagOverquestioning,
 } from "@/lib/concierge/turn-intelligence";
-import { getAppointmentReadiness, readinessPromptHint } from "@/lib/concierge/appointment-readiness";
+import { getAppointmentReadiness, readinessCustomerAsk, readinessPromptHint } from "@/lib/concierge/appointment-readiness";
 import {
   determineNextAction,
   enforceDeterministicAsk,
@@ -518,13 +518,36 @@ export async function conciergeTurn(input: {
 
     const cancelIntent = detectCustomerCancellationIntent(text, state);
     const skipCancelMutation = isHypotheticalSpeech(text) || isQuotedThirdPartyCommand(text);
-    const pendingCancelIds = (state.facts?.pendingCancelRequestIds || "")
+    let pendingCancelIds = (state.facts?.pendingCancelRequestIds || "")
       .split("|")
       .map((id) => id.trim().toUpperCase())
       .filter(Boolean);
-    const pendingCancelAction = state.facts?.pendingAction || "";
+    let pendingCancelAction = state.facts?.pendingAction || "";
     const shortCancelReply = resolveShortReplyIntent(text, state);
     let cancelFlowHandled = false;
+
+    // Recover lost pending confirmation: "sí, cancélala" with an active owned HS.
+    const affirmCancelPhrase =
+      /^(s[ií]|ok|dale|claro|perfecto|de\s+acuerdo)[,!]?\s+(por\s+favor[,!]?\s+)?(cancel[ae]|anul[ae]|canc[eé]lala|anulala)\b/i.test(
+        text.trim(),
+      );
+    if (
+      !skipCancelMutation &&
+      affirmCancelPhrase &&
+      !pendingCancelIds.length &&
+      state.activeLeadId &&
+      !state.activeLeadId.startsWith("DRY-")
+    ) {
+      pendingCancelIds = [String(state.activeLeadId).toUpperCase()];
+      pendingCancelAction = "CONFIRM_CANCEL_REQUEST";
+      state = markPendingCancelConfirmation(
+        state,
+        pendingCancelIds,
+        state.facts?.lastBotQuestion || "¿Confirmas la cancelación?",
+        "ONE",
+        "quiero cancelar mi solicitud",
+      );
+    }
 
     // Bound confirmation / decline for a pending cancel — never reuse an old "sí".
     if (
@@ -533,6 +556,7 @@ export async function conciergeTurn(input: {
       pendingCancelIds.length &&
       (shortCancelReply === "PRESERVE_APPOINTMENT" ||
         shortCancelReply === "CONFIRM_CANCEL" ||
+        affirmCancelPhrase ||
         isNegativeResponse(text) ||
         isAffirmativeResponse(text) ||
         cancelIntent.kind === "CANCEL_REQUEST")
@@ -545,6 +569,7 @@ export async function conciergeTurn(input: {
         cancelReply = cancelConfirmationKeptReply();
       } else if (
         shortCancelReply === "CONFIRM_CANCEL" ||
+        affirmCancelPhrase ||
         (isAffirmativeResponse(text) &&
           (cancelIntent.kind === "CANCEL_REQUEST" || pendingCancelAction === "CONFIRM_CANCEL_REQUEST"))
       ) {
@@ -555,7 +580,10 @@ export async function conciergeTurn(input: {
         const pendingSourceText = state.facts?.pendingCancelSourceText || "";
         for (const requestId of pendingCancelIds) {
           const cancelAuth = authorizeConversationAction("CANCEL_REQUEST", {
-            text: pendingSourceText || text,
+            text:
+              state.facts?.pendingCancelSourceText ||
+              pendingSourceText ||
+              (affirmCancelPhrase ? "quiero cancelar mi solicitud" : text),
             state,
             conversationId: input.conversationId,
             targetId: requestId,
@@ -1628,45 +1656,67 @@ export async function conciergeTurn(input: {
       addEvent(input.conversationId, "REQUEST_CREATE_FAILED");
     }
 
-    if (slotSelectedThisTurn && isSlotConfirmed(state)) {
-      const slotReply = formatSlotSelectionConfirmation(state);
-      const slotReplyBody = requestAnnounce ? `${requestAnnounce}\n\n${slotReply}` : slotReply;
-      addMessage(input.conversationId, "assistant", slotReplyBody);
-      touchConversation(input.conversationId, {
-        state,
-        leadPublicId: state.activeLeadId || clearedLeadPublicId,
-      });
+    if (slotSelectedThisTurn && isSlotConfirmed(state) && !state.appointmentId) {
+      const readiness = getAppointmentReadiness(state, state.pendingSlot);
+      if (!readiness.ready) {
+        const askDecision = determineNextAction(state, { userText: text });
+        const ask =
+          (askDecision.cannedQuestion && !/APPOINTMENT_READINESS/i.test(askDecision.cannedQuestion)
+            ? askDecision.cannedQuestion
+            : "") ||
+          readinessCustomerAsk(readiness) ||
+          "Con el horario anotado, ¿me confirmas la zona para completar la solicitud?";
+        const body = requestAnnounce ? `${requestAnnounce}\n\n${ask}` : ask;
+        addMessage(input.conversationId, "assistant", body);
+        touchConversation(input.conversationId, {
+          state,
+          leadPublicId: state.activeLeadId || clearedLeadPublicId,
+        });
+        logTurnStateTrace({
+          conversationId: input.conversationId,
+          stage: "SLOT_SELECTED_NEEDS_DATA",
+          before: stateBeforeTurn,
+          after: state,
+          attachmentCount: lockTurnPolicy.attachmentCount,
+          nextAction: askDecision.action,
+          responseSource: "slot_selection_incomplete",
+        });
+        const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
+        return {
+          ok: true as const,
+          reply: body,
+          chips: [],
+          historicalChips: session.historicalChips,
+          leadBanner: session.leadBanner,
+          requestCard: session.requestCard,
+          nextAction: askDecision.action,
+          leadId: state.activeLeadId || null,
+          dryLead: false,
+          whatsappUrl: null,
+          contactUrl: "/contact",
+          ended: false,
+          requiresHuman: false,
+          awaitingSlotSelection: false,
+          bookingPending: Boolean(state.pendingSlot),
+          slotGroups: [],
+          serviceContext: session.serviceContext,
+          showResumeBooking: false,
+          showPhotoCta: session.showPhotoCta,
+          photosRemaining: session.photosRemaining,
+        };
+      }
+      // Ready to book: do NOT return an intermediate "reviso y confirmo".
+      // Fall through so create_appointment persists and the client gets folio + final confirm.
       logTurnStateTrace({
         conversationId: input.conversationId,
-        stage: "SLOT_SELECTED_EARLY_RETURN",
+        stage: "SLOT_SELECTED_CONTINUE_BOOK",
         before: stateBeforeTurn,
         after: state,
         attachmentCount: lockTurnPolicy.attachmentCount,
         nextAction: "CONFIRM_OR_BOOK",
         responseSource: "slot_selection",
       });
-      const session = buildSessionSnapshot(state, Date.now(), state.activeLeadId || "");
-      return {
-        ok: true as const,
-        reply: slotReplyBody,
-        chips: [],
-        historicalChips: session.historicalChips,
-        leadBanner: session.leadBanner,
-        nextAction: "CONFIRM_OR_BOOK",
-        leadId: state.activeLeadId || null,
-        dryLead: false,
-        whatsappUrl: null,
-        contactUrl: "/contact",
-        ended: false,
-        requiresHuman: false,
-        awaitingSlotSelection: false,
-        bookingPending: false,
-        slotGroups: [],
-        serviceContext: session.serviceContext,
-        showResumeBooking: false,
-        showPhotoCta: session.showPhotoCta,
-        photosRemaining: session.photosRemaining,
-      };
+      addEvent(input.conversationId, "SLOT_SELECTED_CONTINUE_BOOK");
     }
 
     let availabilityHint = "";

@@ -1,0 +1,316 @@
+{
+  "cid": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c",
+  "transcript": [
+    {
+      "user": "mi aire prende pero no enfria",
+      "reply": "Quedó registrada HS-2026-000280 de aire acondicionado. Seguimos con lo que haga falta.\n\nPara poder ayudarte con el problema de tu aire acondicionado, necesito saber en qué área te encuentras. ¿Podrías indicarme la zona o barrio donde necesitas el servicio?",
+      "leadId": "HS-2026-000280",
+      "created": true,
+      "appt": null
+    },
+    {
+      "user": "cuanto cuesta la visita?",
+      "reply": "El costo de la visita para evaluar tu aire acondicionado depende del diagnóstico que se realice en el lugar. El técnico podrá confirmar el alcance y los costos antes de comenzar cualquier trabajo.\n\nPara avanzar con la solicitud, ¿puedes proporcionarme tu nombre y un número de teléfono de contacto?",
+      "leadId": "HS-2026-000280",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "ok sigamos con la solicitud",
+      "reply": "Para continuar, por favor indícame tu nombre y un número de teléfono de contacto. Con esta información, podremos avanzar en la programación de la visita para revisar tu aire acondicionado.",
+      "leadId": "HS-2026-000280",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "Pedro Gomez 60002212",
+      "reply": "Gracias por la información, Pedro. Ahora, para poder programar la visita, ¿tienes alguna fecha y hora preferida para que el técnico revise tu aire acondicionado?",
+      "leadId": "HS-2026-000280",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "El Cangrejo, apartamento 5A",
+      "reply": "Revisé la agenda. Estos horarios sí están libres: miércoles, 7 oct, 8:00 a. m.; miércoles, 7 oct, 10:00 a. m.; miércoles, 7 oct, 2:00 p. m.; miércoles, 7 oct, 4:00 p. m.. ¿Cuál te queda mejor?",
+      "leadId": "HS-2026-000280",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "pasado mañana en la mañana",
+      "reply": "Para el jueves 8 de octubre, tengo disponibles los siguientes horarios en la mañana:\n\n- 8:00 a. m.\n- 10:00 a. m.\n- 12:00 p. m.\n\nPor favor, dime cuál de estos horarios te conviene más para programar la visita.",
+      "leadId": "HS-2026-000280",
+      "created": false,
+      "appt": null
+    }
+  ],
+  "results": [
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Quedó registrada HS-2026-000280 de aire acondicionado. Seguimos con lo que haga falta.\n\nPara poder ayudarte con el problema de tu aire acondicionado, necesito saber en qué área te encuentras. ¿Podrías indicarme la zona o barrio donde necesitas el servicio?",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": true,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "El costo de la visita para evaluar tu aire acondicionado depende del diagnóstico que se realice en el lugar. El técnico podrá confirmar el alcance y los costos antes de comenzar cualquier trabajo.\n\nPara avanzar con la solicitud, ¿puedes proporcionarme tu nombre y un número de teléfono de contacto?",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Para continuar, por favor indícame tu nombre y un número de teléfono de contacto. Con esta información, podremos avanzar en la programación de la visita para revisar tu aire acondicionado.",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Gracias por la información, Pedro. Ahora, para poder programar la visita, ¿tienes alguna fecha y hora preferida para que el técnico revise tu aire acondicionado?",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Revisé la agenda. Estos horarios sí están libres: miércoles, 7 oct, 8:00 a. m.; miércoles, 7 oct, 10:00 a. m.; miércoles, 7 oct, 2:00 p. m.; miércoles, 7 oct, 4:00 p. m.. ¿Cuál te queda mejor?",
+        "chips": [
+          "miércoles, 7 oct, 8:00 a. m.",
+          "miércoles, 7 oct, 10:00 a. m.",
+          "miércoles, 7 oct, 2:00 p. m.",
+          "miércoles, 7 oct, 4:00 p. m."
+        ],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": true,
+        "bookingPending": false,
+        "slotGroups": [
+          {
+            "date": "2026-10-07",
+            "dateLabel": "miércoles, 7 de octubre a las",
+            "times": [
+              {
+                "label": "8:00 a. m.",
+                "date": "2026-10-07",
+                "time": "08:00"
+              },
+              {
+                "label": "10:00 a. m.",
+                "date": "2026-10-07",
+                "time": "10:00"
+              },
+              {
+                "label": "2:00 p. m.",
+                "date": "2026-10-07",
+                "time": "14:00"
+              },
+              {
+                "label": "4:00 p. m.",
+                "date": "2026-10-07",
+                "time": "16:00"
+              }
+            ]
+          }
+        ],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Para el jueves 8 de octubre, tengo disponibles los siguientes horarios en la mañana:\n\n- 8:00 a. m.\n- 10:00 a. m.\n- 12:00 p. m.\n\nPor favor, dime cuál de estos horarios te conviene más para programar la visita.",
+        "chips": [
+          "jueves, 8 oct, 8:00 a. m.",
+          "jueves, 8 oct, 10:00 a. m.",
+          "jueves, 8 oct, 12:00 p. m.",
+          "jueves, 8 oct, 2:00 p. m."
+        ],
+        "historicalChips": [
+          "miércoles, 7 oct, 8:00 a. m.",
+          "miércoles, 7 oct, 10:00 a. m.",
+          "miércoles, 7 oct, 2:00 p. m.",
+          "miércoles, 7 oct, 4:00 p. m."
+        ],
+        "leadBanner": "HS-2026-000280",
+        "requestCard": {
+          "publicId": "HS-2026-000280",
+          "serviceLabel": "Aire acondicionado",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000280",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000280.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": true,
+        "bookingPending": false,
+        "slotGroups": [
+          {
+            "date": "2026-10-08",
+            "dateLabel": "jueves, 8 de octubre a las",
+            "times": [
+              {
+                "label": "8:00 a. m.",
+                "date": "2026-10-08",
+                "time": "08:00"
+              },
+              {
+                "label": "10:00 a. m.",
+                "date": "2026-10-08",
+                "time": "10:00"
+              },
+              {
+                "label": "12:00 p. m.",
+                "date": "2026-10-08",
+                "time": "12:00"
+              },
+              {
+                "label": "2:00 p. m.",
+                "date": "2026-10-08",
+                "time": "14:00"
+              }
+            ]
+          }
+        ],
+        "serviceContext": "Aire acondicionado",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "3cd0e366-abb9-4247-ab63-0fdb255a2d4c"
+      }
+    }
+  ]
+}

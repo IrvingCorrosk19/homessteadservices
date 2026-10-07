@@ -1,0 +1,46 @@
+{
+  "cid": "0e33e5a3-ccc6-417c-b564-1429d0a38b49",
+  "transcript": [
+    {
+      "user": "tengo una fuga en el baño",
+      "reply": "Quedó registrada HS-2026-000283 de plomería. Seguimos con lo que haga falta.\n\nPara poder ayudarte con la fuga en el baño, necesitaría tu nombre y un número de teléfono de contacto. Así podremos coordinar una visita para revisar el problema.",
+      "leadId": "HS-2026-000283",
+      "created": true,
+      "appt": null
+    },
+    {
+      "user": "Maria Solis 60002214",
+      "reply": "Gracias, Maria. Ahora vamos a coordinar la visita para revisar la fuga en el baño. ¿Tienes alguna fecha y hora preferida para la visita?",
+      "leadId": "HS-2026-000283",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "Paitilla, PH Pacific, apto 8",
+      "reply": "¿Qué día y hora te quedan mejor?",
+      "leadId": "HS-2026-000283",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "quiero cancelar mi solicitud",
+      "reply": "¿Confirmas que quieres cancelar la solicitud de plomería HS-2026-000283?",
+      "leadId": "HS-2026-000283"
+    },
+    {
+      "user": "no",
+      "reply": "De acuerdo, mantengo tu solicitud activa.",
+      "leadId": "HS-2026-000283"
+    },
+    {
+      "user": "quiero cancelar mi solicitud",
+      "reply": "¿Confirmas que quieres cancelar la solicitud de plomería HS-2026-000283?",
+      "leadId": "HS-2026-000283"
+    },
+    {
+      "user": "sí, cancélala",
+      "reply": "Parece que no puedo procesar la cancelación en este momento. Te recomiendo que te pongas en contacto directamente con nuestro servicio de atención al cliente para resolver esto. Lamento las molestias.",
+      "leadId": "HS-2026-000283"
+    }
+  ]
+}

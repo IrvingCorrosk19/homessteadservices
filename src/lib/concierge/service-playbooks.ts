@@ -145,6 +145,9 @@ const PLUMBING: ServicePlaybook = {
   aliases: [
     "plom",
     "fuga",
+    "gotera",
+    "goteras",
+    "gotero",
     "fregador",
     "fregadero",
     "lavamanos",
@@ -155,6 +158,7 @@ const PLUMBING: ServicePlaybook = {
     "tubo",
     "gotea",
     "goteando",
+    "goteo",
     "inodoro",
     "sanitario",
     "grifo",
@@ -162,6 +166,7 @@ const PLUMBING: ServicePlaybook = {
     "ducha",
     "cisterna",
     "se sale agua",
+    "cae agua",
   ],
   objective: "Saber qué ocurre, dónde, y si el agua sigue saliendo.",
   facts: {

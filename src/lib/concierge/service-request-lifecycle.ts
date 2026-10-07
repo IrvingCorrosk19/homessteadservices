@@ -20,6 +20,7 @@ import {
   classifyActionableServiceIntent,
   isNonDemandTurn,
 } from "@/lib/concierge/actionable-intent";
+import { isSlotConfirmed } from "@/lib/concierge/canonical-state";
 import { classifyExistingRequestOperation, serviceAfterNewRequestOperator } from "@/lib/concierge/existing-request-operation";
 import {
   hasActiveBookedAppointment,
@@ -49,6 +50,21 @@ const GENERIC_NAMES = /^(cliente(\s+web)?|usuario|test|prueba)$/i;
  */
 export function hasValidServiceIntent(state: ConversationState, userText = ""): boolean {
   const text = userText.trim();
+  if (stateCarriesActionableService(state)) {
+    if (!text) return true;
+    const decision = classifyActionableServiceIntent(text, state);
+    // Price/catalog questions stay informational; scheduling/acks continue the pending HS.
+    if (
+      decision.informationalOnly &&
+      !isSchedulingProgressText(text) &&
+      !isNonDemandTurn(text) &&
+      !isSlotConfirmed(state) &&
+      !state.bookingIntent
+    ) {
+      return false;
+    }
+    return true;
+  }
   if (text) {
     const decision = classifyActionableServiceIntent(text, state);
     if (decision.informationalOnly) return false;
@@ -58,9 +74,25 @@ export function hasValidServiceIntent(state: ConversationState, userText = ""): 
     return false;
   }
   if (state.activeLeadId) return true;
+  return false;
+}
+
+/** Conversation already holds a real service need (even if this turn is only a slot/ack). */
+export function stateCarriesActionableService(state: ConversationState): boolean {
+  const service = String(state.primaryService || state.service || "").trim();
+  if (service && service !== "unknown" && service !== "other" && service !== "multiple") return true;
   const problem = (state.problem || state.facts?.need || state.facts?.what || "").trim();
-  if (!problem) return false;
+  if (problem.length < 8) return false;
   return classifyActionableServiceIntent(problem, state).createServiceRequest;
+}
+
+function isSchedulingProgressText(text: string): boolean {
+  return (
+    isNonDemandTurn(text) ||
+    /\b(me\s+sirve|esa\s+hora|ese\s+horario|la\s+primera|la\s+segunda|opci[oó]n\s*\d|\d{1,2}:\d{2}|a\.?\s*m\.?|p\.?\s*m\.?|mañana|pasado\s+mañana|el\s+\d{1,2})\b/i.test(
+      text,
+    )
+  );
 }
 
 function resolveService(state: ConversationState, summary: string) {

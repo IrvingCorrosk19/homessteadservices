@@ -1,0 +1,79 @@
+{
+  "cid": "",
+  "results": [
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    },
+    {
+      "status": 500,
+      "data": null
+    }
+  ],
+  "transcript": [
+    {
+      "role": "user",
+      "text": "mi aire prende pero no enfria"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "cuanto cuesta la visita?"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "ok sigamos con la solicitud"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "Pedro Gomez 60001144"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "El Cangrejo, apartamento 5A"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    },
+    {
+      "role": "user",
+      "text": "pasado mañana en la mañana"
+    },
+    {
+      "role": "assistant",
+      "text": ""
+    }
+  ]
+}

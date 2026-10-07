@@ -19,6 +19,10 @@ const AFFIRM_RE =
 const AFFIRM_EMBEDDED_RE =
   /\b(s[ií]\s+por\s+favor|dale\s+pues|hazlo\s+por\s+favor|ok\s+revisa|perfecto\s+revisa|adelante\s+revisa)\b/i;
 
+/** Affirmation that also restates cancel ("sí, cancélala"). */
+const AFFIRM_CANCEL_RE =
+  /^(s[ií]|ok|dale|claro|perfecto|de\s+acuerdo)[,!]?\s+(por\s+favor[,!]?\s+)?(cancel[ae]|anul[ae]|canc[eé]lala|anulala)\b/i;
+
 const DIRECT_AVAIL_RE =
   /\b(mu[eé]stra(me)?(\s+los)?\s+horarios?|muestram(e)?(\s+los)?\s+horarios?|qu[eé]\s+(horarios?|tienen|hay)|horarios?\s+disponibles?|revisa(\s+la)?\s+(agenda|disponib|calendario)|revisa\s+si\s+tienen|consulta(r)?\s+(la\s+)?agenda|dime\s+los\s+horarios?|opciones\s+de\s+horario|disponibilidad)\b/i;
 
@@ -30,10 +34,13 @@ const BOOKING_SIGNAL_RE =
 
 export function isAffirmativeResponse(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.length > 40) return false;
-  if (/\b(otra cosa|olvidemos|mejor|pintura|plomer|cambiar)\b/i.test(trimmed)) return false;
+  if (!trimmed || trimmed.length > 48) return false;
+  if (/\b(otra cosa|olvidemos|mejor|pintura|plomer|cambiar)\b/i.test(trimmed) && !AFFIRM_CANCEL_RE.test(trimmed)) {
+    return false;
+  }
   if (AFFIRM_RE.test(trimmed)) return true;
   if (AFFIRM_EMBEDDED_RE.test(trimmed)) return true;
+  if (AFFIRM_CANCEL_RE.test(trimmed)) return true;
   return false;
 }
 

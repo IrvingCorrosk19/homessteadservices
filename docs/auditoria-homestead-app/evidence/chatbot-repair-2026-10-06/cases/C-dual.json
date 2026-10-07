@@ -1,0 +1,239 @@
+{
+  "cid": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27",
+  "transcript": [
+    {
+      "user": "necesito pintar mi cuarto",
+      "reply": "Quedó registrada HS-2026-000281 de pintura. Seguimos con lo que haga falta.\n\nPara poder ayudarte mejor, ¿puedes decirme en qué zona te encuentras? Esto nos ayudará a coordinar una visita para evaluar el trabajo de pintura en tu cuarto.",
+      "leadId": "HS-2026-000281",
+      "created": true,
+      "appt": null
+    },
+    {
+      "user": "Luis Mora 60002213",
+      "reply": "Gracias por la información. Ahora, para poder coordinar una visita de evaluación, ¿tienes alguna fecha y hora en mente que te gustaría considerar para la visita?",
+      "leadId": "HS-2026-000281",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "Bethania, casa",
+      "reply": "Gracias por la información. Ahora, ¿tienes alguna fecha y hora en mente para coordinar la visita de evaluación para pintar tu cuarto?",
+      "leadId": "HS-2026-000281",
+      "created": false,
+      "appt": null
+    },
+    {
+      "user": "mañana a las 10",
+      "reply": "Listo. Tu solicitud HS-2026-000281 (pintura) quedó agendada para miércoles, 7 de octubre a las 10:00 a. m..",
+      "leadId": "HS-2026-000281",
+      "created": false,
+      "appt": "HA-f3e90363"
+    },
+    {
+      "user": "tambien tengo un problema con el lavamanos",
+      "reply": "Quedó registrada HS-2026-000282 de plomería. Seguimos con lo que haga falta.\n\nClaro, dejamos lo de la pintura. Te ayudo con la plomería.\n\nLamentablemente, el horario de las 10:00 a.m. ya está ocupado. Sin embargo, tengo disponibles los siguientes horarios para mañana:\n\n- 8:00 a.m.\n- 2:00 p.m.\n- 4:00 p.m.\n- 6:00 p.m.\n\n¿Alguno de estos horarios te funciona para atender el problema del lavamanos?",
+      "leadId": "HS-2026-000282",
+      "created": true,
+      "appt": null
+    }
+  ],
+  "results": [
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Quedó registrada HS-2026-000281 de pintura. Seguimos con lo que haga falta.\n\nPara poder ayudarte mejor, ¿puedes decirme en qué zona te encuentras? Esto nos ayudará a coordinar una visita para evaluar el trabajo de pintura en tu cuarto.",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000281",
+        "requestCard": {
+          "publicId": "HS-2026-000281",
+          "serviceLabel": "Pintura",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": true,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000281",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000281.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Pintura",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Gracias por la información. Ahora, para poder coordinar una visita de evaluación, ¿tienes alguna fecha y hora en mente que te gustaría considerar para la visita?",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000281",
+        "requestCard": {
+          "publicId": "HS-2026-000281",
+          "serviceLabel": "Pintura",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000281",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000281.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Pintura",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Gracias por la información. Ahora, ¿tienes alguna fecha y hora en mente para coordinar la visita de evaluación para pintar tu cuarto?",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000281",
+        "requestCard": {
+          "publicId": "HS-2026-000281",
+          "serviceLabel": "Pintura",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000281",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000281.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Pintura",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Listo. Tu solicitud HS-2026-000281 (pintura) quedó agendada para miércoles, 7 de octubre a las 10:00 a. m..",
+        "chips": [],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000281",
+        "requestCard": {
+          "publicId": "HS-2026-000281",
+          "serviceLabel": "Pintura",
+          "status": "scheduled",
+          "when": "2026-10-07 10:00"
+        },
+        "requestCreatedThisTurn": false,
+        "nextAction": "CLOSE",
+        "leadId": "HS-2026-000281",
+        "appointmentId": "HA-f3e90363",
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000281.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": false,
+        "bookingPending": false,
+        "slotGroups": [],
+        "serviceContext": "Pintura",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27"
+      }
+    },
+    {
+      "status": 200,
+      "data": {
+        "ok": true,
+        "reply": "Quedó registrada HS-2026-000282 de plomería. Seguimos con lo que haga falta.\n\nClaro, dejamos lo de la pintura. Te ayudo con la plomería.\n\nLamentablemente, el horario de las 10:00 a.m. ya está ocupado. Sin embargo, tengo disponibles los siguientes horarios para mañana:\n\n- 8:00 a.m.\n- 2:00 p.m.\n- 4:00 p.m.\n- 6:00 p.m.\n\n¿Alguno de estos horarios te funciona para atender el problema del lavamanos?",
+        "chips": [
+          "miércoles, 7 oct, 8:00 a. m.",
+          "miércoles, 7 oct, 2:00 p. m.",
+          "miércoles, 7 oct, 4:00 p. m.",
+          "miércoles, 7 oct, 6:00 p. m."
+        ],
+        "historicalChips": [],
+        "leadBanner": "HS-2026-000282",
+        "requestCard": {
+          "publicId": "HS-2026-000282",
+          "serviceLabel": "Plomería",
+          "status": "open",
+          "when": ""
+        },
+        "requestCreatedThisTurn": true,
+        "nextAction": "CONTINUE",
+        "leadId": "HS-2026-000282",
+        "appointmentId": null,
+        "dryLead": false,
+        "whatsappUrl": "https://wa.me/50766616580?text=Hola%2C%20quisiera%20consultar%20sobre%20mi%20solicitud%20HS-2026-000282.",
+        "contactUrl": "/contact",
+        "ended": false,
+        "requiresHuman": false,
+        "awaitingSlotSelection": true,
+        "bookingPending": false,
+        "slotGroups": [
+          {
+            "date": "2026-10-07",
+            "dateLabel": "miércoles, 7 de octubre a las",
+            "times": [
+              {
+                "label": "8:00 a. m.",
+                "date": "2026-10-07",
+                "time": "08:00"
+              },
+              {
+                "label": "2:00 p. m.",
+                "date": "2026-10-07",
+                "time": "14:00"
+              },
+              {
+                "label": "4:00 p. m.",
+                "date": "2026-10-07",
+                "time": "16:00"
+              },
+              {
+                "label": "6:00 p. m.",
+                "date": "2026-10-07",
+                "time": "18:00"
+              }
+            ]
+          }
+        ],
+        "serviceContext": "Plomería",
+        "showResumeBooking": false,
+        "showPhotoCta": false,
+        "photosRemaining": 4,
+        "conversationId": "cd8d5c1d-86cb-4821-86e3-6e44eff7fd27"
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "at": "2026-10-06T23:49:51.202Z",
+  "failed": 1,
+  "rows": [
+    {
+      "case": "A-goteras",
+      "fallos": "prod EARLY_RETURN + goteras no accionable",
+      "causa": "SLOT_SELECTED_EARLY_RETURN en origin; goteras ausente en intent",
+      "correccion": "CONTINUE_BOOK + goteras aliases + symptom→ACTIONABLE",
+      "folio": "HS-2026-000279",
+      "persistencia": "PASS",
+      "push": "NO PROBADO (dry_run/local)",
+      "resultado": "PASS"
+    },
+    {
+      "case": "B-ac-precio",
+      "fallos": "pérdida de contexto / no crea",
+      "causa": "intent + early return",
+      "correccion": "stateful create + CONTINUE_BOOK",
+      "folio": "HS-2026-000280",
+      "persistencia": "PASS",
+      "push": "NO PROBADO",
+      "resultado": "PASS"
+    },
+    {
+      "case": "C-dual",
+      "fallos": "cambio silencioso de servicio",
+      "causa": "contexto mid-booking",
+      "correccion": "service-transition + create continuity",
+      "folio": "HS-2026-000281,HS-2026-000282",
+      "persistencia": "PASS",
+      "push": "NO PROBADO",
+      "resultado": "PASS"
+    },
+    {
+      "case": "D-cancel",
+      "fallos": "no cancela / no confirma",
+      "causa": "flujo confirmación + ownership",
+      "correccion": "engine cancel path",
+      "folio": "HS-2026-000283",
+      "persistencia": "FAIL",
+      "push": "N/A",
+      "resultado": "FAIL"
+    },
+    {
+      "case": "PUSH-outbox",
+      "fallos": "aviso no llega A06",
+      "causa": "si no hay HS no hay evento; FCM físico requiere dispositivo",
+      "correccion": "create HS on symptom + CONTINUE_BOOK deploy",
+      "folio": "HS-2026-000284",
+      "persistencia": "PASS",
+      "push": "OUTBOX PASS / físico NO PROBADO (A06 desconectado)",
+      "resultado": "PASS parcial"
+    }
+  ]
+}

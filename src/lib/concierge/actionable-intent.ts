@@ -77,7 +77,7 @@ const WANT_TRADE_PRO =
   /\b(quiero|necesito|ocupo|busco|me hace falta)(?:\s+\w+){0,2}\s+(un|una|el|la)?\s*(plomero|electricista|pintor|cerrajero|tecnico)\b/;
 
 const PROBLEM_PREDICATE =
-  /\b(no enfri[ae]|no da fri[oa]|gotea|goteando|fuga|se dan[oó]|se dano|se me dan|seme\s+dan|descompus|no abre|no cierra|bota agua|hay agua|se me esta|se me fue|chispas?|no hay luz|se tapa|se tapo|tapad[oa]|filtraci|humedad|moho|qued[eé] afuera|perdi la llave|perd[ií] la llave|probl?ea|problema|aver[ií]a)\b/;
+  /\b(no enfri[ae]|no da fri[oa]|gotea|goteando|goteo|goteras?|fuga|cae\s+agua|se dan[oó]|se dano|se me dan|seme\s+dan|descompus|no abre|no cierra|bota agua|hay agua|se me esta|se me fue|chispas?|no hay luz|se tapa|se tapo|tapad[oa]|filtraci|humedad|moho|qued[eé] afuera|perdi la llave|perd[ií] la llave|probl?ea|problema|aver[ií]a)\b/;
 
 const VISIT_REQUEST =
   /\b(vengan|agendar|agendemos|mantenimiento para|que (lo |la |me )?revisen|mand(e|en|a)(me)?\s+(un |una )?(tecnico|plomero|pintor)|venir a (revisar|ver|chequear)|podr\w*\s+(venir|pasar|revisar)|pueden\s+(venir|pasar|revisar)|me pueden\s+(venir|revisar)|(quiero|necesito)\s+(una\s+)?visita)\b/;
@@ -222,7 +222,8 @@ export function classifyActionableServiceIntent(
   let actionability: Actionability = "NONE";
   if (wantsHomesteadAction && (wantTradePro || customerInfinitive || authorizedNewJob || /\b(solicitar|agendar)\b/.test(blob))) {
     actionability = "EXPLICIT";
-  } else if (wantsHomesteadAction) {
+  } else if (wantsHomesteadAction || problem) {
+    // Concrete symptoms ("tengo goteras", "gotea", "no enfría") are service demand, not catalog browsing.
     actionability = "ACTIONABLE";
   } else if (problemMention || diagnosticAsk) {
     actionability = "POSSIBLE";
@@ -231,7 +232,7 @@ export function classifyActionableServiceIntent(
   let primaryIntent: ActionablePrimaryIntent = "CONTINUE";
   if (wantsHomesteadAction && (catalogFrame || capabilityAsk || interrogative)) {
     primaryIntent = "MIXED_QUESTION_AND_REQUEST";
-  } else if (wantsHomesteadAction) {
+  } else if (wantsHomesteadAction || problem) {
     primaryIntent = "ACTIONABLE_SERVICE_REQUEST";
   } else if (diagnosticAsk) {
     primaryIntent = "DIAGNOSTIC_QUESTION";
@@ -249,7 +250,13 @@ export function classifyActionableServiceIntent(
     primaryIntent = "SERVICE_CATALOG_QUESTION";
   }
 
-  const informationalOnly = !wantsHomesteadAction && primaryIntent !== "CONTINUE" && primaryIntent !== "PROBLEM_MENTION" && primaryIntent !== "DIAGNOSTIC_QUESTION" && primaryIntent !== "ACTIONABLE_SERVICE_REQUEST";
+  const informationalOnly =
+    !wantsHomesteadAction &&
+    !problem &&
+    primaryIntent !== "CONTINUE" &&
+    primaryIntent !== "PROBLEM_MENTION" &&
+    primaryIntent !== "DIAGNOSTIC_QUESTION" &&
+    primaryIntent !== "ACTIONABLE_SERVICE_REQUEST";
   const createServiceRequest = actionability === "ACTIONABLE" || actionability === "EXPLICIT";
 
   if (state?.activeLeadId && isNonDemandTurn(raw) && !informationalOnly) {

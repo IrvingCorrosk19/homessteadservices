@@ -40,6 +40,16 @@ export function resolveShortReplyIntent(text: string, state: ConversationState):
     return "UNKNOWN";
   }
 
+  // "sí, cancélala" while a cancel confirmation is pending.
+  if (
+    pendingCancel &&
+    /^(s[ií]|ok|dale|claro|perfecto|de\s+acuerdo)[,!]?\s+(por\s+favor[,!]?\s+)?(cancel[ae]|anul[ae]|canc[eé]lala|anulala)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return "CONFIRM_CANCEL";
+  }
+
   if (!isAffirmativeResponse(trimmed)) return "UNKNOWN";
 
   // Bound cancel confirmation outranks stale slot chips / availability prompts.

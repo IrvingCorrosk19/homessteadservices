@@ -337,7 +337,24 @@ export function authorizeConversationAction(
     if (resolved.serviceFromBusinessDb && !resolved.createServiceRequest) {
       return deny("db_service_is_context_not_intent");
     }
-    if (!resolved.createServiceRequest) return deny("not_actionable");
+    if (!resolved.createServiceRequest) {
+      // Keep creating the pending HS while the customer only picks a slot / confirms schedule.
+      const service =
+        String(ctx.state?.primaryService || ctx.state?.service || "").trim();
+      const problem = String(ctx.state?.problem || ctx.state?.facts?.need || "").trim();
+      const hasService = Boolean(service && service !== "unknown" && service !== "other");
+      const hasProblem = problem.length >= 8;
+      const scheduling =
+        Boolean(ctx.state?.bookingIntent) ||
+        Boolean(ctx.state?.pendingSlot?.date) ||
+        /\b(me\s+sirve|esa\s+hora|ese\s+horario|opci[oó]n|mañana|\d{1,2}:\d{2}|a\.?\s*m\.?|p\.?\s*m\.?)\b/i.test(
+          ctx.text || "",
+        );
+      if (!ctx.state?.activeLeadId && (hasService || hasProblem) && scheduling) {
+        return allow("continue_pending_service_create");
+      }
+      return deny("not_actionable");
+    }
     if (resolved.actionability !== "ACTIONABLE" && resolved.actionability !== "EXPLICIT") {
       return deny("actionability_below_threshold");
     }
