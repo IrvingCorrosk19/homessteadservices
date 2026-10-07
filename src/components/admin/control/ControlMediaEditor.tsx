@@ -6,8 +6,8 @@ import { useState } from "react";
 type MediaItem = {
   assetId: number;
   index: number;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
   size: number;
   role: string;
 };
