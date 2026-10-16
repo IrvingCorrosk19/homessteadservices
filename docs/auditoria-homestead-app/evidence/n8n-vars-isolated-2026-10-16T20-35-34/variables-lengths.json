@@ -1,0 +1,10 @@
+[
+  {
+    "key": "CONCIERGE_INTERNAL_SECRET",
+    "len": 48
+  },
+  {
+    "key": "HOMESTEAD_INTERNAL_BASE",
+    "len": 21
+  }
+]

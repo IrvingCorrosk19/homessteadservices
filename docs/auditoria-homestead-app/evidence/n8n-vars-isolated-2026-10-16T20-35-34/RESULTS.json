@@ -1,0 +1,37 @@
+{
+  "evidenceDir": "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\n8n-vars-isolated-2026-10-16T20-35-34",
+  "isolatedBase": "http://127.0.0.1:5679",
+  "sharedVps": {
+    "status": "BLOCKED_THIS_SESSION",
+    "reason": "SSH credentials rejected (Access denied). Run deploy/vps/verify-n8n-vars-readonly.sh on VPS or with working SSH.",
+    "priorEvidence": "docs/auditoria-homestead-app/02-INVENTARIO-N8N.md — variables table + Homestead workflows use $vars; $env blocked; credentials_entity=0"
+  },
+  "results": [
+    {
+      "id": "isolated_health",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "prod_json_vars_only",
+      "ok": true,
+      "detail": "prod workflow expressions"
+    },
+    {
+      "id": "prod_json_no_literal_secret",
+      "ok": true,
+      "detail": "no secret-like literals in JSON"
+    },
+    {
+      "id": "variables_readable",
+      "ok": true,
+      "detail": "rows=2 cred_count=0"
+    },
+    {
+      "id": "concierge_vars_present",
+      "ok": true,
+      "detail": "CONCIERGE_INTERNAL_SECRET:len=48 HOMESTEAD_INTERNAL_BASE:len=21"
+    }
+  ],
+  "failed": 0
+}

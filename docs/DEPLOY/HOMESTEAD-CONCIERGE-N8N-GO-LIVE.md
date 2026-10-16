@@ -1,88 +1,85 @@
-# Homestead Concierge n8n — go-live preparation (from `f931c53`)
+# Homestead Concierge n8n — go-live preparation
 
-**Status:** preparation only. Do **not** flip production traffic until an operator runs the phases below on purpose.  
-**Out of scope:** A06 physical push (phone unavailable — remains pending). Do not declare push físico verified.
+**Base:** `d878846` + corrections in this revision.  
+**Status:** preparation only — **do not deploy / flip traffic yet**.  
+**A06 physical push:** pending (phone unavailable). Does not block this prep.
 
-Production services that must stay untouched: Telegram lead alerts, Content Studio Meta publish, Control Push FCM webhooks, SMTP, Meta tokens, shared n8n workflows other than the **new** Concierge Turn import.
+Untouched production surfaces: Telegram lead alerts, Content Studio / Meta, Control Push, SMTP, and all existing n8n workflows except an eventual **new** Concierge Turn import.
+
+---
+
+## What was actually verified (this session)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Backup script includes SQLite consistency, data dirs, config keys/hash, **previous image IDs** | Script updated (not executed on VPS) | `deploy/vps/backup-before-concierge-n8n.sh` |
+| Phase order: **backup before any deploy/migration** | Documented below as Phase 0 | this file |
+| Engine rollback (isolated): legacy / n8n-pin / in-flight / HS+cita | **PASS** `failed=0` | `docs/.../concierge-engine-rollback-2026-10-16T20-34-04/` |
+| Prod workflow JSON uses `$vars` only (no `$env`, no secret literals) | **PASS** | `n8n/homestead-n8n-concierge-turn.prod.json` + `scripts/verify-n8n-vars-isolated.mjs` |
+| Shared n8n **2.3.6** live `$vars` resolve | **BLOCKED** — SSH `Access denied` this session | Script ready: `deploy/vps/verify-n8n-vars-readonly.sh` |
+| Prior shared inventory (`$vars` used by Homestead WFs; `$env` blocked; `credentials_entity=0`) | Historical **VERIFIED** | `docs/auditoria-homestead-app/02-INVENTARIO-N8N.md` |
+
+### Rollback behavior proven (isolated, no SQLite restore)
+
+| Scenario | After `AI_CONCIERGE_ENGINE=legacy` |
+| --- | --- |
+| Conversation pinned **legacy** | Stays legacy |
+| Conversation pinned **n8n** (with `HS-…` + `HA-…` CONFIRMED) | **Stays n8n** (pin wins); lead+cita retained; no duplicate book |
+| In-flight turn `INTERPRETING` | Remains `INTERPRETING` / engine `n8n` until completed — flag flip does not rewrite the turn |
+| New conversation after rollback | Pins **legacy** |
+
+Command: `npx tsx scripts/test-concierge-engine-rollback.mjs`
 
 ---
 
 ## Architecture (target)
 
 ```
-Browser widget → homestead_web /api/concierge/chat
-  → (new conversations only) AI_CONCIERGE_ENGINE=n8n + N8N_MODE=remote
+Browser → homestead_web /api/concierge/chat
+  → new chats: AI_CONCIERGE_ENGINE=n8n + N8N_MODE=remote
   → POST http://n8n:5678/webhook/homestead-concierge-turn
        header x-homestead-internal-secret
-  → n8n Code calls http://homestead_web:3000/api/internal/concierge/*
-  → SQLite business writes stay in Homestead (n8n never opens homestead.sqlite)
+  → n8n Code → http://homestead_web:3000/api/internal/concierge/*
+  → SQLite writes stay in Homestead
 ```
 
-Existing conversations with transcript/lead stay on **legacy** via `resolveAndPinConversationEngine` (empty `engine` + prior work → pin `legacy`). New chats (`Nueva solicitud` / new `hs_cid`) take the global flag.
+Existing threads with history pin **legacy** via `resolveAndPinConversationEngine`.
 
 ---
 
-## Artifacts prepared in repo
+## Secrets handling (no values in Git / logs)
 
-| Artifact | Purpose |
+| Store | Use |
 | --- | --- |
-| `n8n/homestead-n8n-concierge-turn.json` | Isolated / `$env` (local Node portable n8n) |
-| `n8n/homestead-n8n-concierge-turn.prod.json` | Shared VPS n8n — **`$vars` only** (2.3.6 blocks `$env`) |
-| `scripts/build-concierge-n8n-prod-workflow.mjs` | Rebuild prod JSON from source |
-| `deploy/vps/env.concierge-n8n.production.example` | Flag + URL template (no secrets) |
-| `deploy/vps/docker-compose.yml` | Pass-through for engine/webhook/secret (default `AI_CONCIERGE_ENGINE=legacy`) |
-| `deploy/vps/backup-before-concierge-n8n.sh` | Pre-activation backup |
-| `deploy/vps/preflight-concierge-n8n.sh` | Read-only connectivity + flag presence |
-| `deploy/vps/rollback-concierge-n8n-engine.sh` | Flag rollback only (keeps data) |
+| Homestead `deploy/vps/.env` | `CONCIERGE_INTERNAL_SECRET` (operator credentials / secret manager — never commit) |
+| Shared n8n **Variables** (`$vars`) | `CONCIERGE_INTERNAL_SECRET`, `HOMESTEAD_INTERNAL_BASE` — required on 2.3.6 because `$env` is blocked in Code/IF |
+| n8n **Credentials** entity | Currently empty on shared instance (inventory). Do **not** invent a second secret channel unless you also change the workflow nodes. Prefer Variables to match live Homestead Telegram/Content patterns. |
+| Workflow JSON | Expressions only (`$vars.…`) — never paste secret values |
+
+Verification scripts print **lengths / presence**, never secret values. Use SSH/login credentials to run probes; do not echo passwords into logs or commits.
 
 ---
 
-## Credentials & connectivity checklist (no secret values)
+## Artifacts
 
-### Homestead (`deploy/vps/.env` → `homestead_web`)
-
-| Key | Required for remote | Notes |
-| --- | --- | --- |
-| `AI_CONCIERGE_ENGINE` | yes | Ship as `legacy`; flip to `n8n` only in Phase 5 |
-| `AI_CONCIERGE_N8N_MODE` | yes | `remote` |
-| `CONCIERGE_INTERNAL_SECRET` | yes | ≥32 random bytes; **same value** as n8n Variable |
-| `N8N_CONCIERGE_TURN_WEBHOOK_URL` | yes | Prefer `http://n8n:5678/webhook/homestead-concierge-turn` on `n8n_net` |
-| `AI_CONCIERGE_DRY_RUN` | ops choice | Production leads: `false` only if intentional |
-| `OPENAI_API_KEY` | yes (interpret) | Existing; do not rotate for this rollout unless needed |
-
-Do **not** reuse `N8N_HOMESTEAD_WEBHOOK_SECRET` / Telegram / Control Push secrets for Concierge internal auth.
-
-### Shared n8n (Settings → Variables)
-
-| Variable | Value shape |
+| Path | Role |
 | --- | --- |
-| `CONCIERGE_INTERNAL_SECRET` | identical to Homestead env |
-| `HOMESTEAD_INTERNAL_BASE` | `http://homestead_web:3000` (Docker DNS on `n8n_net`) |
-
-Confirm `$env` remains blocked; prod workflow uses `$vars` only.
-
-### Connectivity (preflight)
-
-1. `homestead_web` → `n8n:5678/healthz` (or `n8n_n8n`) returns ok.  
-2. `n8n_n8n` → `homestead_web:3000/api/health` returns ok.  
-3. Webhook path `homestead-concierge-turn` does **not** already exist on another workflow.  
-4. Existing Homestead webhooks (Telegram / content / control-push) still listed and active as before.
+| `n8n/homestead-n8n-concierge-turn.prod.json` | Shared n8n import (`$vars`, `active:false`) |
+| `deploy/vps/backup-before-concierge-n8n.sh` | **Phase 0** backup (before any deploy) |
+| `deploy/vps/verify-n8n-vars-readonly.sh` | Shared 2.3.6 `$vars` readonly probe |
+| `deploy/vps/preflight-concierge-n8n.sh` | Connectivity + flag presence |
+| `deploy/vps/rollback-concierge-n8n-engine.sh` | Flag → legacy only (`CONFIRM=YES`) |
+| `deploy/vps/env.concierge-n8n.production.example` | Flag template |
+| `scripts/test-concierge-engine-rollback.mjs` | Isolated rollback proof |
+| `scripts/verify-n8n-vars-isolated.mjs` | Prod JSON + isolated vars lengths |
 
 ---
 
-## Phases (exact order — do not skip)
+## Exact activation order (do not reorder)
 
-### Phase 0 — Deploy code with engine still legacy
+### Phase 0 — Backup **before** any deploy or migration
 
-1. Deploy Homestead image/commit that includes `f931c53` + pin hardening + compose pass-through.  
-2. Ensure `.env` has `AI_CONCIERGE_ENGINE=legacy` (or unset → compose default `legacy`).  
-3. Recreate **only** `homestead_web` if compose changed (`docker compose up -d homestead_web`).  
-4. Do **not** restart/recreate `n8n_n8n` / `n8n_postgres` unless required for an unrelated reason.  
-5. Smoke: site health + an **existing** cookie chat still answers (legacy).
-
-### Phase 1 — Backup (data-preserving)
-
-On VPS:
+On VPS (working SSH):
 
 ```bash
 cd /opt/apps/homestead
@@ -90,131 +87,103 @@ sh deploy/vps/backup-before-concierge-n8n.sh
 cat /opt/backups/concierge-n8n-pre-LATEST.path
 ```
 
-Verify: `manifest.json` integrity `ok`, `n8n.dump` non-empty, `all-workflows.json` present.
+Must contain:
 
-### Phase 2 — Preflight (read-only)
+- `homestead/homestead.sqlite` with `manifest.json` `integrity=ok` + sha256  
+- `homestead/{photos,content,concierge,jobs}` if present  
+- `n8n/n8n.dump` + `n8n/all-workflows.json`  
+- `config/*-env-keys.txt` + `*.sha256` (optional `INCLUDE_ENV_COPY=YES` for mode-600 env copy)  
+- `images/previous-runtime.txt` + image IDs for `homestead_web` / `n8n_n8n` + `DEPLOYED_SHA` if present  
+
+**Stop if backup incomplete.** Do not rebuild images yet.
+
+### Phase 1 — Shared n8n `$vars` live probe (readonly)
+
+```bash
+sh deploy/vps/verify-n8n-vars-readonly.sh | tee /tmp/n8n-vars-probe.txt
+```
+
+Pass criteria:
+
+- n8n version reports **2.3.6**  
+- Homestead workflows show `vars_refs=yes` and `env_refs=no`  
+- Existing vars (e.g. `HOMESTEAD_WEBHOOK_SECRET`) show `len>0` (value not printed)  
+- `CONCIERGE_INTERNAL_SECRET` / `HOMESTEAD_INTERNAL_BASE` reported `MISSING` until you create them  
+- `HOOK_COUNT_CONCIERGE=0` (no collision)  
+- No workflow create/update/delete in this script  
+
+**This phase was BLOCKED from the laptop this session (SSH denied). Re-run before Phase 4.**
+
+### Phase 2 — Deploy Homestead code still on legacy
+
+1. Ensure `.env` has `AI_CONCIERGE_ENGINE=legacy` (or unset → compose default).  
+2. Deploy/rebuild **only** `homestead_web` with the prep commit.  
+3. Do not recreate `n8n_n8n` / `n8n_postgres`.  
+4. Smoke: health + an existing chat still answers.
+
+### Phase 3 — Preflight connectivity
 
 ```bash
 sh deploy/vps/preflight-concierge-n8n.sh | tee /tmp/concierge-n8n-preflight.txt
 ```
 
-Abort if health hops fail or a colliding concierge webhook already exists under another name/path.
+### Phase 4 — Set n8n Variables + import inactive workflow
 
-### Phase 3 — n8n Variables + import **inactive** workflow
+1. n8n UI → Variables (operator credentials): set `CONCIERGE_INTERNAL_SECRET` (match Homestead `.env`) and `HOMESTEAD_INTERNAL_BASE=http://homestead_web:3000`.  
+2. Import **only** `n8n/homestead-n8n-concierge-turn.prod.json`, leave **inactive**.  
+3. Do not edit Telegram / Content / Control Push workflows.
 
-1. In n8n UI → Variables: set `CONCIERGE_INTERNAL_SECRET` and `HOMESTEAD_INTERNAL_BASE` (values never committed).  
-2. Import **only** `n8n/homestead-n8n-concierge-turn.prod.json`.  
-3. Leave **active = false**.  
-4. Do not open/edit Telegram, Content Studio, or Control Push workflows.  
-5. Optional: tag the workflow `homestead-concierge` for inventory.
+### Phase 5 — Activate Concierge workflow only (Homestead still legacy)
 
-### Phase 4 — Activate workflow only (Homestead still legacy)
+1. Activate Concierge Turn in UI.  
+2. From `homestead_web`, POST empty body to webhook URL — expect auth failure without leaking secret; proves path.  
+3. Confirm other Homestead executions still succeed.
 
-1. Activate the Concierge Turn workflow in n8n UI.  
-2. From `homestead_web` (secret from env, not echoed):
-
-```bash
-docker exec homestead_web sh -c '
-  SECRET=$(printenv CONCIERGE_INTERNAL_SECRET)
-  URL=$(printenv N8N_CONCIERGE_TURN_WEBHOOK_URL)
-  # Expect 401 without/wrong secret — proves path exists without coordinating a fake turn
-  wget -qS -O- --header="content-type: application/json" \
-    --post-data="{}" "$URL" 2>&1 | head -20 || true
-'
-```
-
-3. Confirm other webhook executions (Telegram/content) still succeed in n8n Executions filter.  
-4. Homestead chat for customers still uses **legacy** (`AI_CONCIERGE_ENGINE=legacy`).
-
-### Phase 5 — Flip Homestead to n8n (new conversations only)
-
-1. Set in `/opt/apps/homestead/deploy/vps/.env`:
+### Phase 6 — Flip engine for **new** conversations
 
 ```bash
+# in deploy/vps/.env
 AI_CONCIERGE_ENGINE=n8n
 AI_CONCIERGE_N8N_MODE=remote
 N8N_CONCIERGE_TURN_WEBHOOK_URL=http://n8n:5678/webhook/homestead-concierge-turn
 # CONCIERGE_INTERNAL_SECRET already set and matching n8n Variable
-```
 
-2. Recreate **only** `homestead_web`:
-
-```bash
 cd /opt/apps/homestead/deploy/vps
-docker compose up -d homestead_web
+docker compose up -d homestead_web   # only this service
 ```
 
-3. Do **not** recreate n8n/postgres.  
-4. Optional backfill (belt-and-suspenders; code already pins history → legacy):
+Optional SQL backfill for empty engine + history → `legacy` (code already does this on resolve).
 
-```sql
--- inside homestead_web / sqlite
-UPDATE concierge_conversations
-SET engine = 'legacy'
-WHERE TRIM(COALESCE(engine,'')) = ''
-  AND (
-    EXISTS (SELECT 1 FROM concierge_messages m WHERE m.conversation_id = concierge_conversations.id)
-    OR TRIM(COALESCE(lead_public_id,'')) != ''
-  );
-```
+### Phase 7 — Verify a **new** conversation
 
-### Phase 6 — Verify **new** conversation (required before calling go-live done)
+Incognito / no `hs_cid`:
 
-Use a private/incognito window (no `hs_cid`):
-
-1. Open `https://homestead.lat/contact` → open chat → **Nueva solicitud** if needed.  
-2. Send a short plumbing-style message with typos → provide name/phone/zone → obtain `HS-…`.  
-3. Ask for horarios → select a chip → expect confirmation (or honest failure, never silent success).  
-4. Correlate layers:
-
-| Layer | Check |
-| --- | --- |
-| UI | Reply + request card / visita confirmada |
-| Homestead turn | `concierge_turns.engine='n8n'`, `status='DONE'`, `reply_json` present |
-| Conversation pin | `concierge_conversations.engine='n8n'` for this new id only |
-| n8n | New execution on Concierge Turn workflow; `executionId` referenced if stored |
-| SQLite business | `service_requests` / `revenue_appointments` row matches folio |
-
-5. Resume an **old** cookie conversation (if available): must remain `engine=legacy` and still answer.  
-6. Confirm Telegram/Content/Control Push still healthy (one read-only execution glance).
-
-**Not required for this go-live:** A06 physical FCM on device.
+1. Nueva solicitud → plumbing path → `HS-…` → slots → book.  
+2. Correlate: UI ↔ `concierge_turns.engine=n8n` ↔ n8n execution ↔ SQLite cita.  
+3. Old cookie chat remains legacy.  
+4. Do **not** claim A06 physical push.
 
 ---
 
-## Rollback (preserve customer data)
-
-Prefer flag rollback over DB restore.
+## Rollback (preserve new data)
 
 ```bash
-# On VPS — sets engine back to legacy and recreates only homestead_web
 CONFIRM=YES sh deploy/vps/rollback-concierge-n8n-engine.sh
 ```
 
-Manual equivalent:
+- Sets `AI_CONCIERGE_ENGINE=legacy`, recreates **only** `homestead_web`.  
+- **Does not** restore pre-backup SQLite over live data.  
+- n8n-pinned conversations keep calling n8n until Nueva solicitud or you deactivate the Concierge workflow / re-pin that row.  
+- In-flight n8n turns are not rewritten mid-operation (proven isolated).
 
-1. `AI_CONCIERGE_ENGINE=legacy` in `.env`  
-2. `docker compose up -d homestead_web`  
-3. Optionally deactivate Concierge Turn workflow in n8n UI (leave JSON imported).  
-4. **Do not** restore `homestead.sqlite` from the pre-backup over live data (would wipe post-activation bookings).  
-5. n8n dump restore only if the **import itself** corrupted n8n (disaster); use `pg_restore` against a maintenance window — out of band.
-
-Conversations already pinned to `n8n` keep that pin until the user starts **Nueva solicitud** (new cookie). After rollback, those pins still call n8n unless you deactivate the workflow (then they get the visible `n8n_unavailable` / timeout copy — data kept). To force legacy for a stuck pin, set that row’s `engine='legacy'` only for that conversation id.
+Disaster-only: n8n `pg_restore` from Phase 0 dump if an import corrupted n8n — separate maintenance window.
 
 ---
 
-## What this rollout must not do
+## Pendings (concrete)
 
-- Restart or recreate unrelated containers (mail, unrelated apps).  
-- Change Meta / Telegram / Control Push env keys.  
-- Edit existing n8n workflows in place.  
-- Point Concierge at public broken TLS if private `n8n_net` works.  
-- Claim A06 physical push PASS.
-
----
-
-## Pending after go-live
-
-1. **A06 physical** — when USB test phone is available (`adb devices` shows `device`).  
-2. Optional canary: keep `AI_CONCIERGE_ENGINE=legacy` and enable n8n only for staff via temporary pin (future).  
-3. Monitor n8n execution error rate for Concierge Turn for 24h.
+1. **SSH to VPS** with working credentials → run `verify-n8n-vars-readonly.sh` and `backup-before-concierge-n8n.sh` for real.  
+2. Create n8n Variables `CONCIERGE_INTERNAL_SECRET` + `HOMESTEAD_INTERNAL_BASE` (after backup).  
+3. Execute Phases 2–7 when ready to go live.  
+4. **A06 physical** when USB phone available (`adb devices` → `device`).  
+5. Optional: monitor Concierge Turn error rate 24h post-flip.

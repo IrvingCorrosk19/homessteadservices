@@ -74,9 +74,19 @@ A06 physical cases: **BLOCKED** — empty `adb devices`; connect authorized test
 
 ## Remaining exact pendings
 
-1. **A06 physical** — phone unavailable; left pending. Attach/authorize USB test device later; then push FG/BG/killed, tap→detail, logout, reminder invalidation (isolated only). Not declared verified.
-2. **Production go-live** — preparation only (not executed): `docs/DEPLOY/HOMESTEAD-CONCIERGE-N8N-GO-LIVE.md` + `n8n/homestead-n8n-concierge-turn.prod.json`.
-3. Optional: UI live race re-offer chips after BOOK fail (workflow path present; Layer A contention already PASS).
+1. **A06 physical** — phone unavailable; left pending. Not declared verified.
+2. **Shared n8n 2.3.6 `$vars` live probe** — BLOCKED this session (SSH Access denied). Run `deploy/vps/verify-n8n-vars-readonly.sh` before import. Prior inventory still shows Homestead WFs use `$vars`.
+3. **VPS Phase 0 backup execution** — script ready (`backup-before-concierge-n8n.sh`); must run before any deploy.
+4. **Production go-live Phases 2–7** — not executed. Runbook: `docs/DEPLOY/HOMESTEAD-CONCIERGE-N8N-GO-LIVE.md`.
+5. Optional: UI live race re-offer chips after BOOK fail.
+
+### Prep corrections verified locally
+
+| Item | Result |
+| --- | --- |
+| Engine rollback isolated (legacy / n8n-pin / in-flight / HS+cita) | PASS — `concierge-engine-rollback-2026-10-16T20-34-04` |
+| Prod JSON `$vars` only | PASS |
+| Backup before deploy (script + runbook Phase 0) | READY (not run on VPS) |
 
 ## Reproduce isolated stack
 

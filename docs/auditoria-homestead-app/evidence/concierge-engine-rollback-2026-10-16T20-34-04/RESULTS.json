@@ -1,0 +1,111 @@
+{
+  "evidenceDir": "C:\\Proyectos\\HOMESTEAD SERVICES\\docs\\auditoria-homestead-app\\evidence\\concierge-engine-rollback-2026-10-16T20-34-04",
+  "globalEngineAfterRollback": "legacy",
+  "scenarios": {
+    "legacy": {
+      "engine": "legacy",
+      "lead": "",
+      "messages": 2,
+      "turns": []
+    },
+    "n8nPinned": {
+      "engine": "n8n",
+      "lead": "HS-2026-000041",
+      "messages": 2,
+      "turns": [
+        {
+          "turn_id": "90a96cd8-6477-42da-9b93-cab70dd475c6",
+          "status": "DONE",
+          "engine": "n8n"
+        },
+        {
+          "turn_id": "7c896e79-d8fc-4cac-89e0-a50100fbd5b1",
+          "status": "DONE",
+          "engine": "n8n"
+        }
+      ],
+      "appointments": [
+        {
+          "appointment_id": "HA-0e6524e8",
+          "date": "2026-10-17",
+          "start_time": "08:00",
+          "status": "CONFIRMED"
+        }
+      ]
+    },
+    "freshAfterRollback": {
+      "engine": "legacy",
+      "lead": "",
+      "messages": 0,
+      "turns": []
+    }
+  },
+  "results": [
+    {
+      "id": "A_legacy_pin",
+      "ok": true,
+      "detail": "engine=legacy msgs=2"
+    },
+    {
+      "id": "B_pin_n8n",
+      "ok": true,
+      "detail": "pin=n8n"
+    },
+    {
+      "id": "B_upsert",
+      "ok": true,
+      "detail": "ok=true lead=HS-2026-000041 code="
+    },
+    {
+      "id": "B_book",
+      "ok": true,
+      "detail": "ok=true code= appts=1 first={\"appointment_id\":\"HA-0e6524e8\",\"date\":\"2026-10-17\",\"start_time\":\"08:00\",\"status\":\"CONFIRMED\"}"
+    },
+    {
+      "id": "B_n8n_turn",
+      "ok": true,
+      "detail": "ok=true engine=n8n status=DONE"
+    },
+    {
+      "id": "C_inflight_created",
+      "ok": true,
+      "detail": "turn=90a96cd8 status=INTERPRETING"
+    },
+    {
+      "id": "D_flag_legacy",
+      "ok": true,
+      "detail": "conciergeEngine()=legacy"
+    },
+    {
+      "id": "D_legacy_stays",
+      "ok": true,
+      "detail": "resolve=legacy"
+    },
+    {
+      "id": "D_n8n_pin_preserved",
+      "ok": true,
+      "detail": "resolve=n8n (global legacy must not unpin)"
+    },
+    {
+      "id": "D_inflight_untouched",
+      "ok": true,
+      "detail": "status=INTERPRETING engine=n8n"
+    },
+    {
+      "id": "D_data_retained",
+      "ok": true,
+      "detail": "lead=HS-2026-000041 apptsBefore=1 apptsAfter=1 id=HA-0e6524e8"
+    },
+    {
+      "id": "D_no_duplicate_on_complete",
+      "ok": true,
+      "detail": "appts still 1 (no second book)"
+    },
+    {
+      "id": "D_fresh_gets_legacy",
+      "ok": true,
+      "detail": "fresh pin=legacy"
+    }
+  ],
+  "failed": 0
+}
