@@ -48,8 +48,13 @@ export function verifyInternalAuth(headerValue: string | null | undefined): bool
   }
 }
 
-function fail(tool: string, code: string, message: string): ToolResultEnvelope {
-  return { ok: false, tool, code, message };
+function fail(
+  tool: string,
+  code: string,
+  message: string,
+  data?: Record<string, unknown>,
+): ToolResultEnvelope {
+  return { ok: false, tool, code, message, ...(data ? { data } : {}) };
 }
 
 function ok(tool: string, data: Record<string, unknown>, extra?: Partial<ToolResultEnvelope>): ToolResultEnvelope {
@@ -314,7 +319,24 @@ export async function toolBookAppointment(
   touchConversation(conversationId, { state: toolResult.state, leadPublicId: toolResult.leadId || "" });
   const parsed = (toolResult.result || {}) as Record<string, unknown>;
   if (parsed.ok === false) {
-    return fail("book_appointment", String(parsed.reason || parsed.error || "book_failed"), String(parsed.message || "No se pudo reservar"));
+    const reason = String(parsed.reason || parsed.error || "book_failed");
+    // Race after offer: never claim success; refresh open slots for another choice.
+    let refreshed: Awaited<ReturnType<typeof toolCheckAvailability>> | null = null;
+    if (reason === "slot_taken" || reason === "slot_not_offered" || reason === "invalid_datetime") {
+      refreshed = await toolCheckAvailability(conversationId);
+    }
+    const slots = (refreshed?.data?.slots as Array<{ date: string; time: string; label: string }>) || [];
+    const lines = slots.slice(0, 4).map((s, i) => `${i + 1}) ${s.label || `${s.date} ${s.time}`}`);
+    const msg =
+      reason === "slot_taken"
+        ? `Ese horario ya no está libre. Tus datos siguen guardados.${
+            lines.length ? `\nOpciones actualizadas:\n${lines.join("\n")}\n¿Cuál te queda mejor?` : " ¿Reviso otros horarios?"
+          }`
+        : String(parsed.message || "No pude confirmar ese horario. ¿Probamos otra opción?");
+    return fail("book_appointment", reason, msg, {
+      slots,
+      retainedLeadId: getConversation(conversationId)?.state.activeLeadId || "",
+    });
   }
   bumpConversationStateVersion(conversationId);
   return ok(
@@ -513,7 +535,8 @@ export function toolRouteDecision(conversationId: string, text: string): ToolRes
       /^\s*(el\s+)?(tercero|3|3o|tres)\b/i.test(text) ||
       /^\s*(el\s+)?(cuarto|4|4o|cuatro)\b/i.test(text));
   let slotPick = text.match(/\b(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\b/);
-  if (!slotPick && state.offeredSlots?.length) {
+  // Bare HH:MM only when no a.m./p.m. follows (otherwise 12:00 a. m. ≠ 12:00).
+  if (!slotPick && state.offeredSlots?.length && !/(\d{1,2}:\d{2})\s*[ap]\.?\s*m\.?/i.test(text)) {
     const hmOnly = text.match(/\b(\d{1,2}:\d{2})\b/);
     if (hmOnly) {
       const padded = (() => {
@@ -539,32 +562,48 @@ export function toolRouteDecision(conversationId: string, text: string): ToolRes
       slotPick = [chosen.date + " " + chosen.time, chosen.date, chosen.time] as unknown as RegExpMatchArray;
     }
   }
-  // "el de las 8:00" / "a las 2" / labels with a. m. / p. m.
+  // Chip copy "Me sirve 12:00 p. m." / "el de las 2" / a.m.–p.m. (America/Panama labels)
   if (!slotPick && state.offeredSlots?.length) {
-    const hm = text.match(/\b(?:a\s+las\s+|las\s+)?(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?)?/i);
-    if (hm) {
-      const hour12 = Number(hm[1]);
-      const mm = (hm[2] || "00").padStart(2, "0");
-      const meridiem = (hm[3] || "").toLowerCase();
-      const candidates = new Set<string>();
-      const hh24from12 = (h: number, pm: boolean) => {
-        let h24 = h % 12;
-        if (pm) h24 += 12;
-        if (!pm && h === 12) h24 = 0;
-        return `${String(h24).padStart(2, "0")}:${mm}`;
-      };
-      if (/p/.test(meridiem)) candidates.add(hh24from12(hour12, true));
-      else if (/a/.test(meridiem)) candidates.add(hh24from12(hour12, false));
-      else {
-        candidates.add(`${String(hour12).padStart(2, "0")}:${mm}`);
-        candidates.add(hh24from12(hour12, true));
-        candidates.add(hh24from12(hour12, false));
-      }
+    const normalizeMeridiem = (raw: string) =>
+      raw
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/\./g, "");
+    const clockInText = text.match(/(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?/i);
+    if (clockInText) {
+      const hour12 = Number(clockInText[1]);
+      const mm = clockInText[2].padStart(2, "0");
+      const isPm = normalizeMeridiem(clockInText[3] + "m").startsWith("p");
+      let h24 = hour12 % 12;
+      if (isPm) h24 += 12;
+      if (!isPm && hour12 === 12) h24 = 0;
+      const want = `${String(h24).padStart(2, "0")}:${mm}`;
       const chosen =
-        state.offeredSlots.find((s) => candidates.has(s.time)) ||
-        state.offeredSlots.find((s) => (s.label || "").includes(`${hour12}:${mm}`) || (s.label || "").includes(`${hour12}:`));
+        state.offeredSlots.find((s) => s.time === want) ||
+        state.offeredSlots.find((s) => {
+          const m = (s.label || "").match(/(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?/i);
+          if (!m) return false;
+          const labPm = normalizeMeridiem(m[3] + "m").startsWith("p");
+          return Number(m[1]) === hour12 && m[2] === mm && labPm === isPm;
+        });
       if (chosen?.date && chosen?.time) {
         slotPick = [chosen.date + " " + chosen.time, chosen.date, chosen.time] as unknown as RegExpMatchArray;
+      }
+    } else {
+      const hm = text.match(/\b(?:a\s+las\s+|las\s+|me\s+sirve\s+)?(\d{1,2})(?::(\d{2}))?\b/i);
+      if (hm) {
+        const hour12 = Number(hm[1]);
+        const mm = (hm[2] || "00").padStart(2, "0");
+        const candidates = [
+          `${String(hour12).padStart(2, "0")}:${mm}`,
+          `${String(hour12 % 12).padStart(2, "0")}:${mm}`,
+          `${String((hour12 % 12) + 12).padStart(2, "0")}:${mm}`,
+          hour12 === 12 ? `00:${mm}` : "",
+        ].filter(Boolean);
+        const chosen = state.offeredSlots.find((s) => candidates.includes(s.time));
+        if (chosen?.date && chosen?.time) {
+          slotPick = [chosen.date + " " + chosen.time, chosen.date, chosen.time] as unknown as RegExpMatchArray;
+        }
       }
     }
   }

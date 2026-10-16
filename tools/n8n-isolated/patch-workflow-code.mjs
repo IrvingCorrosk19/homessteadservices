@@ -76,9 +76,16 @@ if (next === 'BUSINESS_CONTACT') {
 } else if (next === 'BOOK') {
   const hint = route.data.bookHint || {};
   const r = await tool('book_appointment', { date: hint.date, time: hint.time });
-  reply = r.ok
-    ? \`Quedó reservada la visita para \${hint.date || ''} \${hint.time || ''}.\`
-    : \`Aún no pude confirmar ese horario (\${r.code || 'error'}). ¿Probamos otra opción?\`;
+  if (r.ok) {
+    reply = \`Quedó reservada la visita para \${hint.date || ''} \${hint.time || ''}.\`;
+  } else {
+    // Race after offer: keep data, never announce success, re-offer fresh slots.
+    const avail = await tool('check_availability', {});
+    const composed = await tool('compose_ask', { kind: 'slots', toolData: avail.data || {} });
+    const slotsReply = (composed.data && composed.data.reply) || '';
+    reply = (r.message || 'Ese horario ya no está disponible. Tus datos siguen guardados.') +
+      (slotsReply ? \`\\n\\n\${slotsReply}\` : ' ¿Cuál otro te sirve?');
+  }
 } else if (next === 'RESCHEDULE') {
   const hint = route.data.bookHint || {};
   if (!hint.date || !hint.time) {

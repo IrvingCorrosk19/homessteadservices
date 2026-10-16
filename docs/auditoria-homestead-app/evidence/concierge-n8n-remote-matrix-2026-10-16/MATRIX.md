@@ -20,17 +20,39 @@ Production untouched. Shared VPS n8n untouched.
 - Persistence: `upsert_request` / appointments / turn store
 - No silent fallback to local coordinator when remote fails (`ok:false` + visible copy)
 
-## Matrix
+## Matrix by layer
 
-| Suite | Mode | Result | Evidence |
-| --- | --- | --- | --- |
-| Plumbing e2e (prior) | **local** coordinator | Keep separate; script still sets `AI_CONCIERGE_N8N_MODE=local` | `scripts/test-concierge-n8n-plumbing-e2e.mjs` |
-| HTTP remote plumbing | **n8n remote** | PASS (corr. turnId + executionId + HS) | `docs/.../concierge-n8n-remote-2026-10-16T19-57-09` |
-| Pending edge cases | **n8n remote** | PASS (failed=0) | `docs/.../concierge-pending-2026-10-16T20-01-36` |
-| Browser widget plumbing | **UI + remote** | PASS core path: typos → name/phone → phone fix → location → HS-2026-000009 → business WA → resume → slots chips → reload hydrates transcript + card. Booking: 12:00 `slot_taken` (contention from parallel pending tests); 2:00 initially missed 12h→24h map (fixed). | `docs/.../concierge-browser-ui-2026-10-16/` |
-| A06 physical push | **device** | BLOCKED | No authorized test device/FCM creds in this session |
+### Layer A — HTTP / n8n remote (no UI)
 
-## Pending cases (remote)
+| Suite | Result | Evidence |
+| --- | --- | --- |
+| Plumbing e2e (prior) | Keep separate (`AI_CONCIERGE_N8N_MODE=local`) | `scripts/test-concierge-n8n-plumbing-e2e.mjs` |
+| HTTP remote plumbing | **PASS** (turnId + executionId + HS) | `docs/.../concierge-n8n-remote-2026-10-16T19-57-09` |
+| Pending edge cases | **PASS** (failed=0) | `docs/.../concierge-pending-2026-10-16T20-01-36` |
+| 12h→24h Panama slot parse | **PASS** (a.m. / p.m. / afternoon / bare HH:MM) | `scripts/test-slot-12h24h-panama.mjs` + fix in `business-tools.ts` |
+
+### Layer B — Browser widget (real UI + remote n8n)
+
+| Case | Result | Evidence |
+| --- | --- | --- |
+| Core plumbing (typos → HS → WA → resume → slots → reload) | **PASS** (prior) | `docs/.../concierge-browser-ui-2026-10-16/01…03-*.png` |
+| `slot_taken` root cause | **Contention** (not defect): busy CONFIRMED rows from parallel tests | Cleared exclusive; see CORRELATION |
+| Book from widget chip | **PASS** | `04-booking-confirmed.png` · turn `795625ae-…` · n8n **179** · `HA-3e64a4ea` 14:00 CONFIRMED |
+| Reload persistence | **PASS** | `05-booking-persisted-reload.png` · card Visita confirmada |
+| Reschedule from conversation | **PASS** | chip 4:00 p. m. → DB 16:00 RESCHEDULED · n8n **181** |
+| Cancel from conversation | **PASS** | confirm sí → CANCELLED · turn `d3c1dac9-…` · `06-reschedule-cancel.png` |
+| Correlation UI ↔ turn ↔ n8n ↔ cita | **PASS** | `docs/.../concierge-browser-ui-2026-10-16/CORRELATION.md` |
+
+Do **not** treat HTTP-only booking as Layer B PASS.
+
+### Layer C — A06 physical push
+
+| Case | Result | Evidence |
+| --- | --- | --- |
+| Exact BLOCKED reason | **BLOCKED** — `adb devices -l` empty (no device attached). Not yet Firebase/credentials/network. | `docs/.../a06-push-blocked-2026-10-16/BLOCKED.md` |
+| Nueva solicitud → push físico / FG·BG·killed / tap→detail / logout / reminder invalidate | **Not run** | Requires USB device authorized (`device` state) |
+
+## Pending cases (remote) — Layer A
 
 | Case | Result |
 | --- | --- |
@@ -46,15 +68,14 @@ Production untouched. Shared VPS n8n untouched.
 
 ## Notifications honesty
 
-`DELIVERED` in Control push DB means **outbox/job marked delivered after n8n accepted the send payload** (`ControlPushN8nAccepted`). It does **not** prove:
+`DELIVERED` in Control push DB means **outbox/job marked delivered after n8n accepted the send payload** (`ControlPushN8nAccepted`). It does **not** prove physical phone receipt.
 
-1. Simulated transport only — isolated tests with dry/mocked dispatch
-2. Event persisted — outbox/reminder row exists
-3. FCM accepted — n8n/FCM HTTP accept (`accepted`)
-4. Physical phone receipt — requires device
-5. Correct detail open — requires A06 UI path
+A06 physical cases: **BLOCKED** — empty `adb devices`; connect authorized test phone before retrying. Do not mutate production appointments/customers.
 
-A06 physical cases: **BLOCKED** — need authorized test operator device + FCM path; do not mutate production appointments/customers.
+## Remaining exact pendings
+
+1. **A06 physical** — attach/authorize USB test device; then run push FG/BG/killed, tap→detail, logout, reminder invalidation on isolated stack only.
+2. Optional: UI live race re-offer chips after BOOK fail (workflow path present; Layer A contention already PASS).
 
 ## Reproduce isolated stack
 
@@ -78,6 +99,7 @@ node scripts/start-concierge-isolated.mjs
 # 7) Tests
 node scripts/test-concierge-n8n-remote-http.mjs
 node scripts/test-concierge-pending-cases.mjs
+npx tsx scripts/test-slot-12h24h-panama.mjs
 # Browser: open http://127.0.0.1:3095/contact → chat widget
 ```
 
@@ -85,5 +107,5 @@ node scripts/test-concierge-pending-cases.mjs
 
 - Docker Desktop / WSL distro unavailable → npm-local n8n + portable Node 22
 - VPS SSH previously denied → no remote isolated container used
-- A06 physical push BLOCKED without device/credentials
+- A06: no USB device in `adb devices`
 - System Node is v24; n8n requires ≤22 (portable Node used only for n8n)
