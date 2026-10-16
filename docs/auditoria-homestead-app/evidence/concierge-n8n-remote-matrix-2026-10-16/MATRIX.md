@@ -74,8 +74,9 @@ A06 physical cases: **BLOCKED** — empty `adb devices`; connect authorized test
 
 ## Remaining exact pendings
 
-1. **A06 physical** — attach/authorize USB test device; then run push FG/BG/killed, tap→detail, logout, reminder invalidation on isolated stack only.
-2. Optional: UI live race re-offer chips after BOOK fail (workflow path present; Layer A contention already PASS).
+1. **A06 physical** — phone unavailable; left pending. Attach/authorize USB test device later; then push FG/BG/killed, tap→detail, logout, reminder invalidation (isolated only). Not declared verified.
+2. **Production go-live** — preparation only (not executed): `docs/DEPLOY/HOMESTEAD-CONCIERGE-N8N-GO-LIVE.md` + `n8n/homestead-n8n-concierge-turn.prod.json`.
+3. Optional: UI live race re-offer chips after BOOK fail (workflow path present; Layer A contention already PASS).
 
 ## Reproduce isolated stack
 

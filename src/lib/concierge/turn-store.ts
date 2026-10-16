@@ -199,6 +199,44 @@ export function getConversationEngine(conversationId: string): "legacy" | "n8n" 
   return "";
 }
 
+/** True when the conversation already has transcript or lead work — keep legacy on n8n rollout. */
+export function conversationHasPriorWork(conversationId: string): boolean {
+  ensureConciergeTurnTables();
+  const db = getHomesteadDb();
+  const msg = db
+    .prepare(`SELECT COUNT(*) AS n FROM concierge_messages WHERE conversation_id = ?`)
+    .get(conversationId) as { n: number } | undefined;
+  if (Number(msg?.n || 0) > 0) return true;
+  const conv = db
+    .prepare(`SELECT lead_public_id, state_json FROM concierge_conversations WHERE id = ?`)
+    .get(conversationId) as { lead_public_id?: string; state_json?: string } | undefined;
+  if (!conv) return false;
+  if (String(conv.lead_public_id || "").trim()) return true;
+  try {
+    const state = JSON.parse(conv.state_json || "{}") as Record<string, unknown>;
+    if (state.activeLeadId || state.primaryService || state.service || state.problem) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * Pin once per conversation. Existing unpinned chats stay on legacy when desired=n8n
+ * so flipping the global flag does not migrate in-flight customers mid-thread.
+ */
+export function resolveAndPinConversationEngine(
+  conversationId: string,
+  desired: "legacy" | "n8n",
+): "legacy" | "n8n" {
+  const pinned = getConversationEngine(conversationId);
+  if (pinned) return pinned;
+  const choose =
+    desired === "n8n" && conversationHasPriorWork(conversationId) ? "legacy" : desired;
+  pinConversationEngine(conversationId, choose);
+  return choose;
+}
+
 /** Drop stale in-flight results when a newer turn for the same conversation completed. */
 export function shouldAcceptTurnResult(turnId: string): boolean {
   const turn = getTurn(turnId);

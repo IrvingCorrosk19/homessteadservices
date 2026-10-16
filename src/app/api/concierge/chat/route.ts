@@ -6,7 +6,7 @@ import {
 } from "@/lib/concierge-engine";
 import { conciergeEngine } from "@/lib/concierge-flags";
 import { runConciergeN8nTurn } from "@/lib/concierge/n8n-coordinator";
-import { getConversationEngine, pinConversationEngine } from "@/lib/concierge/turn-store";
+import { resolveAndPinConversationEngine } from "@/lib/concierge/turn-store";
 import {
   addEvent,
   countRecentByIp,
@@ -269,11 +269,8 @@ export async function POST(request: Request) {
   if (!message) return NextResponse.json({ ok: false }, { status: 400 });
 
   try {
-    // One engine per conversation — pin on first turn; never silent mid-op switch.
-    const desired = conciergeEngine();
-    const pinned = getConversationEngine(conversationId);
-    const engine = pinned || desired;
-    if (!pinned) pinConversationEngine(conversationId, engine);
+    // One engine per conversation — pin on first eligible turn; existing threads stay legacy.
+    const engine = resolveAndPinConversationEngine(conversationId, conciergeEngine());
 
     if (engine === "n8n") {
       const n8nResult = await runConciergeN8nTurn({
