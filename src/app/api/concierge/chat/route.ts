@@ -4,6 +4,9 @@ import {
   isConciergeEnabled,
   startConcierge,
 } from "@/lib/concierge-engine";
+import { conciergeEngine } from "@/lib/concierge-flags";
+import { runConciergeN8nTurn } from "@/lib/concierge/n8n-coordinator";
+import { getConversationEngine, pinConversationEngine } from "@/lib/concierge/turn-store";
 import {
   addEvent,
   countRecentByIp,
@@ -261,6 +264,30 @@ export async function POST(request: Request) {
   if (!message) return NextResponse.json({ ok: false }, { status: 400 });
 
   try {
+    // One engine per conversation — pin on first turn; never silent mid-op switch.
+    const desired = conciergeEngine();
+    const pinned = getConversationEngine(conversationId);
+    const engine = pinned || desired;
+    if (!pinned) pinConversationEngine(conversationId, engine);
+
+    if (engine === "n8n") {
+      const n8nResult = await runConciergeN8nTurn({
+        conversationId,
+        message,
+        utm: payload.utm && typeof payload.utm === "object" ? payload.utm : {},
+        idempotencyKey: `chat:${conversationId}:${message.slice(0, 80)}:${Math.floor(Date.now() / 2000)}`,
+      });
+      const res = NextResponse.json({ ...n8nResult, conversationId, engine: "n8n" });
+      res.cookies.set(COOKIE, conversationId, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
+        secure: process.env.NODE_ENV === "production",
+      });
+      return res;
+    }
+
     const result = await conciergeTurn({ conversationId, message, utm: payload.utm });
     if (!result.ok && "error" in result && result.error === "busy") {
       enqueuePendingTurn(conversationId, message);

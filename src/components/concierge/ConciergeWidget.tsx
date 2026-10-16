@@ -987,10 +987,17 @@ export function ConciergeWidget() {
               );
             })}
             {pending && (
-              <p className="mr-auto max-w-[85%] flex items-center gap-1 rounded-2xl border border-line bg-white px-4 py-3" aria-live="polite" aria-label="Escribiendo">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50" />
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:120ms]" />
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:240ms]" />
+              <p
+                className="mr-auto max-w-[85%] flex items-center gap-2 rounded-2xl border border-line bg-white px-4 py-3 text-xs text-mist"
+                aria-live="polite"
+                aria-label="Procesando tu mensaje"
+              >
+                <span className="flex items-center gap-1" aria-hidden>
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:120ms]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-navy/50 [animation-delay:240ms]" />
+                </span>
+                Revisando tu mensaje…
               </p>
             )}
             {sendError && (

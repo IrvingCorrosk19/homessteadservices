@@ -1,0 +1,166 @@
+{
+  "name": "HOMESTEAD — Concierge Turn Coordinator (v1)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "homestead-concierge-turn",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ct-webhook",
+      "name": "Webhook Turn",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 320],
+      "webhookId": "homestead-concierge-turn"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-homestead-internal-secret'] }}",
+              "operation": "equal",
+              "value2": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
+            }
+          ]
+        }
+      },
+      "id": "ct-auth",
+      "name": "¿Secreto interno?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [400, 320]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, code: 'unauthorized' } }}",
+        "options": { "responseCode": 401 }
+      },
+      "id": "ct-deny",
+      "name": "Deny",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [620, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/get_context",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-homestead-internal-secret",
+              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
+            },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { turnId: $json.body.turnId, conversationId: $json.body.conversationId } }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "ct-context",
+      "name": "Tool get_context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/interpret",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-homestead-internal-secret",
+              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
+            },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { turnId: $('Webhook Turn').item.json.body.turnId, conversationId: $('Webhook Turn').item.json.body.conversationId, text: $('Webhook Turn').item.json.body.text || '' } }}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "ct-interpret",
+      "name": "Tool interpret",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [840, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/upsert_request",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-homestead-internal-secret",
+              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
+            },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { turnId: $('Webhook Turn').item.json.body.turnId, conversationId: $('Webhook Turn').item.json.body.conversationId, text: $('Webhook Turn').item.json.body.text || 'continuar' } }}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "ct-upsert",
+      "name": "Tool upsert_request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1060, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, turnId: $('Webhook Turn').item.json.body.turnId, accepted: true } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "ct-ack",
+      "name": "Ack accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1280, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Turn": {
+      "main": [[{ "node": "¿Secreto interno?", "type": "main", "index": 0 }]]
+    },
+    "¿Secreto interno?": {
+      "main": [
+        [{ "node": "Tool get_context", "type": "main", "index": 0 }],
+        [{ "node": "Deny", "type": "main", "index": 0 }]
+      ]
+    },
+    "Tool get_context": {
+      "main": [[{ "node": "Tool interpret", "type": "main", "index": 0 }]]
+    },
+    "Tool interpret": {
+      "main": [[{ "node": "Tool upsert_request", "type": "main", "index": 0 }]]
+    },
+    "Tool upsert_request": {
+      "main": [[{ "node": "Ack accepted", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "homesteadNotes": [
+      "Import into an ISOLATED n8n instance only — never overwrite production workflows.",
+      "Set vars: CONCIERGE_INTERNAL_SECRET, HOMESTEAD_INTERNAL_BASE (e.g. http://homestead_web:3000).",
+      "Remote mode prefers local coordinator writing the final reply via turn store; extend this workflow with Switch nodes for cancel/book/availability as needed.",
+      "No credentials embedded. n8n must not write SQL to business tables."
+    ]
+  }
+}

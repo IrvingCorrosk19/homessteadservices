@@ -204,11 +204,20 @@ export function reconcileTransactionState(
   }
 
   if (detectNewTransactionSignal(next, text, resolvePrimaryFromMessage(text) || next.primaryService)) {
+    // Park prior HS — never silently destroy the open request. Second service is ADD, not wipe.
+    const priorLead = next.activeLeadId || "";
+    const priorService = next.primaryService || next.service || "";
     next = clearActiveTransactionState(next, true);
-    next.activeLeadId = "";
+    next.facts = {
+      ...(next.facts || {}),
+      parkedRequestId: priorLead || next.facts?.parkedRequestId || "",
+      parkedService: priorService || next.facts?.parkedService || "",
+      secondaryNeedPending: "1",
+    };
+    // Keep activeLeadId if same customer continues; only clear appointment booking state above.
+    // Do NOT blank activeLeadId here — cancellation/ops still need the folio.
     next.appointmentId = "";
     next.funnelStage = "DISCOVERY";
-    // CRITICAL: evidence from a prior request must not satisfy a new digital-lock case
     const prior = getDigitalLockChecklist(next);
     if (prior.active || prior.front || prior.inside || prior.edge) {
       next = setDigitalLockChecklist(next, emptyDigitalLockChecklist());

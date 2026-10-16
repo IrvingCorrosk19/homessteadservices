@@ -1,0 +1,133 @@
+{
+  "cid": "65ae8d88-781e-411c-82a6-663e8834d28c",
+  "folio": "HS-2026-000001",
+  "turns": [
+    {
+      "user": "Tengo una fuga debajo del lavamanos",
+      "reply": "Quedó registrada HS-2026-000001 de plomería. Seguimos con lo que haga falta.\n\nPara registrar la solicitud, ¿me compartes un teléfono de contacto?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "Me llamo Carla Prueba y mi teléfono es 61119876",
+      "reply": "¿En qué zona o barrio estás?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "perdón el correcto es 62228765",
+      "reply": "¿En qué zona o barrio estás?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "estoy en Bethania cerca del parque",
+      "reply": "Ya tengo tu solicitud. ¿Reviso horarios disponibles o prefieres que te contacten?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "cuál es el WhatsApp de Homestead?",
+      "reply": "WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "ok sigamos con la fuga",
+      "reply": "Ya tengo tu solicitud. ¿Reviso horarios disponibles o prefieres que te contacten?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "qué horarios tienen disponibles?",
+      "reply": "Estos horarios están libres ahora (se revalidan al reservar):\n1) sábado, 17 oct, 8:00 a. m.\n2) sábado, 17 oct, 10:00 a. m.\n3) sábado, 17 oct, 12:00 p. m.\n4) sábado, 17 oct, 2:00 p. m.\n¿Cuál te queda mejor?",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "open",
+        "when": ""
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "2026-10-17 08:00",
+      "reply": "Quedó reservada la visita para sábado, 17 oct, 8:00 a. m..",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "scheduled",
+        "when": "2026-10-17 08:00"
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "quiero cancelar la solicitud",
+      "reply": "¿Confirmas que cancelo la solicitud completa? Responde sí para confirmar.",
+      "leadId": "HS-2026-000001",
+      "requestCard": {
+        "publicId": "HS-2026-000001",
+        "serviceLabel": "Plomería",
+        "status": "scheduled",
+        "when": "2026-10-17 08:00"
+      },
+      "status": "DONE"
+    },
+    {
+      "user": "sí",
+      "reply": "Cancelé la solicitud HS-2026-000001. Si necesitas algo más, dímelo.",
+      "leadId": null,
+      "requestCard": null,
+      "status": "DONE"
+    }
+  ],
+  "hs": {
+    "public_id": "HS-2026-000001",
+    "phone": "+50762228765",
+    "service": "plumbing",
+    "message": "[Asistente web Homestead]\nPlomería\nZona: Bethania Cerca Del Parque\nok sigamos con la fuga\nZona: Bethania Cerca Del Parque. "
+  },
+  "pushRows": [
+    {
+      "event_type": "control.push.new_request",
+      "status": "DELIVERED"
+    }
+  ]
+}

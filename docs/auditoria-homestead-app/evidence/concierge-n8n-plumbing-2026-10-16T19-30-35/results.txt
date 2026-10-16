@@ -1,0 +1,19 @@
+PASS [simulacion] start · 65ae8d88-781e-411c-82a6-663e8834d28c
+PASS [simulacion] business contact no customer digits · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [simulacion] business contact uses official/config
+PASS [simulacion] HS created exactly once context · HS-2026-000001
+PASS [simulacion] phone corrected on state · +50762228765
+PASS [simulacion] location retained after interrupt · Bethania Cerca Del Parque
+PASS [simulacion] service_requests row · HS-2026-000001
+PASS [simulacion] HS phone corrected · +50762228765
+PASS [simulacion] HS service plumbing · plumbing
+PASS [simulacion] exactly one HS in isolated DB · 1
+PASS [simulacion] push new_request event · [{"event_type":"control.push.new_request","status":"DELIVERED"}]
+PASS [simulacion] availability reply · Estos horarios están libres ahora (se revalidan al reservar):
+1) sábado, 17 oct, 8:00 a. m.
+2) sábado, 17 oct, 10:00 a. 
+PASS [simulacion] book attempt replied · Quedó reservada la visita para sábado, 17 oct, 8:00 a. m..
+PASS [simulacion] cancel asks confirmation · ¿Confirmas que cancelo la solicitud completa? Responde sí para confirmar.
+PASS [simulacion] cancel completed or explained · Cancelé la solicitud HS-2026-000001. Si necesitas algo más, dímelo.
+PASS [simulacion] absent business contact · En este momento no tengo un teléfono o WhatsApp comercial verificado para compartir aquí. Seguimos a
+failed=0

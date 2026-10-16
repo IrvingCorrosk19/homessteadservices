@@ -91,10 +91,11 @@ export function selectOfferedSlot(state: ConversationState, slot: OfferedSlot): 
 export function formatSlotSelectionConfirmation(state: ConversationState): string {
   const slot = state.pendingSlot;
   if (!slot?.date || !slot?.time) {
-    return "Anoto ese horario. Reviso que siga libre en la agenda.";
+    return "Anoto ese horario y lo valido ahora en la agenda antes de confirmar.";
   }
   const label = slot.label || formatPanamaSlot(slot.date, slot.time);
-  return `${label} queda seleccionado. Reviso que siga libre y confirmo la visita.`;
+  // Do not promise confirmation — booking completes only when create_appointment succeeds.
+  return `${label} queda seleccionado. Lo valido ahora en la agenda; si sigue libre confirmo la visita en este mismo paso.`;
 }
 
 export function shouldBlockStaleSlotOffer(

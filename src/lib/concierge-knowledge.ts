@@ -44,10 +44,10 @@ export function conciergeKnowledge() {
 }
 
 /** Lineage: hs-concierge-v3.1-he */
-export const CONCIERGE_PROMPT_VERSION = "hs-concierge-v3.2-nc-bizsep";
+export const CONCIERGE_PROMPT_VERSION = "hs-concierge-v3.3-n8n";
 
 /** Build marker for production deploy verification (no secrets). Local natural-conversation engine. */
-export const CONCIERGE_BUILD_MARKER = "v3.2-nc-bizsep";
+export const CONCIERGE_BUILD_MARKER = "v3.3-n8n";
 
 function personaPrompt(brand: string, region: string) {
   return `PERSONA
