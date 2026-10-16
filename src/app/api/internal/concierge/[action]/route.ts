@@ -23,6 +23,12 @@ const ALLOWED = new Set<BusinessToolName>([
   "human_handoff",
   "list_services",
   "reconcile_request",
+  "route_decision",
+  "second_service",
+  "cancel_all_ask",
+  "cancel_all_confirm",
+  "finalize_turn",
+  "compose_ask",
 ]);
 
 export async function POST(request: Request, ctx: { params: Promise<{ action: string }> }) {
@@ -59,5 +65,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
     stage: tool,
   });
   const result = await dispatchBusinessTool(tool, body);
-  return NextResponse.json(result, { status: result.ok ? 200 : 422 });
+  // Business-tool failures stay HTTP 200 with ok:false so n8n Code nodes
+  // can branch without aborting the whole coordination execution.
+  return NextResponse.json(result, { status: 200 });
 }

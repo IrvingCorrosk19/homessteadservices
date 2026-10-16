@@ -1,0 +1,19 @@
+PASS [n8n-remote] engine n8n · engine=n8n
+PASS [n8n-remote] first turn not silent-local-ok-on-n8n-fail · no_error
+PASS [n8n-remote] business contact visible · WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu
+PASS [n8n-remote] no customer phone in business reply
+PASS [n8n-remote] cookie conversation · 5a2815c8-5c7
+PASS [n8n-remote] isolated sqlite exists · C:\Proyectos\HOMESTEAD SERVICES\data\control-test\homestead.sqlite
+PASS [n8n-remote] turns persisted DONE · 10
+PASS [n8n-remote] n8n executionId correlated · [{"turnId":"54a00eb1-1f12-4e9c-82cb-88e791ebbc75","executionId":"13","folio":"HS-2026-000003"},{"turnId":"d0090fe2-ae4f-4304-9e2a-ce035831601f","executionId":"12","folio":"HS-2026-000003"},{"turnId":"8ae24b11-b816-4c44-956d-67ca0589a562","executionId":"11","folio":"HS-2026-000003"}]
+PASS [n8n-remote] HS created · HS-2026-000003
+PASS [n8n-remote] HS phone corrected · +50762228765
+PASS [n8n-remote] HS plumbing · plumbing
+PASS [n8n-remote] availability reply · Estos horarios están libres ahora (se revalidan al reservar):
+1) sábado, 17 oct, 8:00 a. m.
+2) sábado, 17 oct, 10:00 a. m.
+3) sábado, 17 oct
+PASS [n8n-remote] book skipped no concrete slot in copy · no YYYY-MM-DD HH:MM in reply
+PASS [n8n-remote] remote failures visible when present · failed=2
+
+failed=0

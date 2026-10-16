@@ -42,17 +42,18 @@ import { detectServices } from "@/lib/concierge/playbook-engine";
 import { getPlaybook } from "@/lib/concierge/service-playbooks";
 import { logInfo, logError } from "@/lib/log";
 
-function formFallbackReply(): TurnReplyPayload {
+function formFallbackReply(turnId = "", code = "n8n_unavailable"): TurnReplyPayload {
   return {
-    ok: true,
+    ok: false,
     reply:
-      "En este momento el asistente coordinado no está disponible. Puedes dejar tu solicitud en el formulario de contacto y el equipo te responde.",
-    turnId: "",
+      "El coordinador n8n no respondió correctamente. Tus datos previos siguen guardados. Puedes reintentar en un momento o usar el formulario de contacto.",
+    turnId,
     status: "FAILED",
     contactUrl: "/contact",
     chips: [],
     processing: false,
     engine: "n8n",
+    error: code,
   };
 }
 
@@ -284,11 +285,14 @@ async function runRemoteCoordinator(input: {
 }): Promise<TurnReplyPayload> {
   const url = conciergeN8nWebhookUrl();
   const secret = conciergeInternalSecret();
+  // Remote mode: NEVER fall back to local coordinator — failures stay visible.
   if (!url || !secret) {
     logError("ConciergeN8nRemoteMisconfigured", { contentJobId: input.conversationId.slice(0, 8) });
-    return formFallbackReply();
+    updateTurn(input.turnId, { status: "FAILED", errorCode: "remote_misconfigured", completed: true });
+    return formFallbackReply(input.turnId, "remote_misconfigured");
   }
   updateTurn(input.turnId, { status: "INTERPRETING" });
+  let n8nExecutionId = "";
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -300,22 +304,22 @@ async function runRemoteCoordinator(input: {
         turnId: input.turnId,
         conversationId: input.conversationId,
         messageId: input.messageId,
-        // No raw PII beyond what n8n needs to fetch context via tools
         hasText: Boolean(input.text),
         textLength: input.text.length,
       }),
-      signal: AbortSignal.timeout(Math.min(conciergeTurnTimeoutMs(), 20000)),
+      signal: AbortSignal.timeout(Math.min(conciergeTurnTimeoutMs(), 25000)),
     });
     if (!res.ok) {
       updateTurn(input.turnId, { status: "FAILED", errorCode: `webhook_${res.status}`, completed: true });
-      return formFallbackReply();
+      return formFallbackReply(input.turnId, `webhook_${res.status}`);
     }
+    const ack = (await res.json().catch(() => null)) as { executionId?: string; ok?: boolean } | null;
+    n8nExecutionId = String(ack?.executionId || "");
   } catch {
     updateTurn(input.turnId, { status: "FAILED", errorCode: "webhook_unreachable", completed: true });
-    return formFallbackReply();
+    return formFallbackReply(input.turnId, "webhook_unreachable");
   }
 
-  // Poll turn until DONE / timeout
   const deadline = Date.now() + conciergeTurnTimeoutMs();
   while (Date.now() < deadline) {
     const turn = (await import("@/lib/concierge/turn-store")).getTurn(input.turnId);
@@ -323,10 +327,14 @@ async function runRemoteCoordinator(input: {
     if (turn.status === "DONE" && turn.replyJson) {
       if (!shouldAcceptTurnResult(input.turnId)) {
         updateTurn(input.turnId, { status: "SUPERSEDED", completed: true });
-        return formFallbackReply();
+        return formFallbackReply(input.turnId, "superseded");
       }
       try {
-        return JSON.parse(turn.replyJson) as TurnReplyPayload;
+        const parsed = JSON.parse(turn.replyJson) as TurnReplyPayload & {
+          n8nExecutionId?: string;
+        };
+        if (n8nExecutionId && !parsed.n8nExecutionId) parsed.n8nExecutionId = n8nExecutionId;
+        return parsed;
       } catch {
         break;
       }
@@ -336,8 +344,8 @@ async function runRemoteCoordinator(input: {
   }
   updateTurn(input.turnId, { status: "TIMED_OUT", errorCode: "turn_timeout", completed: true });
   return {
-    ...formFallbackReply(),
-    reply: "Está tardando más de lo normal. Tus datos siguen guardados; puedes reintentar o usar el formulario de contacto.",
+    ...formFallbackReply(input.turnId, "turn_timeout"),
+    reply: "n8n no finalizó el turno a tiempo. Tus datos siguen guardados; puedes reenviar el mensaje o usar el formulario.",
     status: "TIMED_OUT",
     turnId: input.turnId,
     processing: false,

@@ -1,5 +1,6 @@
 {
-  "name": "HOMESTEAD — Concierge Turn Coordinator (v1)",
+  "name": "HOMESTEAD — Concierge Turn Coordinator (v2)",
+  "active": false,
   "nodes": [
     {
       "parameters": {
@@ -12,7 +13,10 @@
       "name": "Webhook Turn",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [180, 320],
+      "position": [
+        200,
+        300
+      ],
       "webhookId": "homestead-concierge-turn"
     },
     {
@@ -20,147 +24,124 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{ $json.headers['x-homestead-internal-secret'] }}",
+              "value1": "={{ $json.headers['x-homestead-internal-secret'] || $json.headers['X-Homestead-Internal-Secret'] }}",
               "operation": "equal",
-              "value2": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
+              "value2": "={{ $env.CONCIERGE_INTERNAL_SECRET }}"
             }
           ]
         }
       },
       "id": "ct-auth",
-      "name": "¿Secreto interno?",
+      "name": "Auth OK?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [400, 320]
+      "position": [
+        420,
+        300
+      ]
     },
     {
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ { ok: false, code: 'unauthorized' } }}",
-        "options": { "responseCode": 401 }
+        "options": {
+          "responseCode": 401
+        }
       },
       "id": "ct-deny",
       "name": "Deny",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [620, 480]
+      "position": [
+        640,
+        480
+      ]
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/get_context",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-homestead-internal-secret",
-              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
-            },
-            { "name": "content-type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { turnId: $json.body.turnId, conversationId: $json.body.conversationId } }}",
-        "options": { "timeout": 15000 }
+        "jsCode": "const base = ($env.HOMESTEAD_INTERNAL_BASE || 'http://127.0.0.1:3095').replace(/\\/$/, '');\nconst secret = $env.CONCIERGE_INTERNAL_SECRET || '';\nconst root = $input.first().json;\nconst body = root.body || root;\nconst turnId = body.turnId;\nconst conversationId = body.conversationId;\nconst executionId = String($execution.id || '');\n\nasync function tool(name, payload = {}) {\n  try {\n    return await this.helpers.httpRequest({\n      method: 'POST',\n      url: `${base}/api/internal/concierge/${name}`,\n      headers: {\n        'content-type': 'application/json',\n        'x-homestead-internal-secret': secret,\n      },\n      body: { turnId, conversationId, ...payload },\n      json: true,\n      timeout: 20000,\n    });\n  } catch (err) {\n    const msg = err && err.message ? String(err.message) : String(err);\n    let parsed = null;\n    try { parsed = err && err.response && err.response.body ? err.response.body : null; } catch (_) {}\n    return parsed && typeof parsed === 'object'\n      ? parsed\n      : { ok: false, code: 'tool_http_error', message: msg.slice(0, 200), tool: name };\n  }\n}\n\nconst interpret = await tool('interpret', {});\nconst route = await tool('route_decision', {});\nconst next = (route && route.data && route.data.nextAction) || 'ASK_MISSING';\nconst missing = (route && route.data && route.data.missing) || [];\nlet reply = '';\nlet kind = next;\n\nif (next === 'BUSINESS_CONTACT') {\n  const r = await tool('business_contact', {});\n  reply = (r.data && r.data.reply) || 'No tengo un contacto comercial verificado.';\n} else if (next === 'CANCEL_CONFIRM') {\n  const scope = (route.data.pendingConfirmation === 'CANCEL_APPOINTMENT') ? 'appointment' : 'request';\n  const r = await tool('cancel', { scope, confirm: true });\n  reply = r.ok\n    ? (scope === 'appointment'\n      ? 'Listo, cancelé la cita. La solicitud queda abierta si aún la necesitas.'\n      : `Cancelé la solicitud ${(r.data && r.data.publicId) || ''}.`)\n    : `No pude cancelar (${r.code || 'error'}).`;\n} else if (next === 'CANCEL_ASK') {\n  const r = await tool('cancel', { scope: 'request', confirm: false });\n  reply = (r.data && r.data.awaitingConfirmation)\n    ? '¿Confirmas que cancelo la solicitud completa? Responde sí para confirmar.'\n    : (r.message || '¿Confirmas la cancelación?');\n} else if (next === 'CANCEL_ALL_ASK') {\n  const r = await tool('cancel_all_ask', {});\n  reply = (r.data && r.data.reply) || r.message || 'No pude listar solicitudes.';\n} else if (next === 'CANCEL_ALL_CONFIRM') {\n  const r = await tool('cancel_all_confirm', {});\n  reply = (r.data && r.data.reply) || r.message || 'No pude cancelar.';\n} else if (next === 'SECOND_SERVICE_ASK') {\n  const r = await tool('second_service', {});\n  reply = (r.data && r.data.reply) || '¿Seguimos con la solicitud actual o abrimos otra?';\n} else if (next === 'HUMAN') {\n  const r = await tool('human_handoff', {});\n  reply = (r.data && r.data.reply) || 'Dejo tu caso para revisión humana.';\n} else if (next === 'BOOK') {\n  const hint = route.data.bookHint || {};\n  const r = await tool('book_appointment', { date: hint.date, time: hint.time });\n  reply = r.ok\n    ? `Quedó reservada la visita para ${hint.date || ''} ${hint.time || ''}.`\n    : `Aún no pude confirmar ese horario (${r.code || 'error'}). ¿Probamos otra opción?`;\n} else if (next === 'RESCHEDULE') {\n  const hint = route.data.bookHint || {};\n  if (!hint.date || !hint.time) {\n    const avail = await tool('check_availability', {});\n    const composed = await tool('compose_ask', { kind: 'slots', toolData: avail.data || {} });\n    reply = (composed.data && composed.data.reply) || '¿Qué nuevo horario te sirve?';\n  } else {\n    const r = await tool('reschedule', { date: hint.date, time: hint.time });\n    reply = r.ok\n      ? `Reprogramé la visita para ${hint.date} ${hint.time}.`\n      : (r.message || 'No pude reprogramar; la cita anterior se conserva.');\n  }\n} else if (next === 'CHECK_AVAILABILITY') {\n  await tool('upsert_request', {});\n  const avail = await tool('check_availability', {});\n  const composed = await tool('compose_ask', { kind: 'slots', toolData: avail.data || {} });\n  reply = (composed.data && composed.data.reply) || 'No veo horarios libres.';\n} else if (next === 'DIGITAL_LOCK') {\n  await tool('upsert_request', {});\n  const composed = await tool('compose_ask', { kind: 'digital_lock' });\n  reply = (composed.data && composed.data.reply) || 'Para cerradura digital necesito fotos y contacto.';\n} else if (next === 'LOCKOUT') {\n  const up = await tool('upsert_request', {});\n  const composed = await tool('compose_ask', { kind: 'lockout', toolData: up.data || {} });\n  reply = (composed.data && composed.data.reply) || 'Para la apertura necesito teléfono y zona.';\n} else if (next === 'UPSERT_AND_CONTINUE') {\n  const up = await tool('upsert_request', {});\n  if (up && up.ok) {\n    const composed = await tool('compose_ask', { kind: 'folio_continue', toolData: up.data || {} });\n    reply = (composed.data && composed.data.reply) || 'Seguimos con tu solicitud.';\n  } else {\n    const composed = await tool('compose_ask', { kind: 'missing', toolData: { missing, code: up && up.code } });\n    reply = (composed.data && composed.data.reply) || 'Me faltan algunos datos para registrar la solicitud.';\n  }\n} else {\n  const composed = await tool('compose_ask', { kind: 'missing', toolData: { missing } });\n  reply = (composed.data && composed.data.reply) || 'Cuéntame un poco más (zona y teléfono) para dejarte registrada.';\n}\n\nconst fin = await tool('finalize_turn', { reply, n8nExecutionId: executionId, kind });\nreturn [{\n  json: {\n    ok: true,\n    executionId,\n    turnId,\n    conversationId,\n    nextAction: next,\n    folio: (fin.data && fin.data.folio) || '',\n    interpretOk: !!(interpret && interpret.ok),\n    routeOk: !!(route && route.ok),\n    finalized: !!(fin && fin.ok),\n  }\n}];\n"
       },
-      "id": "ct-context",
-      "name": "Tool get_context",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [620, 200]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/interpret",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-homestead-internal-secret",
-              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
-            },
-            { "name": "content-type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { turnId: $('Webhook Turn').item.json.body.turnId, conversationId: $('Webhook Turn').item.json.body.conversationId, text: $('Webhook Turn').item.json.body.text || '' } }}",
-        "options": { "timeout": 20000 }
-      },
-      "id": "ct-interpret",
-      "name": "Tool interpret",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [840, 200]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.HOMESTEAD_INTERNAL_BASE }}/api/internal/concierge/upsert_request",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-homestead-internal-secret",
-              "value": "={{ $vars.CONCIERGE_INTERNAL_SECRET }}"
-            },
-            { "name": "content-type", "value": "application/json" }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { turnId: $('Webhook Turn').item.json.body.turnId, conversationId: $('Webhook Turn').item.json.body.conversationId, text: $('Webhook Turn').item.json.body.text || 'continuar' } }}",
-        "options": { "timeout": 20000 }
-      },
-      "id": "ct-upsert",
-      "name": "Tool upsert_request",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [1060, 200]
+      "id": "ct-coordinate",
+      "name": "Coordinate Tools",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        200
+      ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { ok: true, turnId: $('Webhook Turn').item.json.body.turnId, accepted: true } }}",
-        "options": { "responseCode": 200 }
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
       },
       "id": "ct-ack",
-      "name": "Ack accepted",
+      "name": "Ack",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1280, 200]
+      "position": [
+        880,
+        200
+      ]
     }
   ],
   "connections": {
     "Webhook Turn": {
-      "main": [[{ "node": "¿Secreto interno?", "type": "main", "index": 0 }]]
-    },
-    "¿Secreto interno?": {
       "main": [
-        [{ "node": "Tool get_context", "type": "main", "index": 0 }],
-        [{ "node": "Deny", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Auth OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Tool get_context": {
-      "main": [[{ "node": "Tool interpret", "type": "main", "index": 0 }]]
+    "Auth OK?": {
+      "main": [
+        [
+          {
+            "node": "Coordinate Tools",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deny",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Tool interpret": {
-      "main": [[{ "node": "Tool upsert_request", "type": "main", "index": 0 }]]
-    },
-    "Tool upsert_request": {
-      "main": [[{ "node": "Ack accepted", "type": "main", "index": 0 }]]
+    "Coordinate Tools": {
+      "main": [
+        [
+          {
+            "node": "Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
   "meta": {
     "templateCredsSetupCompleted": false,
     "homesteadNotes": [
-      "Import into an ISOLATED n8n instance only — never overwrite production workflows.",
-      "Set vars: CONCIERGE_INTERNAL_SECRET, HOMESTEAD_INTERNAL_BASE (e.g. http://homestead_web:3000).",
-      "Remote mode prefers local coordinator writing the final reply via turn store; extend this workflow with Switch nodes for cancel/book/availability as needed.",
-      "No credentials embedded. n8n must not write SQL to business tables."
+      "ISOLATED n8n only. Env: CONCIERGE_INTERNAL_SECRET, HOMESTEAD_INTERNAL_BASE.",
+      "Coordinates via route_decision + discrete business tools + finalize_turn.",
+      "Does NOT invoke the in-process local coordinator.",
+      "No credentials embedded."
     ]
   }
 }

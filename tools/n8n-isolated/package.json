@@ -1,0 +1,15 @@
+{
+  "name": "homestead-n8n-isolated",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Isolated n8n for Homestead concierge remote tests — not production",
+  "scripts": {
+    "start": "node ./start.mjs",
+    "import-workflow": "node ./import-cli.mjs",
+    "import-workflow-api": "node ./import-workflow.mjs",
+    "patch-workflow": "node ./patch-workflow-code.mjs"
+  },
+  "dependencies": {
+    "n8n": "1.72.1"
+  }
+}

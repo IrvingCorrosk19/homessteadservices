@@ -1,0 +1,235 @@
+{
+  "conversationId": "5a2815c8-5c7a-4425-ab1a-dad3a8828a69",
+  "transcript": [
+    {
+      "user": "olaa tengo una fgua debajo del lavamanos",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "Para completar el registro, ¿me compartes un teléfono de contacto?",
+      "turnId": "756f490c-1b7d-421e-b59c-549aaf5f9b31",
+      "status": "DONE",
+      "leadId": null,
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "8"
+    },
+    {
+      "user": "Me llamo Carla Prueba y mi teléfono es 61119876",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "¿En qué zona o barrio estás?",
+      "turnId": "9e1f61e6-082c-411e-b567-f68240405c3b",
+      "status": "DONE",
+      "leadId": null,
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "9"
+    },
+    {
+      "user": "perdón el correcto es 62228765",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "¿En qué zona o barrio estás?",
+      "turnId": "88710b0a-9195-4f4f-9c81-80b680292af1",
+      "status": "DONE",
+      "leadId": null,
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "10"
+    },
+    {
+      "user": "estoy en Bethania cerca del parque",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "Quedó registrada HS-2026-000003 de plomería. Seguimos con lo que haga falta.\n\n¿Qué día y hora te conviene, o prefieres que el equipo te contacte?",
+      "turnId": "8ae24b11-b816-4c44-956d-67ca0589a562",
+      "status": "DONE",
+      "leadId": "HS-2026-000003",
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "11"
+    },
+    {
+      "user": "cuál es el WhatsApp de Homestead?",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "WhatsApp oficial de Homestead: +507 6661-6580. Teléfono publicado: +507 6000-1111. Si prefieres, seguimos coordinando tu solicitud por aquí.",
+      "turnId": "d0090fe2-ae4f-4304-9e2a-ce035831601f",
+      "status": "DONE",
+      "leadId": "HS-2026-000003",
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "12"
+    },
+    {
+      "user": "ok sigamos con la fuga del lavamanos",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "Quedó registrada HS-2026-000003 de plomería. Seguimos con lo que haga falta.\n\n¿Qué día y hora te conviene, o prefieres que el equipo te contacte?",
+      "turnId": "54a00eb1-1f12-4e9c-82cb-88e791ebbc75",
+      "status": "DONE",
+      "leadId": "HS-2026-000003",
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "13"
+    },
+    {
+      "user": "qué horarios tienes disponibles?",
+      "statusHttp": 200,
+      "ok": true,
+      "reply": "Estos horarios están libres ahora (se revalidan al reservar):\n1) sábado, 17 oct, 8:00 a. m.\n2) sábado, 17 oct, 10:00 a. m.\n3) sábado, 17 oct, 12:00 p. m.\n4) sábado, 17 oct, 2:00 p. m.\n¿Cuál te queda mejor?",
+      "turnId": "23fbbb29-cf11-43e4-96d3-f7857ce7c332",
+      "status": "DONE",
+      "leadId": "HS-2026-000003",
+      "engine": "n8n",
+      "error": "",
+      "n8nExecutionId": "14"
+    }
+  ],
+  "executionIds": [
+    {
+      "turnId": "54a00eb1-1f12-4e9c-82cb-88e791ebbc75",
+      "executionId": "13",
+      "folio": "HS-2026-000003"
+    },
+    {
+      "turnId": "d0090fe2-ae4f-4304-9e2a-ce035831601f",
+      "executionId": "12",
+      "folio": "HS-2026-000003"
+    },
+    {
+      "turnId": "8ae24b11-b816-4c44-956d-67ca0589a562",
+      "executionId": "11",
+      "folio": "HS-2026-000003"
+    },
+    {
+      "turnId": "88710b0a-9195-4f4f-9c81-80b680292af1",
+      "executionId": "10",
+      "folio": null
+    },
+    {
+      "turnId": "9e1f61e6-082c-411e-b567-f68240405c3b",
+      "executionId": "9",
+      "folio": null
+    },
+    {
+      "turnId": "756f490c-1b7d-421e-b59c-549aaf5f9b31",
+      "executionId": "8",
+      "folio": null
+    },
+    {
+      "turnId": "f0c85457-8c39-4e36-97c5-0395ea34cd25",
+      "executionId": "7",
+      "folio": "HS-2026-000002"
+    },
+    {
+      "turnId": "11739620-7aa2-43e1-a330-1d58dede853e",
+      "executionId": "6",
+      "folio": "HS-2026-000002"
+    },
+    {
+      "turnId": "7e022dac-60a5-4b2d-a6d5-cf1773c3276d",
+      "executionId": "5",
+      "folio": "HS-2026-000002"
+    },
+    {
+      "turnId": "e85eeba9-8289-4ad6-9fe3-3d615b7ddaa7",
+      "executionId": "2",
+      "folio": null
+    }
+  ],
+  "hs": [
+    {
+      "public_id": "HS-2026-000003",
+      "phone": "+50762228765",
+      "service": "plumbing",
+      "message": "[Asistente web Homestead]\nPlomería\nZona: Bethania Cerca Del Parque\nok sigamos con la fuga del lavamanos\nZona: Bethania Cerca Del Parque. "
+    },
+    {
+      "public_id": "HS-2026-000002",
+      "phone": "+50762228765",
+      "service": "plumbing",
+      "message": "[Asistente web Homestead]\nPlomería\nZona: Bethania Cerca Del Parque\nok sigamos con la fuga del lavamanos\nZona: Bethania Cerca Del Parque. "
+    },
+    {
+      "public_id": "HS-2026-000001",
+      "phone": "+202610170800",
+      "service": "plumbing",
+      "message": "[Asistente web Homestead]\nPlomería\nZona: Bethania Cerca Del Parque\nok sigamos con la fuga\nZona: Bethania Cerca Del Parque. "
+    }
+  ],
+  "recentTurns": [
+    {
+      "turnId": "54a00eb1-1f12-4e9c-82cb-88e791ebbc75",
+      "status": "DONE",
+      "error": "",
+      "user": "ok sigamos con la fuga del lavamanos"
+    },
+    {
+      "turnId": "d0090fe2-ae4f-4304-9e2a-ce035831601f",
+      "status": "DONE",
+      "error": "",
+      "user": "cuál es el WhatsApp de Homestead?"
+    },
+    {
+      "turnId": "8ae24b11-b816-4c44-956d-67ca0589a562",
+      "status": "DONE",
+      "error": "",
+      "user": "estoy en Bethania cerca del parque"
+    },
+    {
+      "turnId": "88710b0a-9195-4f4f-9c81-80b680292af1",
+      "status": "DONE",
+      "error": "",
+      "user": "perdón el correcto es 62228765"
+    },
+    {
+      "turnId": "9e1f61e6-082c-411e-b567-f68240405c3b",
+      "status": "DONE",
+      "error": "",
+      "user": "Me llamo Carla Prueba y mi teléfono es 61119876"
+    },
+    {
+      "turnId": "756f490c-1b7d-421e-b59c-549aaf5f9b31",
+      "status": "DONE",
+      "error": "",
+      "user": "olaa tengo una fgua debajo del lavamanos"
+    },
+    {
+      "turnId": "f0c85457-8c39-4e36-97c5-0395ea34cd25",
+      "status": "DONE",
+      "error": "",
+      "user": "ok sigamos con la fuga del lavamanos"
+    },
+    {
+      "turnId": "11739620-7aa2-43e1-a330-1d58dede853e",
+      "status": "DONE",
+      "error": "",
+      "user": "cuál es el WhatsApp de Homestead?"
+    },
+    {
+      "turnId": "7e022dac-60a5-4b2d-a6d5-cf1773c3276d",
+      "status": "DONE",
+      "error": "",
+      "user": "estoy en Bethania cerca del parque"
+    },
+    {
+      "turnId": "815526bc-691a-4269-ada2-fa0ef8b1acff",
+      "status": "FAILED",
+      "error": "webhook_500",
+      "user": "perdón el correcto es 62228765"
+    },
+    {
+      "turnId": "ae99be0f-7aa4-45ee-a5c2-d74944c5e92d",
+      "status": "FAILED",
+      "error": "webhook_500",
+      "user": "Me llamo Carla Prueba y mi teléfono es 61119876"
+    },
+    {
+      "turnId": "e85eeba9-8289-4ad6-9fe3-3d615b7ddaa7",
+      "status": "DONE",
+      "error": "",
+      "user": "olaa tengo una fgua debajo del lavamanos"
+    }
+  ]
+}

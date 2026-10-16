@@ -4,10 +4,15 @@
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import { classifyPhone } from "@/lib/phone";
-import { conciergeInternalSecret } from "@/lib/concierge-flags";
-import { getConversation, touchConversation, type ConversationState } from "@/lib/concierge-store";
+import { conciergeInternalSecret, isConciergeDryRun } from "@/lib/concierge-flags";
+import { addMessage, getConversation, touchConversation, type ConversationState } from "@/lib/concierge-store";
 import { detectServices } from "@/lib/concierge/playbook-engine";
-import { ensureActiveServiceRequest, syncServiceRequestFromState, buildRequestCard } from "@/lib/concierge/service-request-lifecycle";
+import {
+  ensureActiveServiceRequest,
+  syncServiceRequestFromState,
+  buildRequestCard,
+  requestFolioIntro,
+} from "@/lib/concierge/service-request-lifecycle";
 import {
   authorizeConversationAction,
   resolveTurnIntent,
@@ -21,10 +26,13 @@ import { isBusinessContactQuestion, formatBusinessContactReply, getBusinessConta
 import { checkAvailability } from "@/lib/concierge-availability";
 import { executeConciergeTool } from "@/lib/concierge-tools";
 import { cancelServiceRequest } from "@/lib/service-request-cancellation";
-import { getHomesteadDb } from "@/lib/service-requests";
-import { bumpConversationStateVersion } from "@/lib/concierge/turn-store";
-import type { StructuredIntent, ToolResultEnvelope } from "@/lib/concierge/turn-protocol";
+import { getHomesteadDb, getRequestByPublicId } from "@/lib/service-requests";
+import { bumpConversationStateVersion, getTurn, updateTurn, shouldAcceptTurnResult } from "@/lib/concierge/turn-store";
+import type { StructuredIntent, ToolResultEnvelope, TurnReplyPayload } from "@/lib/concierge/turn-protocol";
 import { detectLockoutIntent } from "@/lib/service-requirements";
+import { detectDigitalLockPurchaseIntent } from "@/lib/concierge/digital-lock-intent";
+import { buildSessionSnapshot } from "@/lib/concierge-transaction";
+import { getPlaybook } from "@/lib/concierge/service-playbooks";
 
 export function verifyInternalAuth(headerValue: string | null | undefined): boolean {
   const expected = conciergeInternalSecret();
@@ -77,9 +85,15 @@ export function toolGetContext(conversationId: string): ToolResultEnvelope {
 export function toolInterpret(conversationId: string, text: string): ToolResultEnvelope {
   const conv = getConversation(conversationId);
   if (!conv) return fail("interpret", "not_found", "Conversación no encontrada");
+  const priorService = conv.state.primaryService || conv.state.service || "";
+  const priorLead = conv.state.activeLeadId || "";
   let state = applyPackedExtraction(conv.state, text);
-  const intent = classifyActionableServiceIntent(text, state);
   const services = detectServices(text);
+  // Never let packed extraction silently switch service on an active HS.
+  if (priorLead && priorService && services[0] && services[0] !== priorService) {
+    state = { ...state, primaryService: priorService, service: priorService };
+  }
+  const intent = classifyActionableServiceIntent(text, state);
   const missing: string[] = [];
   if (state.contactStatus !== "VALID") missing.push("phone");
   if (!state.location?.trim()) missing.push("location");
@@ -158,6 +172,21 @@ export async function toolUpsertRequest(
   const conv = getConversation(conversationId);
   if (!conv) return fail("upsert_request", "not_found", "Conversación no encontrada");
   let state = conv.state;
+  const incomingSvc = detectServices(userText)[0] || "";
+  const currentSvc = state.primaryService || state.service || "";
+  if (
+    state.activeLeadId &&
+    incomingSvc &&
+    currentSvc &&
+    incomingSvc !== currentSvc &&
+    state.facts?.pendingConfirmation !== "SECOND_SERVICE_CHOICE"
+  ) {
+    return fail(
+      "upsert_request",
+      "second_service_requires_choice",
+      "Hay una solicitud activa; confirma si continúas con ella o abres otra antes de cambiar el servicio",
+    );
+  }
   const resolved = resolveTurnIntent(userText, state);
   const plan = buildTurnActionPlan(resolved, state);
   const auth = authorizeConversationAction("CREATE_REQUEST", {
@@ -301,18 +330,32 @@ export async function toolReschedule(
 ): Promise<ToolResultEnvelope> {
   const conv = getConversation(conversationId);
   if (!conv) return fail("reschedule", "not_found", "Conversación no encontrada");
+  const priorAppointmentId = conv.state.appointmentId || "";
   const toolResult = await executeConciergeTool(
     "reschedule_appointment",
-    { date: args.date, time: args.time, conversation_id: conversationId },
+    { date: args.date, time: args.time, conversation_id: conversationId, customerConfirmed: true },
     { conversationId, state: conv.state, leadId: conv.state.activeLeadId || "" },
   );
-  touchConversation(conversationId, { state: toolResult.state, leadPublicId: toolResult.leadId || "" });
   const parsed = (toolResult.result || {}) as Record<string, unknown>;
   if (parsed.ok === false) {
-    return fail("reschedule", String(parsed.reason || "reschedule_failed"), String(parsed.message || "No se pudo reprogramar"));
+    // Keep prior appointment on failure — do not clear appointmentId from a failed attempt.
+    const fresh = getConversation(conversationId);
+    if (fresh && priorAppointmentId && !fresh.state.appointmentId) {
+      touchConversation(conversationId, {
+        state: { ...fresh.state, appointmentId: priorAppointmentId },
+      });
+    }
+    return fail(
+      "reschedule",
+      String(parsed.reason || "reschedule_failed"),
+      String(parsed.message || "No se pudo reprogramar; la cita anterior se conserva"),
+    );
   }
+  touchConversation(conversationId, { state: toolResult.state, leadPublicId: toolResult.leadId || "" });
   bumpConversationStateVersion(conversationId);
-  return ok("reschedule", parsed, { persistedIds: { appointmentId: String(parsed.appointmentId || toolResult.state.appointmentId || "") } });
+  return ok("reschedule", parsed, {
+    persistedIds: { appointmentId: String(parsed.appointmentId || toolResult.state.appointmentId || "") },
+  });
 }
 
 export async function toolCancel(
@@ -426,6 +469,417 @@ export function toolReconcileRequest(publicId: string): ToolResultEnvelope {
   });
 }
 
+/**
+ * n8n calls this AFTER interpret to learn the next allowed step.
+ * Does not run the full local coordinator — only classifies the branch.
+ */
+export function toolRouteDecision(conversationId: string, text: string): ToolResultEnvelope {
+  const conv = getConversation(conversationId);
+  if (!conv) return fail("route_decision", "not_found", "Conversación no encontrada");
+  // Compare against pre-extraction service so a new service mention cannot silently overwrite.
+  const priorService = conv.state.primaryService || conv.state.service || "";
+  const incomingService = detectServices(text)[0] || "";
+  const secondService =
+    Boolean(conv.state.activeLeadId) &&
+    Boolean(incomingService) &&
+    Boolean(priorService) &&
+    incomingService !== priorService &&
+    conv.state.facts?.pendingConfirmation !== "SECOND_SERVICE_CHOICE";
+
+  let state = applyPackedExtraction(conv.state, text);
+  if (secondService) {
+    // Keep the first request's service while we ask how to continue.
+    state = {
+      ...state,
+      primaryService: priorService,
+      service: priorService,
+      facts: {
+        ...(state.facts || {}),
+        pendingSecondService: incomingService,
+      },
+    };
+  }
+  touchConversation(conversationId, { state });
+  const intent = classifyActionableServiceIntent(text, state);
+  const pending = state.facts?.pendingConfirmation || "";
+  const affirms =
+    /^(s[ií]|ok|okay|dale|confirmo|afirmativo|de acuerdo|procede)([\s!.?]|$)/i.test(text.trim()) ||
+    /\b(s[ií],?\s*cancel)/i.test(text.trim());
+  const wantsSlots = /\b(horario|disponib|cita|agendar|mañana|pasado\s+mañana)/i.test(text);
+  const ordinal =
+    state.offeredSlots?.length &&
+    (/^\s*(el\s+)?(primero|1|1o|uno)\b/i.test(text) ||
+      /^\s*(el\s+)?(segundo|2|2o|dos)\b/i.test(text) ||
+      /^\s*(el\s+)?(tercero|3|3o|tres)\b/i.test(text) ||
+      /^\s*(el\s+)?(cuarto|4|4o|cuatro)\b/i.test(text));
+  let slotPick = text.match(/\b(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\b/);
+  if (!slotPick && state.offeredSlots?.length) {
+    const hmOnly = text.match(/\b(\d{1,2}:\d{2})\b/);
+    if (hmOnly) {
+      const padded = (() => {
+        const [hh, mm] = hmOnly[1].split(":");
+        return `${hh.padStart(2, "0")}:${mm}`;
+      })();
+      const offered = state.offeredSlots.find((s) => s.time === padded);
+      if (offered?.date && offered?.time) {
+        slotPick = [offered.date + " " + offered.time, offered.date, offered.time] as unknown as RegExpMatchArray;
+      }
+    }
+  }
+  if (!slotPick && ordinal && state.offeredSlots?.length) {
+    const idx = /^\s*(el\s+)?(segundo|2)/i.test(text)
+      ? 1
+      : /^\s*(el\s+)?(tercero|3)/i.test(text)
+        ? 2
+        : /^\s*(el\s+)?(cuarto|4)/i.test(text)
+          ? 3
+          : 0;
+    const chosen = state.offeredSlots[Math.min(idx, state.offeredSlots.length - 1)];
+    if (chosen?.date && chosen?.time) {
+      slotPick = [chosen.date + " " + chosen.time, chosen.date, chosen.time] as unknown as RegExpMatchArray;
+    }
+  }
+  // "el de las 8:00" / "a las 2" / labels with a. m. / p. m.
+  if (!slotPick && state.offeredSlots?.length) {
+    const hm = text.match(/\b(?:a\s+las\s+|las\s+)?(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?)?/i);
+    if (hm) {
+      const hour12 = Number(hm[1]);
+      const mm = (hm[2] || "00").padStart(2, "0");
+      const meridiem = (hm[3] || "").toLowerCase();
+      const candidates = new Set<string>();
+      const hh24from12 = (h: number, pm: boolean) => {
+        let h24 = h % 12;
+        if (pm) h24 += 12;
+        if (!pm && h === 12) h24 = 0;
+        return `${String(h24).padStart(2, "0")}:${mm}`;
+      };
+      if (/p/.test(meridiem)) candidates.add(hh24from12(hour12, true));
+      else if (/a/.test(meridiem)) candidates.add(hh24from12(hour12, false));
+      else {
+        candidates.add(`${String(hour12).padStart(2, "0")}:${mm}`);
+        candidates.add(hh24from12(hour12, true));
+        candidates.add(hh24from12(hour12, false));
+      }
+      const chosen =
+        state.offeredSlots.find((s) => candidates.has(s.time)) ||
+        state.offeredSlots.find((s) => (s.label || "").includes(`${hour12}:${mm}`) || (s.label || "").includes(`${hour12}:`));
+      if (chosen?.date && chosen?.time) {
+        slotPick = [chosen.date + " " + chosen.time, chosen.date, chosen.time] as unknown as RegExpMatchArray;
+      }
+    }
+  }
+  const cancelAll = /\b(cancel\w*|anul\w*)\s+(todas|todo|todos)\b/i.test(text);
+  const lockout = detectLockoutIntent(text) || state.facts?.serviceIntent === "lockout";
+  const digitalLock = detectDigitalLockPurchaseIntent(text);
+
+  let nextAction:
+    | "BUSINESS_CONTACT"
+    | "CANCEL_CONFIRM"
+    | "CANCEL_ASK"
+    | "CANCEL_ALL_ASK"
+    | "CANCEL_ALL_CONFIRM"
+    | "SECOND_SERVICE_ASK"
+    | "BOOK"
+    | "RESCHEDULE"
+    | "UPSERT_AND_CONTINUE"
+    | "CHECK_AVAILABILITY"
+    | "HUMAN"
+    | "ASK_MISSING"
+    | "DIGITAL_LOCK"
+    | "LOCKOUT" = "ASK_MISSING";
+
+  if (isBusinessContactQuestion(text)) nextAction = "BUSINESS_CONTACT";
+  else if (pending === "CANCEL_ALL" && affirms) nextAction = "CANCEL_ALL_CONFIRM";
+  else if (pending && affirms) nextAction = "CANCEL_CONFIRM";
+  else if (cancelAll) nextAction = "CANCEL_ALL_ASK";
+  else if (intent.cancelRequest || intent.cancelAppointmentOnly || /\bcancel/i.test(text)) nextAction = "CANCEL_ASK";
+  else if (/\b(reprogram\w*|cambiar\s+(la\s+)?(cita|hora|fecha))\b/i.test(text)) nextAction = "RESCHEDULE";
+  else if (secondService) nextAction = "SECOND_SERVICE_ASK";
+  else if (digitalLock) nextAction = "DIGITAL_LOCK";
+  else if (lockout) nextAction = "LOCKOUT";
+  else if (slotPick && state.offeredSlots?.length) nextAction = "BOOK";
+  else if (wantsSlots && state.contactStatus === "VALID") nextAction = "CHECK_AVAILABILITY";
+  else if (/\b(humano|asesor|persona)\b/i.test(text)) nextAction = "HUMAN";
+  else if (intent.createServiceRequest || state.activeLeadId || state.contactStatus === "VALID")
+    nextAction = "UPSERT_AND_CONTINUE";
+
+  const missing: string[] = [];
+  if (state.contactStatus !== "VALID") missing.push("phone");
+  if (!state.location?.trim()) missing.push("location");
+
+  // Do not force upsert while required fields are still missing (unless HS already exists).
+  if (nextAction === "UPSERT_AND_CONTINUE" && missing.length && !state.activeLeadId) {
+    nextAction = "ASK_MISSING";
+  }
+
+  return ok("route_decision", {
+    nextAction,
+    missing,
+    pendingConfirmation: pending,
+    activeLeadId: state.activeLeadId || "",
+    appointmentId: state.appointmentId || "",
+    offeredSlotCount: state.offeredSlots?.length || 0,
+    lockout,
+    digitalLock,
+    createServiceRequest: intent.createServiceRequest,
+    primaryIntent: intent.primaryIntent,
+    // Hint for n8n book node
+    bookHint: (() => {
+      if (!slotPick) return null;
+      const g1 = String(slotPick[1] || "");
+      const g2 = String(slotPick[2] || "");
+      let date = "";
+      let time = "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(g1) && /^\d{1,2}:\d{2}$/.test(g2)) {
+        date = g1;
+        time = g2;
+      } else if (/^\d{1,2}:\d{2}$/.test(g1)) {
+        time = g1;
+        date = state.offeredSlots?.find((s) => s.time === time || s.time.endsWith(time.slice(-5)))?.date ||
+          state.offeredSlots?.[0]?.date ||
+          "";
+      } else {
+        date = g1;
+        time = g2;
+      }
+      if (/^\d{1,2}:\d{2}$/.test(time)) {
+        const [hh, mm] = time.split(":");
+        time = `${hh.padStart(2, "0")}:${mm}`;
+      }
+      // Prefer an exact offered slot when time matches.
+      const offered = state.offeredSlots?.find((s) => s.time === time);
+      if (offered?.date) date = offered.date;
+      if (!date || !time) return null;
+      return { date, time };
+    })(),
+  });
+}
+
+export function toolSecondServiceAsk(conversationId: string, text: string): ToolResultEnvelope {
+  const conv = getConversation(conversationId);
+  if (!conv) return fail("second_service", "not_found", "Conversación no encontrada");
+  const incoming = detectServices(text)[0] || "";
+  const current = conv.state.primaryService || conv.state.service || "";
+  const parked = conv.state.activeLeadId || "";
+  touchConversation(conversationId, {
+    state: {
+      ...conv.state,
+      facts: {
+        ...(conv.state.facts || {}),
+        parkedRequestId: parked,
+        parkedService: current,
+        pendingSecondService: incoming,
+        pendingConfirmation: "SECOND_SERVICE_CHOICE",
+      },
+    },
+  });
+  const playbookNew = getPlaybook(incoming);
+  const playbookOld = getPlaybook(current);
+  return ok("second_service", {
+    reply: `Ya tienes una solicitud activa de ${playbookOld.label || current || "servicio"} (${parked || "sin folio"}). ¿Quieres (1) seguir con esa, o (2) abrir otra de ${playbookNew.label || incoming}? No reemplazo la primera sin que lo confirmes.`,
+    parkedRequestId: parked,
+    pendingService: incoming,
+  });
+}
+
+export function toolCancelAllAsk(conversationId: string): ToolResultEnvelope {
+  const conv = getConversation(conversationId);
+  if (!conv) return fail("cancel_all", "not_found", "Conversación no encontrada");
+  if (conv.state.contactStatus !== "VALID" || !conv.state.phone) {
+    return fail("cancel_all", "unauthorized", "Necesito un teléfono verificado en esta conversación para listar solicitudes");
+  }
+  const phone = classifyPhone(conv.state.phone);
+  const digits = phone.national || phone.digits || "";
+  const rows = getHomesteadDb()
+    .prepare(
+      `SELECT public_id, service, status, phone FROM service_requests
+       WHERE status NOT IN ('CANCELLED','COMPLETED')
+       ORDER BY created_at DESC LIMIT 20`,
+    )
+    .all() as Array<{ public_id: string; service: string; status: string; phone: string }>;
+  const authorized = rows.filter((r) => {
+    const p = classifyPhone(r.phone);
+    return p.national === digits || p.e164 === phone.e164;
+  });
+  if (!authorized.length) {
+    return ok("cancel_all", {
+      reply: "No encuentro solicitudes abiertas autorizadas para este teléfono.",
+      items: [],
+    });
+  }
+  touchConversation(conversationId, {
+    state: {
+      ...conv.state,
+      facts: {
+        ...(conv.state.facts || {}),
+        pendingConfirmation: "CANCEL_ALL",
+        cancelAllIds: authorized.map((r) => r.public_id).join(","),
+      },
+    },
+  });
+  const list = authorized.map((r) => `• ${r.public_id} (${r.service}, ${r.status})`).join("\n");
+  return ok("cancel_all", {
+    reply: `Estas son las solicitudes abiertas autorizadas para tu número:\n${list}\n¿Confirmas cancelar TODAS estas? Responde sí para proceder.`,
+    items: authorized.map((r) => ({ publicId: r.public_id, service: r.service, status: r.status })),
+  });
+}
+
+export function toolCancelAllConfirm(conversationId: string): ToolResultEnvelope {
+  const conv = getConversation(conversationId);
+  if (!conv) return fail("cancel_all_confirm", "not_found", "Conversación no encontrada");
+  if (conv.state.facts?.pendingConfirmation !== "CANCEL_ALL") {
+    return fail("cancel_all_confirm", "no_pending", "No hay confirmación de cancelar todas pendiente");
+  }
+  const ids = String(conv.state.facts.cancelAllIds || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const results: Array<{ publicId: string; ok: boolean; code?: string }> = [];
+  for (const id of ids) {
+    const row = getRequestByPublicId(id);
+    if (!row) {
+      results.push({ publicId: id, ok: false, code: "NOT_FOUND" });
+      continue;
+    }
+    const r = cancelServiceRequest({
+      requestId: id,
+      actor: "concierge-n8n",
+      source: "CUSTOMER_AI",
+      conversationId,
+      reason: "customer_cancel_all",
+      notify: false,
+      idempotencyKey: `service_request.cancelled:${id}:cancel_all`,
+    });
+    results.push({ publicId: id, ok: r.success || r.alreadyCancelled, code: r.errorCode });
+  }
+  touchConversation(conversationId, {
+    state: {
+      ...conv.state,
+      activeLeadId: "",
+      appointmentId: "",
+      facts: { ...(conv.state.facts || {}), pendingConfirmation: "", cancelAllIds: "" },
+    },
+    leadPublicId: "",
+  });
+  bumpConversationStateVersion(conversationId);
+  const lines = results.map((r) => `${r.publicId}: ${r.ok ? "cancelada" : `falló (${r.code || "error"})`}`);
+  return ok("cancel_all_confirm", {
+    reply: `Resultado de cancelación:\n${lines.join("\n")}`,
+    results,
+  });
+}
+
+/** Compose UI reply + persist turn DONE. Called by n8n at end of coordination. */
+export function toolFinalizeTurn(body: {
+  conversationId: string;
+  turnId: string;
+  reply: string;
+  n8nExecutionId?: string;
+  kind?: string;
+}): ToolResultEnvelope {
+  const { conversationId, turnId } = body;
+  const reply = String(body.reply || "").trim();
+  if (!reply) return fail("finalize_turn", "empty_reply", "Respuesta vacía");
+  const turn = getTurn(turnId);
+  if (!turn || turn.conversationId !== conversationId) {
+    return fail("finalize_turn", "turn_mismatch", "Turno no pertenece a la conversación");
+  }
+  if (!shouldAcceptTurnResult(turnId)) {
+    updateTurn(turnId, { status: "SUPERSEDED", completed: true });
+    return fail("finalize_turn", "superseded", "Resultado atrasado; no sobrescribe estado reciente");
+  }
+  addMessage(conversationId, "assistant", reply);
+  const conv = getConversation(conversationId);
+  const session = conv ? buildSessionSnapshot(conv.state, Date.now(), conv.state.activeLeadId || "") : null;
+  const payload: TurnReplyPayload = {
+    ok: true,
+    reply,
+    turnId,
+    status: "DONE",
+    leadId: session?.leadBanner || conv?.state.activeLeadId || null,
+    requestCard: (session?.requestCard as Record<string, unknown> | null) || null,
+    chips: session?.chips || [],
+    historicalChips: session?.historicalChips || [],
+    awaitingSlotSelection: session?.awaitingSlotSelection || false,
+    bookingPending: session?.bookingPending || false,
+    slotGroups: session?.slotGroups || [],
+    serviceContext: session?.serviceContext || null,
+    showResumeBooking: session?.showResumeBooking || false,
+    showPhotoCta: session?.showPhotoCta || false,
+    photosRemaining: session?.photosRemaining ?? 4,
+    contactUrl: "/contact",
+    whatsappUrl: null,
+    ended: false,
+    requiresHuman: Boolean(conv?.state.humanHandoffRequested),
+    dryLead: isConciergeDryRun(),
+    engine: "n8n",
+    nextAction: body.kind || "",
+  };
+  updateTurn(turnId, {
+    status: "DONE",
+    replyJson: JSON.stringify({
+      ...payload,
+      n8nExecutionId: body.n8nExecutionId || "",
+      correlation: {
+        conversationId,
+        turnId,
+        folio: conv?.state.activeLeadId || "",
+        n8nExecutionId: body.n8nExecutionId || "",
+      },
+    }),
+    completed: true,
+  });
+  bumpConversationStateVersion(conversationId);
+  return ok("finalize_turn", {
+    turnId,
+    status: "DONE",
+    folio: conv?.state.activeLeadId || "",
+    n8nExecutionId: body.n8nExecutionId || "",
+    payload,
+  });
+}
+
+/** Build a folio announce line after upsert (for n8n to include in finalize). */
+export function toolComposeAsk(conversationId: string, kind: string, toolData?: Record<string, unknown>): ToolResultEnvelope {
+  const conv = getConversation(conversationId);
+  if (!conv) return fail("compose_ask", "not_found", "Conversación no encontrada");
+  const state = conv.state;
+  const missing: string[] = [];
+  if (state.contactStatus !== "VALID") missing.push("teléfono");
+  if (!state.location?.trim()) missing.push("zona");
+
+  let reply = "";
+  if (kind === "folio_continue") {
+    const folio = String(toolData?.publicId || state.activeLeadId || "");
+    const playbook = getPlaybook(state.primaryService || state.service);
+    const intro = folio ? requestFolioIntro(folio, playbook.label || "") : "";
+    if (missing.includes("teléfono")) reply = `${intro}\n\nPara completar el registro, ¿me compartes un teléfono de contacto?`.trim();
+    else if (missing.includes("zona")) reply = `${intro}\n\n¿En qué zona o barrio estás?`.trim();
+    else reply = `${intro}\n\n¿Qué día y hora te conviene, o prefieres que el equipo te contacte?`.trim();
+  } else if (kind === "slots") {
+    const slots = (toolData?.slots as Array<{ label?: string; date: string; time: string }>) || state.offeredSlots || [];
+    const lines = slots.slice(0, 4).map((s, i) => `${i + 1}) ${s.label || `${s.date} ${s.time}`}`);
+    reply = lines.length
+      ? `Estos horarios están libres ahora (se revalidan al reservar):\n${lines.join("\n")}\n¿Cuál te queda mejor?`
+      : "No veo horarios libres en el rango cercano. ¿Prefieres que el equipo te contacte?";
+  } else if (kind === "lockout") {
+    reply =
+      "Para registrar la apertura necesito un teléfono de contacto y la zona. No te pido fotos del interior si no puedes entrar.";
+  } else if (kind === "digital_lock") {
+    reply =
+      "Para la cerradura digital me ayudan fotos del frente, el interior y el canto de la puerta cuando puedas obtenerlas. ¿Me compartes un teléfono y la zona?";
+  } else if (kind === "missing") {
+    if (missing.includes("teléfono")) reply = "Para completar el registro, ¿me compartes un teléfono de contacto?";
+    else if (missing.includes("zona")) reply = "¿En qué zona o barrio estás?";
+    else reply = "Cuéntame un poco más para seguir con tu solicitud.";
+  } else {
+    if (missing.includes("teléfono")) reply = "Para completar el registro, ¿me compartes un teléfono de contacto?";
+    else if (missing.includes("zona")) reply = "¿En qué zona o barrio estás?";
+    else reply = "Cuéntame un poco más para seguir con tu solicitud.";
+  }
+  return ok("compose_ask", { reply, missing, folio: state.activeLeadId || "" });
+}
+
 export type BusinessToolName =
   | "get_context"
   | "interpret"
@@ -438,7 +892,13 @@ export type BusinessToolName =
   | "business_contact"
   | "human_handoff"
   | "list_services"
-  | "reconcile_request";
+  | "reconcile_request"
+  | "route_decision"
+  | "second_service"
+  | "cancel_all_ask"
+  | "cancel_all_confirm"
+  | "finalize_turn"
+  | "compose_ask";
 
 export async function dispatchBusinessTool(
   tool: BusinessToolName,
@@ -470,6 +930,24 @@ export async function dispatchBusinessTool(
       return toolListServices();
     case "reconcile_request":
       return toolReconcileRequest(String(body.publicId || ""));
+    case "route_decision":
+      return toolRouteDecision(conversationId, String(body.text || ""));
+    case "second_service":
+      return toolSecondServiceAsk(conversationId, String(body.text || ""));
+    case "cancel_all_ask":
+      return toolCancelAllAsk(conversationId);
+    case "cancel_all_confirm":
+      return toolCancelAllConfirm(conversationId);
+    case "finalize_turn":
+      return toolFinalizeTurn({
+        conversationId,
+        turnId: String(body.turnId || ""),
+        reply: String(body.reply || ""),
+        n8nExecutionId: String(body.n8nExecutionId || ""),
+        kind: String(body.kind || ""),
+      });
+    case "compose_ask":
+      return toolComposeAsk(conversationId, String(body.kind || "ask"), body.toolData as Record<string, unknown> | undefined);
     default:
       return fail(String(tool), "unknown_tool", "Herramienta no permitida");
   }

@@ -1,0 +1,20 @@
+PASS [pending] second service asks how to continue · Ya tienes una solicitud activa de Plomería (HS-2026-000028). ¿Quieres (1) seguir con esa, o (2) abrir otra de Electricidad? No reemplazo la primera sin que lo c
+PASS [pending] first HS still present after second-service ask · HS-2026-000028
+PASS [pending] first service still plumbing · HS-2026-000028:plumbing
+PASS [pending] cancel all enumerates or asks confirm · Estas son las solicitudes abiertas autorizadas para tu número:
+• HS-2026-000029 (plumbing, NEW)
+¿Confirmas cancelar TODAS estas? Responde sí para proceder.
+PASS [pending] cancel all confirm replied · DONE
+PASS [pending] book or slot pick replied · DONE
+PASS [pending] failed reschedule mentions keep prior or cannot · No se pudo reprogramar; la cita anterior se conserva
+PASS [pending] slot contention: not both silently confirmed · A=true B=true
+PASS [pending] concurrent turns both answered · DONE/DONE
+PASS [pending] concurrent failures stay visible (no silent local ok) · -/-
+PASS [pending] idempotent replay same turnId within window · 1a88af7d-7024-4326-92d2-9e4f877a2a8b|1a88af7d-7024-4326-92d2-9e4f877a2a8b
+PASS [pending] n8n auth failure visible (401) · 401
+PASS [pending] cross-conversation internal mismatch rejected · 403:conversation_mismatch
+PASS [pending] foreign cookie path did not crash · 200
+PASS [pending] lockout path (no digital install ask) · Para registrar la apertura necesito un teléfono de contacto y la zona. No te pido fotos del interior si no puedes entrar.
+PASS [pending] digital lock path mentions photos/install · Para la cerradura digital me ayudan fotos del frente, el interior y el canto de la puerta cuando puedas obtenerlas. ¿Me compartes un teléfon
+
+failed=0

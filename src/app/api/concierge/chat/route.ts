@@ -29,7 +29,12 @@ export const runtime = "nodejs";
 const COOKIE = "hs_cid";
 
 function conciergeE2EMode() {
-  return process.env.NODE_ENV !== "production" && /e2e-cert/i.test(process.env.DATA_DIR || "");
+  return (
+    process.env.NODE_ENV !== "production" &&
+    (/e2e-cert/i.test(process.env.DATA_DIR || "") ||
+      process.env.HOMESTEAD_CONTROL_ISOLATED === "true" ||
+      /control-test|control-dev/i.test(process.env.DATA_DIR || ""))
+  );
 }
 
 function readStoredImageContext(state: { facts?: Record<string, string> } | undefined) {
